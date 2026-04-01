@@ -79,7 +79,26 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
     }
 
     // Fallback: direct Anthropic API
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    let apiKey = process.env.ANTHROPIC_API_KEY;
+
+    // Try loading from .env files if not in environment
+    if (!apiKey) {
+      for (const envPath of [
+        `${process.cwd()}/.env`,
+        `${process.cwd()}/../.env`,
+        `${process.env.HOME}/work/mf/.env`,
+      ]) {
+        try {
+          const envFile = Bun.file(envPath);
+          if (await envFile.exists()) {
+            const content = await envFile.text();
+            const match = content.match(/^ANTHROPIC_API_KEY=(.+)$/m);
+            if (match) { apiKey = match[1].trim(); break; }
+          }
+        } catch {}
+      }
+    }
+
     if (!apiKey) {
       throw new Error("LLM capability requires PAI Inference tool or ANTHROPIC_API_KEY");
     }
@@ -106,9 +125,21 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
 
     const data = await response.json() as any;
     const text = data.content?.[0]?.text || "";
+
+    let json: unknown;
+    if (options?.json) {
+      // Strip markdown code fences if the LLM wrapped the JSON
+      const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+      try {
+        json = JSON.parse(cleaned);
+      } catch {
+        json = undefined;
+      }
+    }
+
     return {
       text,
-      json: options?.json ? JSON.parse(text) : undefined,
+      json,
       usage: data.usage ? { input: data.usage.input_tokens, output: data.usage.output_tokens } : undefined,
     };
   };

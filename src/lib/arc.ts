@@ -52,22 +52,25 @@ export interface ArcPipeline {
  * Tries `arc list --json` first. Falls back to scanning the repos directory.
  */
 async function getInstalledPackages(reposDir: string = DEFAULT_REPOS_DIR): Promise<ArcPackage[]> {
-  // Try arc CLI first (arc#20)
-  try {
-    const proc = Bun.spawn(["arc", "list", "--json"], { stdout: "pipe", stderr: "pipe" });
-    const stdout = await new Response(proc.stdout).text();
-    const code = await proc.exited;
-    if (code === 0 && stdout.trim()) {
-      const data = JSON.parse(stdout);
-      if (Array.isArray(data.packages)) {
-        return data.packages;
+  // Only use arc CLI when using the default repos directory.
+  // Custom reposDir means the caller wants to scan a specific location.
+  if (reposDir === DEFAULT_REPOS_DIR) {
+    try {
+      const proc = Bun.spawn(["arc", "list", "--json"], { stdout: "pipe", stderr: "pipe" });
+      const stdout = await new Response(proc.stdout).text();
+      const code = await proc.exited;
+      if (code === 0 && stdout.trim()) {
+        const data = JSON.parse(stdout);
+        if (Array.isArray(data.packages)) {
+          return data.packages;
+        }
       }
+    } catch {
+      // arc CLI not available or doesn't support --json yet
     }
-  } catch {
-    // arc CLI not available or doesn't support --json yet
   }
 
-  // Fallback: scan repos directory
+  // Scan repos directory
   return scanReposDirectory(reposDir);
 }
 
