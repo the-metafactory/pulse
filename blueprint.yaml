@@ -40,25 +40,32 @@ features:
 
   # Iteration 2: Pipe Model & Action Contract
   - id: P-200
-    name: Typed Action contract
-    status: planned
+    name: Typed Action contract with capability injection
+    status: done
     iteration: 2
     depends: [P-103]
-    description: "Structured input/output interface for actions, aligned with pai-manifest.yaml capability declarations"
+    description: "ActionManifest + ActionContext + capability injection (llm, fetch, shell, readFile, writeFile, kv). Adapted from Daniel Miessler's PAI Actions."
 
   - id: P-201
     name: Passthrough pipe model
-    status: planned
+    status: done
     iteration: 2
     depends: [P-200]
     description: "Accumulating {...upstream, ...myFields} data flow — actions receive and forward all ancestor data"
 
   - id: P-202
     name: Pipeline primitive
-    status: planned
+    status: done
     iteration: 2
     depends: [P-201]
-    description: "First-class Pipeline that chains Actions linearly with pipe model, declarative YAML definition"
+    description: "runPipeline() chains actions linearly with pipe model. Per-step timing and error reporting."
+
+  - id: P-205
+    name: Local/cloud dispatch
+    status: done
+    iteration: 2
+    depends: [P-200]
+    description: "runAction with mode local|cloud. Local uses Bun APIs, cloud dispatches to Cloudflare Worker via HTTPS POST."
 
   - id: P-203
     name: Process YAML loader

@@ -4,9 +4,11 @@
 
 Pulse takes dependency trees of actions and executes them with parallel scheduling, retry logic, timeout enforcement, and real-time event emission. It's the heartbeat that animates composed processes — the runtime that turns captured workflows back into living work.
 
-## Origin & naming
+## Origin & credits
 
 Pulse was originally prototyped as "Arbol" (Spanish for "tree"), inspired by Daniel Miessler's [PAI](https://github.com/danielmiessler/PAI) project where Arbol describes a cloud execution platform built on three composable primitives: Actions, Pipelines, and Flows.
+
+The **action system** (capability injection, local/cloud dispatch, passthrough pipe model) is directly adapted from PAI's Actions framework — specifically the `runner.v2.ts` and `types.v2.ts` patterns that Daniel designed. The core insight: **actions declare what capabilities they need, the runtime provides implementations.** Same action code runs on Bun locally or on Cloudflare Workers. We extracted and generalized this pattern into pulse as the execution engine for the broader metafactory ecosystem.
 
 We renamed it **Pulse** when moving it into the metafactory ecosystem, where it completes the lifecycle:
 
@@ -20,7 +22,7 @@ Work happens
             → execution traces feed back to miner
 ```
 
-The name reflects what it does: **a pulse propagates through the system, each action is a beat, a pipeline is a pulse, and scheduled flows create a rhythm.** It's what separates a living process from a dead document.
+The name reflects what it does: **a pulse propagates through the system, each action is a beat, a pipeline is a pulse, and scheduled flows create a rhythm.**
 
 ## Ecosystem context
 
@@ -33,20 +35,13 @@ The name reflects what it does: **a pulse propagates through the system, each ac
 | [blueprint](../blueprint/) | Cross-repo dependency tracking |
 | **pulse** | **Process execution engine** |
 
-## Current capabilities (v0.1.0)
+## Two execution models
 
-What we have today is the **tree runner** — the scheduling and execution core:
+Pulse provides two complementary ways to run work:
 
-- **Dependency-graph execution** — nodes declare `dependsOn` edges, pulse resolves the topological order
-- **Parallel sibling execution** — independent nodes run concurrently via `Promise.all`
-- **Retry logic** — configurable per-node retries (0-10 attempts)
-- **Timeout enforcement** — per-node timeouts via `Promise.race` with proper timer cleanup
-- **Cascade failure** — when a node exhausts retries, all descendants are skipped
-- **Event system** — `node-start`, `node-complete`, `node-failed`, `tree-complete` events
-- **Validation** — cycle detection (DFS), missing dependency checks, duplicate ID detection
-- **Zod schema validation** — structural validation of tree definitions
+### 1. Tree Runner — dependency graph execution
 
-## Usage
+For complex workflows with non-linear dependencies:
 
 ```typescript
 import { PulseRunner } from "pulse";
@@ -60,72 +55,113 @@ runner.registerAll({
 });
 
 const execution = await runner.run({
-  id: "my-pipeline",
+  id: "my-tree",
   nodes: [
     { id: "fetch", name: "Fetch Data" },
     { id: "process", name: "Process", dependsOn: ["fetch"] },
     { id: "save", name: "Save", dependsOn: ["process"] },
   ],
 });
-
-console.log(execution.status); // "completed" | "failed"
 ```
 
-## Roadmap — toward the full vision
+Features: parallel sibling execution, retry/timeout per node, cycle detection, cascade failure, event emission, Zod validation.
 
-The PAI Arbol vision describes three composable primitives. Pulse currently implements the execution core; the full vision requires:
+### 2. Action System — capability-injected actions with pipe model
 
-### 1. Pipe model (next)
+For composable, portable actions that run locally or in the cloud:
 
-The PAI passthrough pattern where data accumulates through a pipeline:
+**Define an action** (`A_SUMMARIZE/action.json`):
+```json
+{
+  "name": "A_SUMMARIZE",
+  "version": "1.0.0",
+  "description": "Summarize text using LLM",
+  "input": { "content": { "type": "string", "required": true } },
+  "output": { "summary": { "type": "string" } },
+  "requires": ["llm"]
+}
+```
 
+**Implement it** (`A_SUMMARIZE/action.ts`):
 ```typescript
-// Each action preserves upstream data and adds its own
-return { ...upstream, myField: result };
+export default {
+  async execute(input, ctx) {
+    const { content, ...upstream } = input;
+    const result = await ctx.capabilities.llm!(content, {
+      system: "Summarize in 2-3 sentences.",
+      tier: "fast",
+    });
+    return { ...upstream, summary: result.text };
+  },
+};
 ```
 
-Currently our `ExecutionContext` passes parent results as a Map. The pipe model would make this implicit — each action receives everything from all ancestors, not just direct parents.
+**Run it** — locally or in the cloud:
+```typescript
+import { runAction } from "pulse";
 
-### 2. Pipeline primitive
+// Local execution (Bun)
+const result = await runAction("A_SUMMARIZE", { content: "..." }, {
+  actionDirs: ["./actions"],
+  mode: "local",
+});
 
-A first-class `Pipeline` that chains Actions linearly with the pipe model. Declarative definition (YAML or JSON):
-
-```yaml
-name: P_LABEL_EMAIL
-actions:
-  - A_EXTRACT
-  - A_LABEL
-  - A_SEND_EMAIL
+// Cloud execution (Cloudflare Worker)
+const result = await runAction("A_SUMMARIZE", { content: "..." }, {
+  actionDirs: ["./actions"],
+  mode: "cloud",
+  cloudUrlPattern: "https://pulse-{name}.workers.dev",
+});
 ```
 
-### 3. Flow primitive
+**Chain into a pipeline** — data accumulates through the passthrough pattern:
+```typescript
+import { runPipeline } from "pulse";
 
-Top-level orchestrator: source + pipeline + destination + schedule.
-
-```yaml
-name: F_RSS_DIGEST
-source: rss://feeds.example.com
-pipeline: P_LABEL_EMAIL
-schedule: "0 */6 * * *"
-destination: email://digest@example.com
+const result = await runPipeline(
+  { name: "P_DIGEST", actions: ["A_EXTRACT", "A_SUMMARIZE", "A_FORMAT"] },
+  { url: "https://example.com/article" },
+  { actionDirs: ["./actions"] }
+);
+// result.output has ALL fields from ALL actions
 ```
 
-### 4. D/A/H step classification
+## Capability injection
 
-Miner classifies process steps as Deterministic / Agentic / Human-gate. Pulse should respect these:
-- **D** steps: execute automatically
-- **A** steps: delegate to an agent
-- **H** steps: pause for human approval
+Actions declare what they need. The runtime provides it. The action never imports its own dependencies:
 
-### 5. Trace emission
+| Capability | Local (Bun) | Cloud (Workers) |
+|---|---|---|
+| `llm` | PAI Inference tool or Anthropic API | Workers AI or API |
+| `fetch` | Native fetch | Worker fetch |
+| `shell` | Bun.spawn | Not available |
+| `readFile` | Bun.file | Not available |
+| `writeFile` | Bun.write | Not available |
+| `kv` | In-memory Map | KV namespace binding |
 
-Every execution should produce JSONL traces that miner can re-ingest, closing the feedback loop.
+Actions that require `shell` or `readFile` can only run locally. Actions that only need `llm` and `fetch` run anywhere.
+
+## Roadmap
+
+### Done (v0.1.0)
+- Tree runner with dependency scheduling, parallel execution, retry/timeout
+- Action system with capability injection (local + cloud dispatch)
+- Pipeline primitive with passthrough pipe model
+- 68 tests across 8 files, tsc clean
+
+### Next
+- Flow primitive (source → pipeline → destination + schedule)
+- D/A/H step classification (from miner's trace types)
+- JSONL trace emission (feeding back to miner)
+- Arc package integration (load installed packages as actions)
+
+See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-repo dependencies.
 
 ## Development
 
 ```bash
 bun install
-bun test           # 45 tests across 5 files
+bun test           # 68 tests across 8 files
 bun run typecheck  # tsc --noEmit
 ```
 
