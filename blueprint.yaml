@@ -84,10 +84,10 @@ features:
   # Iteration 3: Flow Orchestration & Ecosystem Integration
   - id: P-300
     name: Flow primitive with scheduling
-    status: planned
+    status: done
     iteration: 3
     depends: [P-202]
-    description: "Source -> Pipeline -> Destination abstraction with cron/trigger support"
+    description: "runFlow() + scheduleFlow() + loadFlow(). Source adapters (inline, file, RSS, custom), destination adapters (stdout, file, webhook, custom), interval scheduling."
 
   - id: P-301
     name: D/A/H step classification

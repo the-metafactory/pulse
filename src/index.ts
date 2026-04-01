@@ -36,3 +36,13 @@ export type {
   LLMResponse,
   ShellResult,
 } from "./types/action";
+
+// Flow system (iteration 3) — the third primitive
+export { runFlow, scheduleFlow, loadFlow } from "./lib/flow";
+export type {
+  FlowDef,
+  FlowResult,
+  FlowSource,
+  FlowDestination,
+  FlowSchedule,
+} from "./types/flow";
