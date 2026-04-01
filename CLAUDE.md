@@ -1,6 +1,6 @@
 # Pulse — Process Execution Engine
 
-Part of the [metafactory](../meta-factory/) ecosystem. v0.2.0.
+Part of the [metafactory](../meta-factory/) ecosystem. v0.3.0.
 
 ## What is Pulse?
 
@@ -26,7 +26,7 @@ miner captures traces → metafactory distributes → arc installs → pulse exe
 
 - **Runtime:** Bun
 - **Language:** TypeScript (strict)
-- **Test:** `bun test` (91 tests across 10 files)
+- **Test:** `bun test` (97 tests across 11 files)
 - **Dependencies:** commander, zod
 
 ## Architecture

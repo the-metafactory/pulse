@@ -205,7 +205,7 @@ The capability injection pattern means the same action code runs locally on Bun 
 
 ## Roadmap
 
-### Done (v0.2.0)
+### Done (v0.3.0)
 - Tree runner with dependency scheduling, parallel execution, retry/timeout
 - Action system with capability injection (local + cloud dispatch)
 - Pipeline primitive with passthrough pipe model
@@ -224,7 +224,7 @@ See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-r
 
 ```bash
 bun install
-bun test           # 91 tests across 10 files
+bun test           # 97 tests across 11 files
 bun run typecheck  # tsc --noEmit
 ```
 
