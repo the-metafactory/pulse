@@ -1,30 +1,29 @@
 /**
  * Arc Integration — discover actions and pipelines from arc-installed packages.
  *
- * Pulse reads arc's SQLite database to find installed packages, then
- * scans their repo directories for actions (A_* folders with action.json)
- * and pipelines (pipeline.yaml files).
+ * Pulse calls arc's CLI (`arc list --json`) to discover installed packages,
+ * then scans their repo directories for actions and pipelines.
  *
- * Pulse does NOT import arc's code — it reads the database directly.
- * This keeps the dependency one-way: arc installs, pulse discovers.
+ * Pulse does NOT read arc's database directly. Arc owns its storage format;
+ * pulse consumes the public CLI contract. See: the-metafactory/arc#20.
+ *
+ * Until arc#20 lands (--json flag), this module falls back to scanning
+ * the known repos directory (~/.config/arc/pkg/repos/) directly.
  */
 
-import { Database } from "bun:sqlite";
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { loadPipeline, type PipelineDef } from "./pipeline";
 import type { ActionManifest } from "../types/action";
 
-// Default arc database path
-const DEFAULT_DB_PATH = `${process.env.HOME}/.config/arc/packages.db`;
+const DEFAULT_REPOS_DIR = `${process.env.HOME}/.config/arc/pkg/repos`;
 
-interface InstalledPackage {
+interface ArcPackage {
   name: string;
   version: string;
-  install_path: string;
-  skill_dir: string;
+  type: string;
   status: string;
-  artifact_type: string;
+  installPath: string;
 }
 
 export interface ArcAction {
@@ -48,19 +47,76 @@ export interface ArcPipeline {
 }
 
 /**
- * Query arc's database for active packages.
+ * Query arc for installed packages via CLI.
+ *
+ * Tries `arc list --json` first. Falls back to scanning the repos directory.
  */
-function getActivePackages(dbPath: string): InstalledPackage[] {
+async function getInstalledPackages(reposDir: string = DEFAULT_REPOS_DIR): Promise<ArcPackage[]> {
+  // Try arc CLI first (arc#20)
   try {
-    const db = new Database(dbPath, { readonly: true });
-    const rows = db
-      .query("SELECT name, version, install_path, skill_dir, status, artifact_type FROM skills WHERE status = 'active'")
-      .all() as InstalledPackage[];
-    db.close();
-    return rows;
+    const proc = Bun.spawn(["arc", "list", "--json"], { stdout: "pipe", stderr: "pipe" });
+    const stdout = await new Response(proc.stdout).text();
+    const code = await proc.exited;
+    if (code === 0 && stdout.trim()) {
+      const data = JSON.parse(stdout);
+      if (Array.isArray(data.packages)) {
+        return data.packages;
+      }
+    }
   } catch {
-    return [];
+    // arc CLI not available or doesn't support --json yet
   }
+
+  // Fallback: scan repos directory
+  return scanReposDirectory(reposDir);
+}
+
+/**
+ * Fallback: scan the repos directory for packages.
+ * Each subdirectory is assumed to be an installed package.
+ */
+async function scanReposDirectory(reposDir: string): Promise<ArcPackage[]> {
+  const packages: ArcPackage[] = [];
+
+  try {
+    const entries = await readdir(reposDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+
+      const pkgDir = join(reposDir, entry.name);
+
+      // Try to read arc-manifest.yaml or pai-manifest.yaml for metadata
+      let type = "unknown";
+      let version = "0.0.0";
+      for (const manifestName of ["arc-manifest.yaml", "pai-manifest.yaml"]) {
+        const manifestFile = Bun.file(join(pkgDir, manifestName));
+        try {
+          if (await manifestFile.exists()) {
+            const content = await manifestFile.text();
+            const typeMatch = content.match(/^type:\s*(.+)/m);
+            const versionMatch = content.match(/^version:\s*(.+)/m);
+            if (typeMatch) type = typeMatch[1].trim();
+            if (versionMatch) version = versionMatch[1].trim();
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      packages.push({
+        name: entry.name,
+        version,
+        type,
+        status: "active",
+        installPath: pkgDir,
+      });
+    }
+  } catch {
+    // Directory doesn't exist
+  }
+
+  return packages;
 }
 
 /**
@@ -97,19 +153,16 @@ async function scanForActions(dir: string): Promise<Array<{ manifest: ActionMani
  * Discover all actions from arc-installed packages.
  *
  * Scans active packages for A_* directories containing action.json.
- * Disabled packages are excluded.
  */
-export async function discoverArcActions(dbPath: string = DEFAULT_DB_PATH): Promise<ArcAction[]> {
-  const packages = getActivePackages(dbPath);
+export async function discoverArcActions(reposDir: string = DEFAULT_REPOS_DIR): Promise<ArcAction[]> {
+  const packages = await getInstalledPackages(reposDir);
   const allActions: ArcAction[] = [];
 
   for (const pkg of packages) {
-    const actions = await scanForActions(pkg.install_path);
+    if (pkg.status === "disabled") continue;
+    const actions = await scanForActions(pkg.installPath);
     for (const action of actions) {
-      allActions.push({
-        ...action,
-        packageName: pkg.name,
-      });
+      allActions.push({ ...action, packageName: pkg.name });
     }
   }
 
@@ -118,25 +171,19 @@ export async function discoverArcActions(dbPath: string = DEFAULT_DB_PATH): Prom
 
 /**
  * Discover all pipelines from arc-installed pipeline packages.
- *
- * Looks for pipeline.yaml in packages with artifact_type = 'pipeline'.
  */
-export async function discoverArcPipelines(dbPath: string = DEFAULT_DB_PATH): Promise<ArcPipeline[]> {
-  const packages = getActivePackages(dbPath);
+export async function discoverArcPipelines(reposDir: string = DEFAULT_REPOS_DIR): Promise<ArcPipeline[]> {
+  const packages = await getInstalledPackages(reposDir);
   const pipelines: ArcPipeline[] = [];
 
   for (const pkg of packages) {
-    if (pkg.artifact_type !== "pipeline") continue;
+    if (pkg.status === "disabled") continue;
+    if (pkg.type !== "pipeline") continue;
 
-    const yamlPath = join(pkg.install_path, "pipeline.yaml");
+    const yamlPath = join(pkg.installPath, "pipeline.yaml");
     try {
       const { pipeline, baseDir } = await loadPipeline(yamlPath);
-      pipelines.push({
-        pipeline,
-        yamlPath,
-        baseDir,
-        packageName: pkg.name,
-      });
+      pipelines.push({ pipeline, yamlPath, baseDir, packageName: pkg.name });
     } catch {
       // No pipeline.yaml or invalid, skip
     }
@@ -148,8 +195,7 @@ export async function discoverArcPipelines(dbPath: string = DEFAULT_DB_PATH): Pr
 /**
  * Build an actionDirs array from all active arc packages.
  *
- * This is the primary integration point: pass the result to
- * runAction(), runPipeline(), or runFlow() as actionDirs.
+ * Pass the result to runAction(), runPipeline(), or runFlow():
  *
  * ```typescript
  * const arcDirs = await createArcActionDirs();
@@ -158,7 +204,9 @@ export async function discoverArcPipelines(dbPath: string = DEFAULT_DB_PATH): Pr
  * });
  * ```
  */
-export async function createArcActionDirs(dbPath: string = DEFAULT_DB_PATH): Promise<string[]> {
-  const packages = getActivePackages(dbPath);
-  return packages.map((pkg) => pkg.install_path);
+export async function createArcActionDirs(reposDir: string = DEFAULT_REPOS_DIR): Promise<string[]> {
+  const packages = await getInstalledPackages(reposDir);
+  return packages
+    .filter((pkg) => pkg.status !== "disabled")
+    .map((pkg) => pkg.installPath);
 }
