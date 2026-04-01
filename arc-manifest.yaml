@@ -1,0 +1,36 @@
+schema: pai/v1
+name: pulse
+type: tool
+tier: community
+version: 0.1.0
+description: Process execution engine — tree runner, action system with capability injection, pipeline pipe model
+author:
+  name: Jens-Christian Fischer
+  github: jcfischer
+license: MIT
+
+depends_on:
+  tools:
+    - bun
+
+provides:
+  cli:
+    - name: pulse
+      command: bun src/cli.ts
+      description: Pulse CLI — validate and run process trees
+  library:
+    - name: pulse
+      entry: src/index.ts
+      description: PulseRunner, runAction, runPipeline — importable execution engine
+
+scripts:
+  postinstall: bun install
+
+capabilities:
+  filesystem:
+    - path: ~/.config/pai/pulse/
+      access: read-write
+      reason: Store execution traces and action cache
+  network:
+    - domain: "*.workers.dev"
+      reason: Dispatch actions to Cloudflare Workers in cloud mode
