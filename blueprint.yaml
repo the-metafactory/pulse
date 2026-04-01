@@ -105,10 +105,10 @@ features:
 
   - id: P-303
     name: Arc package integration
-    status: planned
+    status: done
     iteration: 3
     depends: [P-200, arc:A-101]
-    description: "Load actions from arc-installed packages — skill/tool invocations as pulse actions"
+    description: "discoverArcActions(), discoverArcPipelines(), createArcActionDirs(). Reads arc's SQLite DB, scans repos for actions."
 
   # Iteration 4: Runtime & Distribution
   - id: P-400

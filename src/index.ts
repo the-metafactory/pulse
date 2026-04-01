@@ -39,6 +39,10 @@ export type {
 
 // Flow system (iteration 3) — the third primitive
 export { runFlow, scheduleFlow, loadFlow } from "./lib/flow";
+
+// Arc integration (iteration 3) — discover arc-installed packages
+export { discoverArcActions, discoverArcPipelines, createArcActionDirs } from "./lib/arc";
+export type { ArcAction, ArcPipeline } from "./lib/arc";
 export type {
   FlowDef,
   FlowResult,
