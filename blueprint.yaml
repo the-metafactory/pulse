@@ -1,0 +1,119 @@
+schema: blueprint/v1
+repo: pulse
+
+features:
+  # Iteration 1: Execution Core (what we have today)
+  - id: P-100
+    name: Dependency graph parser and validator
+    status: done
+    iteration: 1
+    depends: []
+    description: "Zod schema validation, cycle detection (DFS), missing dep checks, duplicate ID detection"
+
+  - id: P-101
+    name: Topological scheduler
+    status: done
+    iteration: 1
+    depends: [P-100]
+    description: "Dependency-aware scheduling, parallel readiness detection, cascade skip on failure"
+
+  - id: P-102
+    name: Node executor with retry and timeout
+    status: done
+    iteration: 1
+    depends: [P-101]
+    description: "Per-node retry logic (0-10 attempts), timeout via Promise.race, timer cleanup"
+
+  - id: P-103
+    name: PulseRunner orchestrator
+    status: done
+    iteration: 1
+    depends: [P-101, P-102]
+    description: "Main execution loop, event emission (node-start/complete/failed, tree-complete), parallel sibling execution"
+
+  - id: P-104
+    name: CLI skeleton
+    status: done
+    iteration: 1
+    depends: [P-103]
+    description: "pulse validate / pulse run / pulse status commands via Commander.js"
+
+  # Iteration 2: Pipe Model & Action Contract
+  - id: P-200
+    name: Typed Action contract
+    status: planned
+    iteration: 2
+    depends: [P-103]
+    description: "Structured input/output interface for actions, aligned with pai-manifest.yaml capability declarations"
+
+  - id: P-201
+    name: Passthrough pipe model
+    status: planned
+    iteration: 2
+    depends: [P-200]
+    description: "Accumulating {...upstream, ...myFields} data flow — actions receive and forward all ancestor data"
+
+  - id: P-202
+    name: Pipeline primitive
+    status: planned
+    iteration: 2
+    depends: [P-201]
+    description: "First-class Pipeline that chains Actions linearly with pipe model, declarative YAML definition"
+
+  - id: P-203
+    name: Process YAML loader
+    status: planned
+    iteration: 2
+    depends: [P-202, miner:M-301]
+    description: "Accept miner's composed process YAML format as pipeline input"
+
+  # Iteration 3: Flow Orchestration & Ecosystem Integration
+  - id: P-300
+    name: Flow primitive with scheduling
+    status: planned
+    iteration: 3
+    depends: [P-202]
+    description: "Source -> Pipeline -> Destination abstraction with cron/trigger support"
+
+  - id: P-301
+    name: D/A/H step classification
+    status: planned
+    iteration: 3
+    depends: [P-200, miner:M-103]
+    description: "Respect miner's Deterministic/Agentic/Human-gate classification — auto-execute D, delegate A, pause at H"
+
+  - id: P-302
+    name: Trace emission (JSONL)
+    status: planned
+    iteration: 3
+    depends: [P-103, miner:M-101]
+    description: "Every execution emits JSONL traces that miner can re-ingest — closing the feedback loop"
+
+  - id: P-303
+    name: Arc package integration
+    status: planned
+    iteration: 3
+    depends: [P-200, arc:A-101]
+    description: "Load actions from arc-installed packages — skill/tool invocations as pulse actions"
+
+  # Iteration 4: Runtime & Distribution
+  - id: P-400
+    name: Runtime-agnostic adapter layer
+    status: planned
+    iteration: 4
+    depends: [P-300]
+    description: "Abstract execution target — run same pipeline on Bun, Node, Cloudflare Workers, or Deno"
+
+  - id: P-401
+    name: Grove event bridge
+    status: planned
+    iteration: 4
+    depends: [P-302, grove:G-101]
+    description: "Publish execution events to Grove for multi-agent visibility and human-in-the-loop via Discord/Mattermost"
+
+  - id: P-402
+    name: Metafactory process runner
+    status: planned
+    iteration: 4
+    depends: [P-303, meta-factory:F3-300]
+    description: "Execute processes published on metafactory marketplace — the end-to-end lifecycle"
