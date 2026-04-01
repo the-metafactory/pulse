@@ -141,6 +141,35 @@ Actions declare what they need. The runtime provides it. The action never import
 
 Actions that require `shell` or `readFile` can only run locally. Actions that only need `llm` and `fetch` run anywhere.
 
+## Ecosystem Integration
+
+Pulse completes the "capture → distribute → execute" loop. The ecosystem analogy: Miner is the brain (captures how work happens), metafactory + Arc form the distribution network, Grove is the nervous system (event relay and collaboration bridge), and Pulse provides the muscles that actually *do* things.
+
+### Grove event bridging
+
+Pulse emits real-time events during execution (node-start, node-complete, node-failed, tree-complete). These are natural signals for Grove to relay — once JSONL trace emission lands (P-302), piping execution status through Grove to dashboards or Discord becomes straightforward. An agent kicks off a Pulse pipeline, and collaborators can watch it run in real time.
+
+### Arc as the glue
+
+Pulse loads actions from directories today. The key connector is P-303 (Arc package integration): Arc installs packages, Pulse runs them. Grove already integrates with Arc for bot upgrades — extending that to trigger Pulse executions is the logical next step. The flow becomes: `arc install` → actions appear → `pulse run` picks them up.
+
+### The self-improving loop
+
+The feedback loop back to Miner (P-302 trace emission → Miner ingestion) is where the ecosystem becomes self-improving:
+
+```
+Miner captures how work happens
+  → patterns get extracted
+    → Pulse executes them
+      → execution traces refine the patterns
+```
+
+Each cycle tightens the process definitions. Miner's D/A/H step classification (Deterministic / Agentic / Human-gate) flows into Pulse's execution model (P-301), so the system learns not just *what* to do but *how* each step should be handled.
+
+### Portability
+
+The capability injection pattern means the same action code runs locally on Bun or on Cloudflare Workers. This aligns with Grove's model of straddling local and cloud execution — actions that only need `llm` and `fetch` can run anywhere, while those requiring `shell` or `readFile` stay local.
+
 ## Roadmap
 
 ### Done (v0.1.0)

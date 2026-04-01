@@ -47,6 +47,14 @@ arc:A-101 (install pipeline)       ──► P-303 (load installed packages)
 grove:G-101 (event relay)          ◄── P-302 (execution events)
 ```
 
+### Integration notes (from Grove perspective)
+
+**Event bridging priority:** P-302's JSONL trace events (beat-start, beat-complete, beat-failed, pulse-complete) map directly to what Grove relays. Design the event schema with Grove consumption in mind — these signals enable real-time pipeline monitoring in Discord/dashboards without Pulse needing to know about those destinations.
+
+**Arc → Pulse trigger path:** Grove already integrates with Arc for bot upgrades. P-303 should consider that Grove may trigger Pulse executions on behalf of agents — the API surface should support programmatic invocation, not just CLI.
+
+**Self-improving feedback loop:** The Miner → Pulse → Miner cycle (P-302 feeding traces back to M-101) is the highest-value integration. Each execution refines the process patterns that generated it. Prioritize trace fidelity — include timing, input/output snapshots, and retry history so Miner has rich data to work with.
+
 ## Exit Criteria
 
 - [ ] Flow YAML defines source → pipeline → destination

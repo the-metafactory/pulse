@@ -67,12 +67,19 @@ features:
     depends: [P-200]
     description: "runAction with mode local|cloud. Local uses Bun APIs, cloud dispatches to Cloudflare Worker via HTTPS POST."
 
-  - id: P-203
-    name: Process YAML loader
-    status: planned
+  - id: P-206
+    name: Pipeline YAML loader
+    status: done
     iteration: 2
-    depends: [P-202, miner:M-301]
-    description: "Accept miner's composed process YAML format as pipeline input"
+    depends: [P-202]
+    description: "loadPipeline(), runPipelineFromYaml(), discoverPipelines(). Loads pipeline.yaml, resolves actions from bundled directory."
+
+  - id: P-203
+    name: Miner process import
+    status: planned
+    iteration: 3
+    depends: [P-206, miner:M-301]
+    description: "Accept miner's composed process format and map it to pulse pipeline definitions"
 
   # Iteration 3: Flow Orchestration & Ecosystem Integration
   - id: P-300
@@ -116,7 +123,7 @@ features:
     status: planned
     iteration: 4
     depends: [P-302, grove:G-101]
-    description: "Publish execution events to Grove for multi-agent visibility and human-in-the-loop via Discord/Mattermost"
+    description: "Publish execution events to Grove for multi-agent visibility and human-in-the-loop via Discord/Mattermost. Design note: P-302's JSONL events (beat-start/complete/failed, pulse-complete) are natural Grove relay signals — Grove can pipe execution status to dashboards and Discord without Pulse knowing about destinations. Also support programmatic invocation so Grove can trigger Pulse executions on behalf of agents."
 
   - id: P-402
     name: Metafactory process runner

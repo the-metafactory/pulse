@@ -14,10 +14,10 @@
  * Default feed: Simon Willison's blog (high-quality AI/tech content)
  */
 
-import { runPipeline } from "../../src/lib/pipeline";
+import { runPipelineFromYaml } from "../../src/lib/pipeline";
 import { join } from "path";
 
-const ACTIONS_DIR = join(import.meta.dir);
+const PIPELINE_YAML = join(import.meta.dir, "pipeline.yaml");
 const DEFAULT_FEED = "https://simonwillison.net/atom/everything/";
 
 async function main() {
@@ -25,18 +25,15 @@ async function main() {
 
   console.log("╔══════════════════════════════════════════════╗");
   console.log("║  Pulse RSS Pipeline Demo                     ║");
-  console.log("║  A_FETCH_FEED → A_EXTRACT → A_RATE → A_REC  ║");
+  console.log("║  Loaded from pipeline.yaml                   ║");
   console.log("╚══════════════════════════════════════════════╝\n");
 
   console.log(`Feed: ${feedUrl}\n`);
 
-  const result = await runPipeline(
-    {
-      name: "P_RSS_DIGEST",
-      actions: ["A_FETCH_FEED", "A_EXTRACT_ARTICLE", "A_RATE", "A_RECOMMEND"],
-    },
+  const result = await runPipelineFromYaml(
+    PIPELINE_YAML,
     { feedUrl, limit: 3 },
-    { actionDirs: [ACTIONS_DIR] }
+    {}
   );
 
   // Show step results

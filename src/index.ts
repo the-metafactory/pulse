@@ -22,7 +22,7 @@ export type {
 // Action system (iteration 2) — inspired by Daniel Miessler's PAI
 export { runAction, listActions } from "./lib/action-runner";
 export type { ActionRunnerOptions } from "./lib/action-runner";
-export { runPipeline } from "./lib/pipeline";
+export { runPipeline, loadPipeline, runPipelineFromYaml, discoverPipelines } from "./lib/pipeline";
 export type { PipelineDef, PipelineResult } from "./lib/pipeline";
 export { createLocalCapabilities, createCloudCapabilities } from "./lib/capabilities";
 export type {
