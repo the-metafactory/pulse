@@ -126,6 +126,39 @@ const result = await runPipeline(
 // result.output has ALL fields from ALL actions
 ```
 
+### 3. Flow — source, pipeline, destination, schedule
+
+The top-level orchestrator that connects everything:
+
+```typescript
+import { runFlow, scheduleFlow } from "pulse";
+
+// Run once: fetch RSS → process pipeline → write to file
+const result = await runFlow({
+  name: "F_RSS_DIGEST",
+  source: { type: "rss", url: "https://example.com/feed.xml", limit: 5 },
+  pipeline: "./pipelines/P_RSS_DIGEST/pipeline.yaml",
+  destination: { type: "file", path: "./digest.md", format: "markdown" },
+}, { actionDirs: ["./actions"] });
+
+// Run on schedule: every 6 hours
+const { stop } = scheduleFlow({
+  name: "F_RSS_DIGEST",
+  source: { type: "rss", url: "https://example.com/feed.xml" },
+  pipeline: { actions: ["A_FETCH_FEED", "A_EXTRACT", "A_RATE", "A_RECOMMEND"] },
+  destination: { type: "file", path: "./digest.md", format: "markdown" },
+  schedule: { intervalSeconds: 6 * 60 * 60 },
+}, {
+  actionDirs: ["./actions"],
+  onRun: (result) => console.log(`Flow completed: ${result.success}`),
+});
+
+// Stop later
+stop();
+```
+
+Source types: `inline`, `file`, `rss`, `custom` function. Destination types: `stdout`, `file` (JSON/markdown), `webhook`, `custom` function. Each stage reports failure independently via `failedStage`.
+
 ## Capability injection
 
 Actions declare what they need. The runtime provides it. The action never imports its own dependencies:
@@ -172,14 +205,15 @@ The capability injection pattern means the same action code runs locally on Bun 
 
 ## Roadmap
 
-### Done (v0.1.0)
+### Done (v0.2.0)
 - Tree runner with dependency scheduling, parallel execution, retry/timeout
 - Action system with capability injection (local + cloud dispatch)
 - Pipeline primitive with passthrough pipe model
-- 68 tests across 8 files, tsc clean
+- Pipeline YAML loader (declarative pipeline definitions)
+- Flow primitive: source → pipeline → destination with scheduling
+- 91 tests across 10 files, tsc clean
 
 ### Next
-- Flow primitive (source → pipeline → destination + schedule)
 - D/A/H step classification (from miner's trace types)
 - JSONL trace emission (feeding back to miner)
 - Arc package integration (load installed packages as actions)
@@ -190,7 +224,7 @@ See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-r
 
 ```bash
 bun install
-bun test           # 68 tests across 8 files
+bun test           # 91 tests across 10 files
 bun run typecheck  # tsc --noEmit
 ```
 

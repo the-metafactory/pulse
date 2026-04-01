@@ -2,8 +2,8 @@ schema: pai/v1
 name: pulse
 type: tool
 tier: community
-version: 0.1.0
-description: Process execution engine — tree runner, action system with capability injection, pipeline pipe model
+version: 0.2.0
+description: Process execution engine — tree runner, action system with capability injection, pipeline pipe model, flow orchestration
 author:
   name: Jens-Christian Fischer
   github: jcfischer
@@ -21,7 +21,7 @@ provides:
   library:
     - name: pulse
       entry: src/index.ts
-      description: PulseRunner, runAction, runPipeline — importable execution engine
+      description: PulseRunner, runAction, runPipeline, runFlow — importable execution engine
 
 scripts:
   postinstall: bun install
