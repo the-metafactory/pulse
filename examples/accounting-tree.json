@@ -1,0 +1,24 @@
+{
+  "id": "monthly-accounting",
+  "nodes": [
+    { "id": "fetch-orders", "name": "Fetch LS Orders" },
+    { "id": "fetch-payouts", "name": "Fetch LS Payouts" },
+    {
+      "id": "categorize",
+      "name": "Categorize by Account",
+      "dependsOn": ["fetch-orders", "fetch-payouts"],
+      "retries": 3
+    },
+    {
+      "id": "generate-pdf",
+      "name": "Generate Report",
+      "dependsOn": ["categorize"],
+      "timeout": 30000
+    },
+    {
+      "id": "send-email",
+      "name": "Email to Daniela",
+      "dependsOn": ["generate-pdf"]
+    }
+  ]
+}

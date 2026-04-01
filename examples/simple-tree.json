@@ -1,0 +1,8 @@
+{
+  "id": "simple",
+  "nodes": [
+    { "id": "fetch", "name": "Fetch Data" },
+    { "id": "process", "name": "Process Data", "dependsOn": ["fetch"] },
+    { "id": "save", "name": "Save Results", "dependsOn": ["process"] }
+  ]
+}

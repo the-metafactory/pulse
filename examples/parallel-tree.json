@@ -1,0 +1,9 @@
+{
+  "id": "parallel",
+  "nodes": [
+    { "id": "fetch-a", "name": "Fetch Source A" },
+    { "id": "fetch-b", "name": "Fetch Source B" },
+    { "id": "merge", "name": "Merge Results", "dependsOn": ["fetch-a", "fetch-b"] },
+    { "id": "output", "name": "Generate Output", "dependsOn": ["merge"] }
+  ]
+}
