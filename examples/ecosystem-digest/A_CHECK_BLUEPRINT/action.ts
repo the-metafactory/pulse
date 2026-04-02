@@ -18,7 +18,7 @@ export default {
     }> = {};
 
     for (const repo of repos) {
-      const repoPath = `${process.env.HOME}/work/mf/${repo}`;
+      const repoPath = `${process.env.HOME}/Developer/${repo}`;
       const yamlPath = `${repoPath}/blueprint.yaml`;
 
       // Read blueprint.yaml and extract feature statuses
