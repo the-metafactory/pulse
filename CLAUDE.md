@@ -110,7 +110,7 @@ This repo follows ecosystem SOPs defined in [compass](https://github.com/the-met
 |-----|--------------|------|
 | **Dev pipeline** | Creating branches, making PRs, starting any feature/fix work | `compass/sops/dev-pipeline.md` |
 | **Versioning** | After merging PRs, before deploying, any version bump | `compass/sops/versioning.md` |
-| **Worktree discipline** | Starting feature work (always -- even solo) | `compass/sops/worktree-discipline.md` |
+| **Worktree discipline** | Starting feature work (always — even solo) | `compass/sops/worktree-discipline.md` |
 | **Design process** | Creating specs, design docs, or research docs | `compass/sops/design-process.md` |
 | **Retrospective** | Post-work review, extracting process patterns | `compass/sops/retrospective-and-process-mining.md` |
 | **New repo** | Bootstrapping a new repository in the ecosystem | `compass/sops/new-repo.md` |
@@ -192,8 +192,7 @@ All metafactory ecosystem repos use a shared label set. Do not create ad-hoc lab
 
 Every issue must have at least one type label (`bug`, `feature`, `infrastructure`, `documentation`) and one priority label (`now`, `next`, `future`) if open.
 
-## GitHub Issue Tracking (mandatory)
-
+## GitHub Issue Tracking
 When working on a GitHub issue in this repo, keep the issue updated as you work. This is default agent behavior, not optional.
 
 **On starting work:**
@@ -211,13 +210,19 @@ When working on a GitHub issue in this repo, keep the issue updated as you work.
 
 **Why:** GitHub is the shared collaboration surface. JC, Andreas, and agents all read it. If you do work but don't update the issue, it looks like nothing happened.
 
-## Versioning & Releases (mandatory)
+## Versioning & Releases
 
-See `compass/sops/versioning.md`. Key details: `arc-manifest.yaml`, `"pulse vX.Y.Z — Short Description"`
+See `compass/sops/versioning.md` for the full procedure. Key repo-specific details:
 
-## Multi-Agent Worktree Discipline (mandatory)
+- Version source of truth: `arc-manifest.yaml`
+- Release title format: `"pulse vX.Y.Z — Short Description"`
+- Deploy command: `arc upgrade pulse`
 
-See `compass/sops/worktree-discipline.md`. Pattern: `../pulse-{slug}`
+## Multi-Agent Worktree Discipline
+
+See `compass/sops/worktree-discipline.md` for the full procedure. Key repo-specific details:
+
+- Worktree directory pattern: `../pulse-{slug}`
 
 ## Bun
 
