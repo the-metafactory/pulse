@@ -15,6 +15,7 @@ deploy_command: "arc upgrade pulse"
 version_source: arc-manifest.yaml
 release_title_format: '"pulse vX.Y.Z — Short Description"'
 worktree_pattern: "../pulse-{slug}"
+sop_path_prefix: "compass/"
 
 # No project-specific labels beyond the ecosystem standard set
 extra_labels: []

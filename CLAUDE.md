@@ -1,6 +1,8 @@
-# Pulse — Process Execution Engine
+<!-- Generated from metafactory ecosystem template. Customize sections marked with {PLACEHOLDER}. -->
 
-Part of the [metafactory](../meta-factory/) ecosystem. v0.3.0.
+# pulse -- Process Execution Engine
+
+Process Execution Engine
 
 ## What is Pulse?
 
@@ -98,9 +100,58 @@ bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
 - Tree types in `src/types/pulse.ts`, action types in `src/types/action.ts`, flow types in `src/types/flow.ts`
 - No external runtime dependencies beyond commander + zod
 
+
 ## Naming
 
 - **metafactory** -- always lowercase, one word. Not "Metafactory", not "Meta Factory". The GitHub org is `the-metafactory`, the repo name may be hyphenated (technical constraint), and the domains are `meta-factory.ai/.dev/.io` (DNS constraint). But the brand name is always `metafactory`.
+
+## Critical Rules
+
+- NEVER describe code you haven't read. Use Read/Glob/Grep to verify before making claims.
+- NEVER fabricate file names, class names, or architecture. If unsure, read the source.
+- Fix ALL errors found during type checks, tests, or linting -- even if pre-existing or introduced by another developer. Never dismiss errors as "not from our changes." If you see it, fix it.
+- Before fixing a bug or implementing a feature, ALWAYS check open PRs (`gh pr list`) and issues (`gh issue list`) first. Someone may already be working on it, or there may be a PR ready to merge that addresses it. Don't duplicate work -- review what exists before racing to write code.
+
+- Arc integration uses `src/lib/arc.ts` (directory scanning via `~/.config/arc/pkg/repos/`) — NOT SQLite direct access. Arc owns its storage format; pulse consumes the public CLI contract.
+- NEVER use empty catch blocks. Every catch must either: (a) log the error, (b) handle it meaningfully (e.g., return a fallback value with a comment explaining why), or (c) name the variable with `_err` and add a comment explaining why it's safe to ignore. Silently swallowing errors hides bugs.
+
+
+## GitHub Labels (ecosystem standard)
+
+All metafactory ecosystem repos use a shared label set. Do not create ad-hoc labels.
+
+| Label | Description | Color | Purpose |
+|-------|-------------|-------|---------|
+| `bug` | Something isn't working | `#d73a4a` | Defect tracking |
+| `documentation` | Improvements or additions to documentation | `#0075ca` | Docs work |
+| `feature` | Feature specification | `#1D76DB` | Feature work |
+| `infrastructure` | Cross-cutting infrastructure work | `#5319E7` | Infra/tooling |
+| `now` | Currently being worked | `#0E8A16` | Priority: active |
+| `next` | Next up after current work | `#FBCA04` | Priority: queued |
+| `future` | Planned but not yet scheduled | `#C5DEF5` | Priority: backlog |
+| `handover` | NZ/EU timezone bridge -- work session summary | `#F9D0C4` | Async handoffs |
+
+
+
+Every issue must have at least one type label (`bug`, `feature`, `infrastructure`, `documentation`) and one priority label (`now`, `next`, `future`) if open.
+
+## GitHub Issue Tracking
+When working on a GitHub issue in this repo, keep the issue updated as you work. This is default agent behavior, not optional.
+
+**On starting work:**
+- Comment on the issue: what you're working on, which sub-task
+- Example: `gh issue comment 1 --body "Starting: implement initial project structure"`
+
+**During work:**
+- When a sub-task checkbox is completed, tick it on the issue
+- When you create a PR, link it to the issue (use `closes #N` or `gh pr create` with issue reference)
+
+**On completing work:**
+- Comment with a summary: what was done, what changed, any follow-up needed
+- Tick completed checkboxes on both the GitHub issue AND any iteration plans
+- If all checkboxes are done, close the issue
+
+**Why:** GitHub is the shared collaboration surface. Team members and agents all read it. If you do work but don't update the issue, it looks like nothing happened.
 
 ## Standard Operating Procedures
 
@@ -120,39 +171,30 @@ This repo follows ecosystem SOPs defined in [compass](https://github.com/the-met
 
 **Starting a feature:**
 ```
-Task: "Add a new cue type"
+Task: "Add a dashboard panel"
 → Activate: dev-pipeline + worktree
-→ Read both SOPs from compass
-→ Output: "SOP: dev-pipeline | Branch: feat/p-200-cue-type | Prefix: feat:"
-→ Output: "SOP: worktree | Worktree: ../pulse-cue-type | Branch: feat/p-200-cue-type | Main: untouched"
+→ Read both SOPs
+→ Output: "SOP: dev-pipeline | Branch: feat/g-300-panel | Prefix: feat:"
+→ Output: "SOP: worktree | Worktree: ../pulse-panel | Branch: feat/g-300-panel | Main: untouched"
 ```
 
 **After merging a PR:**
 ```
-Task: "Merge PR #3"
+Task: "Merge PR #42"
 → After merge, activate: versioning
-→ Read SOP from compass
-→ Output: "SOP: versioning | Current: v0.3.0 | Bump: patch → v0.3.1"
+→ Read SOP
+→ Output: "SOP: versioning | Current: v0.2.0 | Bump: patch → v0.2.1"
 ```
-
-## Critical Rules
-
-- NEVER describe code you haven't read. Use Read/Glob/Grep to verify before making claims.
-- NEVER fabricate file names, class names, or architecture. If unsure, read the source.
-- Fix ALL errors found during type checks, tests, or linting -- even if pre-existing or introduced by another developer. Never dismiss errors as "not from our changes." If you see it, fix it.
-- Before fixing a bug or implementing a feature, ALWAYS check open PRs (`gh pr list`) and issues (`gh issue list`) first. Someone may already be working on it, or there may be a PR ready to merge that addresses it. Don't duplicate work -- review what exists before racing to write code.
-- Arc integration uses `src/lib/arc.ts` (directory scanning via `~/.config/arc/pkg/repos/`) -- NOT SQLite direct access. Arc owns its storage format; pulse consumes the public CLI contract.
-- NEVER use empty catch blocks. Every catch must either: (a) log the error, (b) handle it meaningfully (e.g., return a fallback value with a comment explaining why), or (c) name the variable with `_err` and add a comment explaining why it's safe to ignore. Silently swallowing errors hides bugs.
 
 ## Implementation Workflow
 
 Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration plans.
 
 **Feature IDs (from blueprint.yaml):**
-- **Iteration 1 -- Execution Core:** P-100 (parser/validator), P-101 (scheduler), P-102 (executor), P-103 (PulseRunner), P-104 (CLI)
-- **Iteration 2 -- Pipe Model & Action Contract:** P-200 (Action contract), P-201 (passthrough pipe), P-202 (Pipeline primitive), P-203 (miner process import), P-205 (local/cloud dispatch), P-206 (pipeline YAML loader)
-- **Iteration 3 -- Flow & Ecosystem:** P-300 (Flow primitive), P-301 (D/A/H classification), P-302 (trace emission), P-303 (Arc package integration)
-- **Iteration 4 -- Runtime & Distribution:** P-400 (runtime adapters), P-401 (Grove event bridge), P-402 (metafactory process runner)
+- **Iteration 1 — Execution Core:** P-100 (parser/validator), P-101 (scheduler), P-102 (executor), P-103 (PulseRunner), P-104 (CLI)
+- **Iteration 2 — Pipe Model & Action Contract:** P-200 (Action contract), P-201 (passthrough pipe), P-202 (Pipeline primitive), P-203 (miner process import), P-205 (local/cloud dispatch), P-206 (pipeline YAML loader)
+- **Iteration 3 — Flow & Ecosystem:** P-300 (Flow primitive), P-301 (D/A/H classification), P-302 (trace emission), P-303 (Arc package integration)
+- **Iteration 4 — Runtime & Distribution:** P-400 (runtime adapters), P-401 (Grove event bridge), P-402 (metafactory process runner)
 
 **Workflow:**
 ```
@@ -160,70 +202,58 @@ Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration
 2. Pick next feature by dependency order from blueprint.yaml
 3. Create feature branch: feat/p-{id}-{slug}
 4. Implement against acceptance criteria in the iteration plan
-5. PR -> review -> merge to main
+5. PR → review → merge to main
 6. Tick checkboxes in BOTH the iteration plan AND the GitHub tracking issue
 ```
 
 **Commit conventions:** `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`
 
 **Iteration plans:**
-- `iterations/iteration-1.md` -- Execution Core (complete)
-- `iterations/iteration-2.md` -- Pipe Model & Action Contract
-- `iterations/iteration-3.md` -- Flow Orchestration & Ecosystem Integration
+- `iterations/iteration-1.md` — Execution Core (complete)
+- `iterations/iteration-2.md` — Pipe Model & Action Contract
+- `iterations/iteration-3.md` — Flow Orchestration & Ecosystem Integration
 
 **Design specs:**
-- `design/cue-architecture.md` -- Cue system (standalone artifacts, three-artifact model)
+- `design/cue-architecture.md` — Cue system (standalone artifacts, three-artifact model)
 
-**Sync rule:** Iteration plans exist in two places -- `iterations/` (repo artifact, agents read it) and a GitHub Issue (trackable, commentable). When a checkbox is completed, update both.
+**Sync rule:** Iteration plans exist in two places — `iterations/` (repo artifact, agents read it) and a GitHub Issue (trackable, commentable). When a checkbox is completed, update both.
 
-## GitHub Labels (ecosystem standard)
 
-All metafactory ecosystem repos use a shared label set. Do not create ad-hoc labels.
+## Blueprint-Driven Development
 
-| Label | Description | Color | Purpose |
-|-------|-------------|-------|---------|
-| `bug` | Something isn't working | `#d73a4a` | Defect tracking |
-| `documentation` | Improvements or additions to documentation | `#0075ca` | Docs work |
-| `feature` | Feature specification | `#1D76DB` | Feature work |
-| `infrastructure` | Cross-cutting infrastructure work | `#5319E7` | Infra/tooling |
-| `now` | Currently being worked | `#0E8A16` | Priority: active |
-| `next` | Next up after current work | `#FBCA04` | Priority: queued |
-| `future` | Planned but not yet scheduled | `#C5DEF5` | Priority: backlog |
-| `handover` | NZ/EU timezone bridge -- work session summary | `#F9D0C4` | Async handoffs |
+All ecosystem repos track features in `blueprint.yaml`. Before starting feature work, check the dependency graph:
 
-Every issue must have at least one type label (`bug`, `feature`, `infrastructure`, `documentation`) and one priority label (`now`, `next`, `future`) if open.
+```bash
+# What's ready to work on? (dependencies satisfied)
+blueprint ready
 
-## GitHub Issue Tracking
-When working on a GitHub issue in this repo, keep the issue updated as you work. This is default agent behavior, not optional.
+# Claim a feature
+blueprint update {REPO_SHORT}:{ID} --status in-progress
 
-**On starting work:**
-- Comment on the issue: what you're working on, which sub-task
-- Example: `gh issue comment 12 --body "Starting: implement trace emission for beat-start/complete events"`
+# After PR merges
+blueprint update {REPO_SHORT}:{ID} --status done
+blueprint lint   # Validate graph integrity
+```
 
-**During work:**
-- When a sub-task checkbox is completed, tick it on the issue
-- When you create a PR, link it to the issue (use `closes #N` or `gh pr create` with issue reference)
+**Statuses:** Only `planned`, `in-progress`, and `done` are settable. `ready`, `blocked`, and `next` are computed from the dependency graph.
 
-**On completing work:**
-- Comment with a summary: what was done, what changed, any follow-up needed
-- Tick completed checkboxes on both the GitHub issue AND `iterations/iteration-*.md`
-- If all checkboxes are done, close the issue
-
-**Why:** GitHub is the shared collaboration surface. JC, Andreas, and agents all read it. If you do work but don't update the issue, it looks like nothing happened.
+**Cross-repo dependencies:** Use `{repo}:{ID}` format (e.g., `grove:G-200`, `arc:A-100`). A feature is `blocked` if any dependency in another repo isn't `done`.
 
 ## Versioning & Releases
 
 See `compass/sops/versioning.md` for the full procedure. Key repo-specific details:
 
 - Version source of truth: `arc-manifest.yaml`
-- Release title format: `"pulse vX.Y.Z — Short Description"`
+- Release title format: `"pulse vX.Y.Z -- Short Description"`
 - Deploy command: `arc upgrade pulse`
+
 
 ## Multi-Agent Worktree Discipline
 
 See `compass/sops/worktree-discipline.md` for the full procedure. Key repo-specific details:
 
 - Worktree directory pattern: `../pulse-{slug}`
+- Example: `git worktree add ../pulse-feature -b feat/{branch-name} main`
 
 ## Bun
 
@@ -231,8 +261,8 @@ Default to using Bun instead of Node.js.
 
 - Use `bun <file>` instead of `node <file>` or `ts-node <file>`
 - Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
+- Use `bun build` instead of `webpack` or `esbuild`
 - Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
+- Use `bun run <script>` instead of `npm run <script>`
 - Use `bunx <package> <command>` instead of `npx <package> <command>`
 - Bun automatically loads .env, so don't use dotenv.
