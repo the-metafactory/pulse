@@ -52,9 +52,10 @@ export default {
 
     const digest = lines.join("\n");
 
-    // Post to Discord if shell is available
+    // Post to Discord if shell is available and we have real content
     let posted = false;
-    if (shell) {
+    const hasContent = summary && summary !== "Unable to generate summary" && highlights.length > 0;
+    if (shell && hasContent) {
       try {
         const escaped = digest.replace(/"/g, '\\"');
         const result = await shell(`bun ~/bin/discord post --channel general "${escaped}"`);
