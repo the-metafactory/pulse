@@ -154,17 +154,14 @@ Scoring rules used:
 - Types: handover=50 (unread handovers block collaboration), bug=50, PR=30 (blocking collaborators), blueprint=20 (roadmap work), issue=10
 - Dependencies: +15 per feature this unblocks, +10 per earlier iteration, +25 if in-progress, +15 if unblocked and ready, -50 if blocked by unfinished deps
 
-Select THE SINGLE MOST IMPORTANT item to work on next. Consider:
-1. The numeric score (higher = more important by rules)
-2. Whether this unblocks other work
-3. Whether this is time-sensitive (handovers, blocking PRs)
-4. Whether this moves the project forward meaningfully
+The highest-scored item is #1. You may override this pick ONLY if you have strong justification (e.g., it's blocked in practice, or a lower-scored item is clearly more urgent due to context the scoring misses). Otherwise, select #1.
+
+Your job is to explain WHY the selected item matters and suggest a concrete first step.
 
 Return JSON:
 {
-  "pickId": "the id of the selected item",
-  "pickIndex": 0,
-  "reasoning": "2-3 sentences explaining WHY this is the top pick — what it unblocks, why it's urgent, what happens if delayed",
+  "pickId": "the id of the selected item (use the exact id from the list)",
+  "reasoning": "2-3 sentences explaining WHY this pick — what it unblocks, why it's urgent, what happens if delayed. Reference the item by its actual id.",
   "suggestedFirstStep": "One concrete sentence: what the developer should do first to start this work"
 }
 
@@ -178,13 +175,16 @@ Return ONLY valid JSON.`;
 
     const parsed = result.json as {
       pickId?: string;
-      pickIndex?: number;
       reasoning?: string;
       suggestedFirstStep?: string;
     } | undefined;
 
-    const pickIndex = parsed?.pickIndex ?? 0;
-    const topPick = candidates[pickIndex] || candidates[0];
+    // Resolve by pickId (must match a candidate), otherwise use highest-scored
+    let topPick = candidates[0];
+    if (parsed?.pickId) {
+      const byId = candidates.find((c) => c.id === parsed.pickId);
+      if (byId) topPick = byId;
+    }
 
     return {
       ...upstream,
