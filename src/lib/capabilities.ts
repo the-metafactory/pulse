@@ -146,6 +146,9 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
   };
 }
 
+/** Max time to wait for claude -p response before killing the process */
+const CLAUDE_CLI_TIMEOUT_MS = 180_000; // 3 minutes
+
 /**
  * Invoke claude -p for LLM calls using the CC subscription (no API cost).
  * Uses --output-format json for structured output extraction.
@@ -153,12 +156,18 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
  */
 async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMResponse | null> {
   const modelMap = { fast: "haiku", standard: "sonnet", smart: "opus" } as const;
+
+  // Resolve claude to absolute path to prevent PATH injection
+  const whichProc = Bun.spawnSync(["which", "claude"], { stdout: "pipe" });
+  const claudePath = whichProc.stdout.toString().trim();
+  if (!claudePath || whichProc.exitCode !== 0) return null;
+
   const args = [
-    "claude", "-p",
+    claudePath, "-p",
     "--output-format", "json",
     "--model", modelMap[options?.tier || "fast"],
     "--disable-slash-commands",
-    "--tools", "",
+    "--tools", "",  // Disable all tools — LLM-only call, no tool use needed
     "--no-session-persistence",
   ];
   if (options?.system) {
@@ -177,7 +186,12 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
       env: cleanEnv,
     });
 
-    const timeout = setTimeout(() => proc.kill(), 180_000);
+    const timeout = setTimeout(() => {
+      proc.kill();
+      // Force kill if SIGTERM doesn't work after 5s
+      setTimeout(() => proc.kill(9), 5_000);
+    }, CLAUDE_CLI_TIMEOUT_MS);
+
     const [rawStdout, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
       proc.exited,
@@ -194,14 +208,15 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
       const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
       try {
         json = JSON.parse(cleaned);
-      } catch {
+      } catch (_err) {
+        // Response wasn't valid JSON despite json option — return text only
         json = undefined;
       }
     }
 
     return { text, json };
-  } catch {
-    // claude CLI not available
+  } catch (_err) {
+    // claude CLI not installed or spawn failed — fall through to next provider
     return null;
   }
 }
@@ -214,7 +229,8 @@ function extractClaudeOutput(raw: string): string {
       return wrapper.result;
     }
     return raw;
-  } catch {
+  } catch (_err) {
+    // Not a JSON wrapper — return raw text (e.g., plain text from older CC versions)
     return raw.trim();
   }
 }
