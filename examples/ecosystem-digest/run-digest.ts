@@ -67,7 +67,7 @@ async function main() {
   const result = await runPipelineFromYaml(
     PIPELINE_YAML,
     {
-      org: ORG,
+      org,
       repos,
       sinceDays,
       skipDiscord: noPost,

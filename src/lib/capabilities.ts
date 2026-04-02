@@ -166,6 +166,7 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
     claudePath, "-p",
     "--output-format", "json",
     "--model", modelMap[options?.tier || "fast"],
+    "--setting-sources", "",  // Skip CLAUDE.md/hooks/PAI — pure LLM call, keeps OAuth auth
     "--disable-slash-commands",
     "--tools", "",  // Disable all tools — LLM-only call, no tool use needed
     "--no-session-persistence",
