@@ -13,9 +13,59 @@
 
 import { runPipelineFromYaml } from "../../src/lib/pipeline";
 import { join } from "path";
+import { homedir } from "os";
+import YAML from "yaml";
 
 const PIPELINE_YAML = join(import.meta.dir, "pipeline.yaml");
 const DEFAULT_ORG = "the-metafactory";
+
+/**
+ * Resolve repos from compass ecosystem/repos.yaml (canonical source of truth).
+ * Fallback chain: compass → gh repo list → PULSE_REPOS env var.
+ * Only returns "active" repos by default.
+ */
+async function resolveRepos(org: string): Promise<string[]> {
+  // 1. Try compass ecosystem/repos.yaml
+  const compassRepos = await readCompassRepos();
+  if (compassRepos.length > 0) return compassRepos;
+
+  // 2. Fallback: gh repo list (for setups without local compass checkout)
+  const dynamic = await fetchOrgRepos(org);
+  if (dynamic.length > 0) return dynamic;
+
+  // 3. Env var override (for non-org-member setups)
+  if (process.env.PULSE_REPOS) {
+    return process.env.PULSE_REPOS.split(",").map(r => r.trim()).filter(Boolean);
+  }
+
+  throw new Error(
+    `Could not list repos. Either:\n` +
+    `  - Check out compass at ~/Developer/compass\n` +
+    `  - Authenticate with gh: gh auth login\n` +
+    `  - Set PULSE_REPOS env var: PULSE_REPOS=arc,grove,pulse`
+  );
+}
+
+/** Read active repos from compass/ecosystem/repos.yaml */
+async function readCompassRepos(): Promise<string[]> {
+  const devRoot = process.env.PULSE_DEV_ROOT || join(homedir(), "Developer");
+  const compassPath = process.env.COMPASS_PATH || join(devRoot, "compass");
+  const reposPath = join(compassPath, "ecosystem", "repos.yaml");
+
+  try {
+    const file = Bun.file(reposPath);
+    if (!(await file.exists())) return [];
+    const parsed = YAML.parse(await file.text()) as { repos?: Record<string, { status?: string }> };
+    if (!parsed?.repos) return [];
+    return Object.entries(parsed.repos)
+      .filter(([_, entry]) => entry.status === "active")
+      .map(([name]) => name)
+      .sort();
+  } catch (_err) {
+    // Compass not available — fall through
+    return [];
+  }
+}
 
 /** Fetch all repos in the org dynamically via gh CLI */
 async function fetchOrgRepos(org: string): Promise<string[]> {
@@ -29,27 +79,6 @@ async function fetchOrgRepos(org: string): Promise<string[]> {
     return [];
   }
   return proc.stdout.toString().trim().split("\n").filter(Boolean).sort();
-}
-
-/**
- * Resolve repos: dynamic org discovery → PULSE_REPOS env → hardcoded fallback.
- * PULSE_REPOS env var: comma-separated repo names (e.g., "arc,grove,pulse")
- */
-async function resolveRepos(org: string): Promise<string[]> {
-  // Try dynamic discovery first
-  const dynamic = await fetchOrgRepos(org);
-  if (dynamic.length > 0) return dynamic;
-
-  // Env var override (for non-org-member setups)
-  if (process.env.PULSE_REPOS) {
-    return process.env.PULSE_REPOS.split(",").map(r => r.trim()).filter(Boolean);
-  }
-
-  throw new Error(
-    `Could not list repos for ${org}. Either:\n` +
-    `  - Authenticate with gh: gh auth login\n` +
-    `  - Set PULSE_REPOS env var: PULSE_REPOS=arc,grove,pulse`
-  );
 }
 
 async function main() {

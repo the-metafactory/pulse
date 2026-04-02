@@ -72,6 +72,24 @@ const COMMIT_PATTERNS: Array<{
     }),
   },
   {
+    // Agent rules / agents-md.yaml changes
+    test: /agents-md|agent.?rules|claude-md\.yaml/i,
+    action: (repo) => ({
+      command: `arc upgrade compass`,
+      reason: `agent rules updated in ${repo} — regenerate CLAUDE.md with arc`,
+      priority: "normal",
+      repo,
+    }),
+  },
+  {
+    // Ecosystem repos.yaml changes (compass governs which repos are in the network)
+    test: /ecosystem.*repos|repos\.yaml/i,
+    action: (repo) =>
+      repo === "compass"
+        ? { command: "arc upgrade compass", reason: "ecosystem repo registry updated — blueprint and pulse will pick up changes", priority: "high", repo }
+        : null,
+  },
+  {
     // Breaking changes
     test: /\bBREAKING\b|breaking change/i,
     action: (repo) => ({

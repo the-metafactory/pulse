@@ -1,15 +1,21 @@
 import type { ActionContext } from "../../../src/types/action";
 
+interface BlueprintHealth {
+  repos: Array<{ repo: string; total: number; done: number; inProgress: number; ready: number; blocked: number }>;
+  summary: { total: number; done: number; inProgress: number; ready: number; blocked: number };
+}
+
 interface Input {
   repoActivity: any[];
   blueprintStatus: Record<string, { done: string[]; inProgress: string[]; planned: string[] }>;
+  blueprintHealth?: BlueprintHealth | null;
   since?: string;
   [key: string]: unknown;
 }
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { repoActivity, blueprintStatus, since, ...upstream } = input;
+    const { repoActivity, blueprintStatus, blueprintHealth, since, ...upstream } = input;
     const llm = ctx.capabilities.llm;
     if (!llm) throw new Error("LLM capability required");
 
@@ -32,6 +38,17 @@ export default {
       return parts.join("\n");
     }).join("\n\n");
 
+    // Build blueprint health section if available (from blueprint CLI)
+    let healthSection = "";
+    if (blueprintHealth?.repos) {
+      const lines = blueprintHealth.repos.map((r) =>
+        `${r.repo}: ${r.done}/${r.total} done, ${r.ready} ready, ${r.blocked} blocked`
+      );
+      const s = blueprintHealth.summary;
+      lines.push(`TOTAL: ${s.done}/${s.total} done, ${s.ready} ready, ${s.blocked} blocked`);
+      healthSection = `\n\n## Blueprint Health (cross-repo dependency graph)\n${lines.join("\n")}`;
+    }
+
     const prompt = `You are a development team assistant for the metafactory ecosystem — a marketplace for agentic components.
 
 Analyze this ecosystem activity and produce a concise daily digest.
@@ -39,8 +56,10 @@ Analyze this ecosystem activity and produce a concise daily digest.
 ## Recent Activity
 ${activitySummary}
 
-## Blueprint Status (feature roadmap)
-${blueprintSummary}
+## Blueprint Status (per-repo feature roadmap)
+${blueprintSummary}${healthSection}
+
+Note: Agent rules (CLAUDE.md) for each repo are managed by arc via agents-md.yaml. When compass templates or SOPs change, operators run \`arc upgrade compass\` to regenerate CLAUDE.md across repos.
 
 Produce a JSON response with:
 - "summary": A 2-3 sentence overview of what happened and what's moving
