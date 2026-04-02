@@ -102,6 +102,19 @@ bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
 
 - **metafactory** -- always lowercase, one word. Not "Metafactory", not "Meta Factory". The GitHub org is `the-metafactory`, the repo name may be hyphenated (technical constraint), and the domains are `meta-factory.ai/.dev/.io` (DNS constraint). But the brand name is always `metafactory`.
 
+## Standard Operating Procedures
+
+This repo follows ecosystem SOPs from [compass](https://github.com/the-metafactory/compass):
+
+- **Development pipeline:** `compass/sops/dev-pipeline.md` — branches, commits, PR workflow
+- **Versioning & releases:** `compass/sops/versioning.md` — semantic versioning, tags, GitHub releases
+- **Worktree discipline:** `compass/sops/worktree-discipline.md` — multi-agent isolation
+- **Design process:** `compass/sops/design-process.md` — research → decisions → specs → code
+- **Retrospectives:** `compass/sops/retrospective-and-process-mining.md` — post-work pattern extraction
+- **New repo onboarding:** `compass/sops/new-repo.md` — labels, webhooks, CLAUDE.md, bot.yaml
+
+Read the relevant SOP when starting that type of work.
+
 ## Critical Rules
 
 - NEVER describe code you haven't read. Use Read/Glob/Grep to verify before making claims.
@@ -181,50 +194,20 @@ When working on a GitHub issue in this repo, keep the issue updated as you work.
 
 ## Versioning & Releases (mandatory)
 
-Pulse uses semantic versioning via `arc-manifest.yaml`. Current version: 0.3.0.
+Follow `compass/sops/versioning.md` for the full release workflow. Pulse-specific:
 
-**When to bump:**
-- **Patch** (0.3.0 -> 0.3.1): Bug fixes, performance improvements, minor doc updates
-- **Minor** (0.3.x -> 0.4.0): New actions, flow features, capability enhancements
-- **Major** (0.x -> 1.0): Breaking changes to tree format, action contract, or API surface
-
-**Release workflow:**
-```
-1. Bump version in arc-manifest.yaml
-2. Commit: "chore: bump to vX.Y.Z"
-3. Push to main
-4. Create GitHub release: gh release create vX.Y.Z --title "Pulse vX.Y.Z -- Summary" --generate-notes --notes-start-tag <previous-tag>
-```
-
-**Rules:**
-- Every feature or fix commit should be followed by a version bump before deploying
-- GitHub releases use auto-generated notes (`--generate-notes`) plus a human-readable title
-- Tags are created by `gh release create` (don't manually `git tag`)
-- Release title format: `"Pulse vX.Y.Z -- Short Description"`
-- `arc-manifest.yaml` is the single source of truth for the current version
+- Version tracked in `arc-manifest.yaml`
+- **Patch**: Bug fixes, action fixes
+- **Minor**: New actions, new capabilities, new cue types
+- **Major**: Breaking changes to action API or pipeline schema
+- Release title format: `"pulse vX.Y.Z — Short Description"`
+- Deploy: `arc upgrade pulse`
 
 ## Multi-Agent Worktree Discipline (mandatory)
 
-Multiple agents may work on this repo concurrently. To prevent race conditions from branch switching, stashing, and file edits:
+Never switch branches or stash in the main worktree when another agent might be active. Use `git worktree` instead. See `compass/sops/worktree-discipline.md` for full setup and conventions.
 
-**Rule: Never switch branches or stash in the main worktree when another agent might be active.** Use `git worktree` instead.
-
-**Setup:**
-```bash
-# Create a worktree for feature work (from the repo root):
-git worktree add ../pulse-{slug} -b feat/{branch-name} main
-
-# Install dependencies in the worktree:
-cd ../pulse-{slug} && bun install
-```
-
-**Conventions:**
-- Main worktree stays on whatever branch the primary agent is using. Do not touch it from a secondary agent.
-- Feature worktrees go in sibling directories (e.g., `../pulse-p302`).
-- Each worktree gets its own branch. Never check out the same branch in two worktrees.
-- Clean up worktrees when done: `git worktree remove ../pulse-{slug}`
-
-**Why:** Two agents on the same worktree cause branch switching conflicts, stash pop failures, and lost work. Worktrees give full isolation with zero overhead.
+Pulse worktree directories: `../pulse-{slug}`.
 
 ## Bun
 
