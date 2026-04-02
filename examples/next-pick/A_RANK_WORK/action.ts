@@ -31,12 +31,12 @@ const LABEL_SCORES: Record<string, number> = {
   future: 20,
 };
 
-// Type priority: handovers=50 (unread = blocking), bugs=40, PRs=30 (blocking collaborators), features=10, blueprint=5
+// Type priority: handovers=50 (unread = blocking), bugs=40, PRs=30 (blocking collaborators), features=10, blueprint=20
 const TYPE_SCORES: Record<string, number> = {
   handover: 50,
   issue: 10,
   pr: 30,
-  "blueprint-feature": 5,
+  "blueprint-feature": 20,
 };
 
 function scoreLabelPriority(labels: string[]): number {
@@ -83,13 +83,14 @@ function scoreDependency(item: WorkItem, allItems: WorkItem[]): number {
   }
 
   // Check if all dependencies are done (not in our work items = done)
-  if (item.depends && item.depends.length > 0) {
-    const blockedBy = item.depends.filter((dep) =>
-      allItems.some((other) => other.id.endsWith(dep) && other.type === "blueprint-feature")
-    );
-    if (blockedBy.length > 0) {
-      depScore -= 50; // Blocked — can't start this yet
-    }
+  const blockedBy = (item.depends || []).filter((dep) =>
+    allItems.some((other) => other.id.endsWith(dep) && other.type === "blueprint-feature")
+  );
+
+  if (blockedBy.length > 0) {
+    depScore -= 50; // Blocked — can't start this yet
+  } else {
+    depScore += 15; // Roadmap momentum — unblocked and ready to advance the project
   }
 
   return depScore;
@@ -150,8 +151,8 @@ ${candidateList}
 
 Scoring rules used:
 - Labels: now=100, next=60, future=20, unlabeled=10
-- Types: handover=50 (unread handovers block collaboration), bug=50, PR=30 (blocking collaborators), issue=10, blueprint=5
-- Dependencies: +15 per feature this unblocks, +10 per earlier iteration, +25 if in-progress, -50 if blocked by unfinished deps
+- Types: handover=50 (unread handovers block collaboration), bug=50, PR=30 (blocking collaborators), blueprint=20 (roadmap work), issue=10
+- Dependencies: +15 per feature this unblocks, +10 per earlier iteration, +25 if in-progress, +15 if unblocked and ready, -50 if blocked by unfinished deps
 
 Select THE SINGLE MOST IMPORTANT item to work on next. Consider:
 1. The numeric score (higher = more important by rules)
