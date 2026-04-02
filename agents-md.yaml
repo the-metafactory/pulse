@@ -1,0 +1,29 @@
+# agents-md.yaml — repo-specific agent rules configuration
+# Used by `arc upgrade compass-standards` to generate agent rule files
+# See compass/docs/design-claude-md-sync.md for the full design spec.
+
+template: compass-standards
+
+# Which rule file formats to generate
+generate:
+  - format: claude-md
+
+# Placeholder values (substituted into templates)
+repo_name: pulse
+repo_description: "Process Execution Engine"
+deploy_command: "arc upgrade pulse"
+version_source: arc-manifest.yaml
+release_title_format: '"pulse vX.Y.Z — Short Description"'
+worktree_pattern: "../pulse-{slug}"
+
+# No project-specific labels beyond the ecosystem standard set
+extra_labels: []
+
+# Repo-specific sections injected at marked positions in the template
+sections:
+  - position: "after:description"
+    file: docs/agents-md/architecture.md
+  - position: "after:critical-rules"
+    file: docs/agents-md/critical-rules.md
+  - position: "after:sop-table"
+    file: docs/agents-md/implementation-workflow.md

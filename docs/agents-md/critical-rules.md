@@ -1,0 +1,2 @@
+- Arc integration uses `src/lib/arc.ts` (directory scanning via `~/.config/arc/pkg/repos/`) — NOT SQLite direct access. Arc owns its storage format; pulse consumes the public CLI contract.
+- NEVER use empty catch blocks. Every catch must either: (a) log the error, (b) handle it meaningfully (e.g., return a fallback value with a comment explaining why), or (c) name the variable with `_err` and add a comment explaining why it's safe to ignore. Silently swallowing errors hides bugs.
