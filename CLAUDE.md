@@ -104,16 +104,35 @@ bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
 
 ## Standard Operating Procedures
 
-This repo follows ecosystem SOPs from [compass](https://github.com/the-metafactory/compass):
+This repo follows ecosystem SOPs defined in [compass](https://github.com/the-metafactory/compass). **Before starting work, identify which SOPs apply and Read them. Output the pre-flight line from each loaded SOP.**
 
-- **Development pipeline:** `compass/sops/dev-pipeline.md` — branches, commits, PR workflow
-- **Versioning & releases:** `compass/sops/versioning.md` — semantic versioning, tags, GitHub releases
-- **Worktree discipline:** `compass/sops/worktree-discipline.md` — multi-agent isolation
-- **Design process:** `compass/sops/design-process.md` — research → decisions → specs → code
-- **Retrospectives:** `compass/sops/retrospective-and-process-mining.md` — post-work pattern extraction
-- **New repo onboarding:** `compass/sops/new-repo.md` — labels, webhooks, CLAUDE.md, bot.yaml
+| SOP | Activate when | File |
+|-----|--------------|------|
+| **Dev pipeline** | Creating branches, making PRs, starting any feature/fix work | `compass/sops/dev-pipeline.md` |
+| **Versioning** | After merging PRs, before deploying, any version bump | `compass/sops/versioning.md` |
+| **Worktree discipline** | Starting feature work (always -- even solo) | `compass/sops/worktree-discipline.md` |
+| **Design process** | Creating specs, design docs, or research docs | `compass/sops/design-process.md` |
+| **Retrospective** | Post-work review, extracting process patterns | `compass/sops/retrospective-and-process-mining.md` |
+| **New repo** | Bootstrapping a new repository in the ecosystem | `compass/sops/new-repo.md` |
 
-Read the relevant SOP when starting that type of work.
+### Examples
+
+**Starting a feature:**
+```
+Task: "Add a new cue type"
+→ Activate: dev-pipeline + worktree
+→ Read both SOPs from compass
+→ Output: "SOP: dev-pipeline | Branch: feat/p-200-cue-type | Prefix: feat:"
+→ Output: "SOP: worktree | Worktree: ../pulse-cue-type | Branch: feat/p-200-cue-type | Main: untouched"
+```
+
+**After merging a PR:**
+```
+Task: "Merge PR #3"
+→ After merge, activate: versioning
+→ Read SOP from compass
+→ Output: "SOP: versioning | Current: v0.3.0 | Bump: patch → v0.3.1"
+```
 
 ## Critical Rules
 
@@ -194,20 +213,11 @@ When working on a GitHub issue in this repo, keep the issue updated as you work.
 
 ## Versioning & Releases (mandatory)
 
-Follow `compass/sops/versioning.md` for the full release workflow. Pulse-specific:
-
-- Version tracked in `arc-manifest.yaml`
-- **Patch**: Bug fixes, action fixes
-- **Minor**: New actions, new capabilities, new cue types
-- **Major**: Breaking changes to action API or pipeline schema
-- Release title format: `"pulse vX.Y.Z — Short Description"`
-- Deploy: `arc upgrade pulse`
+See `compass/sops/versioning.md`. Key details: `arc-manifest.yaml`, `"pulse vX.Y.Z — Short Description"`
 
 ## Multi-Agent Worktree Discipline (mandatory)
 
-Never switch branches or stash in the main worktree when another agent might be active. Use `git worktree` instead. See `compass/sops/worktree-discipline.md` for full setup and conventions.
-
-Pulse worktree directories: `../pulse-{slug}`.
+See `compass/sops/worktree-discipline.md`. Pattern: `../pulse-{slug}`
 
 ## Bun
 
