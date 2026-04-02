@@ -23,7 +23,11 @@ async function fetchOrgRepos(org: string): Promise<string[]> {
     ["gh", "repo", "list", org, "--json", "name", "--jq", ".[].name", "--limit", "100"],
     { stdout: "pipe", stderr: "pipe" }
   );
-  if (proc.exitCode !== 0) return [];
+  if (proc.exitCode !== 0) {
+    const stderr = proc.stderr.toString().trim();
+    if (stderr) process.stderr.write(`gh repo list failed: ${stderr}\n`);
+    return [];
+  }
   return proc.stdout.toString().trim().split("\n").filter(Boolean).sort();
 }
 
@@ -51,7 +55,7 @@ async function resolveRepos(org: string): Promise<string[]> {
 async function main() {
   const args = process.argv.slice(2);
   const daysIdx = args.indexOf("--days");
-  const sinceDays = daysIdx >= 0 ? parseInt(args[daysIdx + 1]) : 1;
+  const sinceDays = daysIdx >= 0 ? parseInt(args[daysIdx + 1], 10) : 1;
   const noPost = args.includes("--no-post");
   const orgIdx = args.indexOf("--org");
   const org = orgIdx >= 0 ? args[orgIdx + 1] : DEFAULT_ORG;

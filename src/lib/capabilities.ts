@@ -190,7 +190,8 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
     const timeout = setTimeout(() => {
       proc.kill();
       // Force kill if SIGTERM doesn't work after 5s
-      setTimeout(() => proc.kill(9), 5_000);
+      const forceKill = setTimeout(() => proc.kill(9), 5_000);
+      proc.exited.then(() => clearTimeout(forceKill));
     }, CLAUDE_CLI_TIMEOUT_MS);
 
     const [rawStdout, exitCode] = await Promise.all([
