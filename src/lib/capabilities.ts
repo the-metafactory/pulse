@@ -52,11 +52,15 @@ export async function createLocalCapabilities(
  * Local LLM provider.
  *
  * Tries PAI's Inference tool first (if available), falls back to
- * direct Anthropic API call.
+ * Priority: claude -p (CC subscription, no marginal cost) → PAI Inference → Anthropic API.
  */
 function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLMResponse> {
   return async (prompt: string, options?: LLMOptions): Promise<LLMResponse> => {
-    // Try PAI Inference tool
+    // 1. Try claude -p (CC subscription — no per-token cost)
+    const ccResult = await tryClaudeCLI(prompt, options);
+    if (ccResult) return ccResult;
+
+    // 2. Try PAI Inference tool
     const inferPath = `${process.env.HOME}/.claude/PAI/Tools/Inference.ts`;
     try {
       const file = Bun.file(inferPath);
@@ -78,10 +82,8 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
       // PAI not available, fall through
     }
 
-    // Fallback: direct Anthropic API
+    // 3. Fallback: direct Anthropic API
     let apiKey = process.env.ANTHROPIC_API_KEY;
-
-    // Try loading from .env files if not in environment
     if (!apiKey) {
       for (const envPath of [
         `${process.cwd()}/.env`,
@@ -100,7 +102,7 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
     }
 
     if (!apiKey) {
-      throw new Error("LLM capability requires PAI Inference tool or ANTHROPIC_API_KEY");
+      throw new Error("LLM capability requires claude CLI, PAI Inference tool, or ANTHROPIC_API_KEY");
     }
 
     const modelMap = { fast: "claude-haiku-4-5-20251001", standard: "claude-sonnet-4-6", smart: "claude-opus-4-6" } as const;
@@ -128,7 +130,6 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
 
     let json: unknown;
     if (options?.json) {
-      // Strip markdown code fences if the LLM wrapped the JSON
       const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
       try {
         json = JSON.parse(cleaned);
@@ -143,6 +144,79 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
       usage: data.usage ? { input: data.usage.input_tokens, output: data.usage.output_tokens } : undefined,
     };
   };
+}
+
+/**
+ * Invoke claude -p for LLM calls using the CC subscription (no API cost).
+ * Uses --output-format json for structured output extraction.
+ * Returns null if claude CLI is not available.
+ */
+async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMResponse | null> {
+  const modelMap = { fast: "haiku", standard: "sonnet", smart: "opus" } as const;
+  const args = [
+    "claude", "-p",
+    "--output-format", "json",
+    "--model", modelMap[options?.tier || "fast"],
+    "--disable-slash-commands",
+    "--tools", "",
+    "--no-session-persistence",
+  ];
+  if (options?.system) {
+    args.push("--system-prompt", options.system);
+  }
+  args.push(prompt);
+
+  // Clean env to avoid session interference
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.CLAUDECODE;
+
+  try {
+    const proc = Bun.spawn(args, {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: cleanEnv,
+    });
+
+    const timeout = setTimeout(() => proc.kill(), 180_000);
+    const [rawStdout, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]);
+    clearTimeout(timeout);
+
+    if (exitCode !== 0) return null;
+
+    // Extract from CC JSON wrapper: {"type":"result","result":"<content>"}
+    const text = extractClaudeOutput(rawStdout);
+
+    let json: unknown;
+    if (options?.json) {
+      const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+      try {
+        json = JSON.parse(cleaned);
+      } catch {
+        json = undefined;
+      }
+    }
+
+    return { text, json };
+  } catch {
+    // claude CLI not available
+    return null;
+  }
+}
+
+/** Extract text content from claude --output-format json wrapper */
+function extractClaudeOutput(raw: string): string {
+  try {
+    const wrapper = JSON.parse(raw);
+    if (wrapper.type === "result" && typeof wrapper.result === "string") {
+      return wrapper.result;
+    }
+    return raw;
+  } catch {
+    return raw.trim();
+  }
 }
 
 /**
