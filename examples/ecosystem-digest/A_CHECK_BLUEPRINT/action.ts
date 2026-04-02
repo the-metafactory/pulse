@@ -17,8 +17,10 @@ export default {
       planned: string[];
     }> = {};
 
+    const devRoot = process.env.PULSE_DEV_ROOT || `${process.env.HOME}/Developer`;
+
     for (const repo of repos) {
-      const repoPath = `${process.env.HOME}/work/mf/${repo}`;
+      const repoPath = `${devRoot}/${repo}`;
       const yamlPath = `${repoPath}/blueprint.yaml`;
 
       // Read blueprint.yaml and extract feature statuses

@@ -5,7 +5,8 @@
   "input": {
     "summary": { "type": "string", "required": true },
     "highlights": { "type": "array", "required": true },
-    "blockers": { "type": "array" }
+    "blockers": { "type": "array" },
+    "operatorActions": { "type": "array" }
   },
   "output": {
     "digest": { "type": "string" },

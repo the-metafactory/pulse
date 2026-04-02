@@ -51,7 +51,7 @@ Produce a JSON response with:
 Return ONLY valid JSON.`;
 
     const result = await llm(prompt, {
-      tier: "fast",
+      tier: "standard",
       system: "You are a concise, actionable development digest generator. Focus on what matters. No fluff.",
       json: true,
     });
