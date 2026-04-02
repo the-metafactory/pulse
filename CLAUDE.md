@@ -97,3 +97,143 @@ bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
 - Action/pipeline/flow tests create temp dirs in `beforeAll`, clean up in `afterAll`
 - Tree types in `src/types/pulse.ts`, action types in `src/types/action.ts`, flow types in `src/types/flow.ts`
 - No external runtime dependencies beyond commander + zod
+
+## Naming
+
+- **metafactory** -- always lowercase, one word. Not "Metafactory", not "Meta Factory". The GitHub org is `the-metafactory`, the repo name may be hyphenated (technical constraint), and the domains are `meta-factory.ai/.dev/.io` (DNS constraint). But the brand name is always `metafactory`.
+
+## Critical Rules
+
+- NEVER describe code you haven't read. Use Read/Glob/Grep to verify before making claims.
+- NEVER fabricate file names, class names, or architecture. If unsure, read the source.
+- Fix ALL errors found during type checks, tests, or linting -- even if pre-existing or introduced by another developer. Never dismiss errors as "not from our changes." If you see it, fix it.
+- Before fixing a bug or implementing a feature, ALWAYS check open PRs (`gh pr list`) and issues (`gh issue list`) first. Someone may already be working on it, or there may be a PR ready to merge that addresses it. Don't duplicate work -- review what exists before racing to write code.
+- Arc integration uses `src/lib/arc.ts` (directory scanning via `~/.config/arc/pkg/repos/`) -- NOT SQLite direct access. Arc owns its storage format; pulse consumes the public CLI contract.
+- NEVER use empty catch blocks. Every catch must either: (a) log the error, (b) handle it meaningfully (e.g., return a fallback value with a comment explaining why), or (c) name the variable with `_err` and add a comment explaining why it's safe to ignore. Silently swallowing errors hides bugs.
+
+## Implementation Workflow
+
+Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration plans.
+
+**Feature IDs (from blueprint.yaml):**
+- **Iteration 1 -- Execution Core:** P-100 (parser/validator), P-101 (scheduler), P-102 (executor), P-103 (PulseRunner), P-104 (CLI)
+- **Iteration 2 -- Pipe Model & Action Contract:** P-200 (Action contract), P-201 (passthrough pipe), P-202 (Pipeline primitive), P-203 (miner process import), P-205 (local/cloud dispatch), P-206 (pipeline YAML loader)
+- **Iteration 3 -- Flow & Ecosystem:** P-300 (Flow primitive), P-301 (D/A/H classification), P-302 (trace emission), P-303 (Arc package integration)
+- **Iteration 4 -- Runtime & Distribution:** P-400 (runtime adapters), P-401 (Grove event bridge), P-402 (metafactory process runner)
+
+**Workflow:**
+```
+1. Read the design spec (design/) and iteration plan (iterations/)
+2. Pick next feature by dependency order from blueprint.yaml
+3. Create feature branch: feat/p-{id}-{slug}
+4. Implement against acceptance criteria in the iteration plan
+5. PR -> review -> merge to main
+6. Tick checkboxes in BOTH the iteration plan AND the GitHub tracking issue
+```
+
+**Commit conventions:** `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:`
+
+**Iteration plans:**
+- `iterations/iteration-1.md` -- Execution Core (complete)
+- `iterations/iteration-2.md` -- Pipe Model & Action Contract
+- `iterations/iteration-3.md` -- Flow Orchestration & Ecosystem Integration
+
+**Design specs:**
+- `design/cue-architecture.md` -- Cue system (standalone artifacts, three-artifact model)
+
+**Sync rule:** Iteration plans exist in two places -- `iterations/` (repo artifact, agents read it) and a GitHub Issue (trackable, commentable). When a checkbox is completed, update both.
+
+## GitHub Labels (ecosystem standard)
+
+All metafactory ecosystem repos use a shared label set. Do not create ad-hoc labels.
+
+| Label | Description | Color | Purpose |
+|-------|-------------|-------|---------|
+| `bug` | Something isn't working | `#d73a4a` | Defect tracking |
+| `documentation` | Improvements or additions to documentation | `#0075ca` | Docs work |
+| `feature` | Feature specification | `#1D76DB` | Feature work |
+| `infrastructure` | Cross-cutting infrastructure work | `#5319E7` | Infra/tooling |
+| `now` | Currently being worked | `#0E8A16` | Priority: active |
+| `next` | Next up after current work | `#FBCA04` | Priority: queued |
+| `future` | Planned but not yet scheduled | `#C5DEF5` | Priority: backlog |
+| `handover` | NZ/EU timezone bridge -- work session summary | `#F9D0C4` | Async handoffs |
+
+Every issue must have at least one type label (`bug`, `feature`, `infrastructure`, `documentation`) and one priority label (`now`, `next`, `future`) if open.
+
+## GitHub Issue Tracking (mandatory)
+
+When working on a GitHub issue in this repo, keep the issue updated as you work. This is default agent behavior, not optional.
+
+**On starting work:**
+- Comment on the issue: what you're working on, which sub-task
+- Example: `gh issue comment 12 --body "Starting: implement trace emission for beat-start/complete events"`
+
+**During work:**
+- When a sub-task checkbox is completed, tick it on the issue
+- When you create a PR, link it to the issue (use `closes #N` or `gh pr create` with issue reference)
+
+**On completing work:**
+- Comment with a summary: what was done, what changed, any follow-up needed
+- Tick completed checkboxes on both the GitHub issue AND `iterations/iteration-*.md`
+- If all checkboxes are done, close the issue
+
+**Why:** GitHub is the shared collaboration surface. JC, Andreas, and agents all read it. If you do work but don't update the issue, it looks like nothing happened.
+
+## Versioning & Releases (mandatory)
+
+Pulse uses semantic versioning via `arc-manifest.yaml`. Current version: 0.3.0.
+
+**When to bump:**
+- **Patch** (0.3.0 -> 0.3.1): Bug fixes, performance improvements, minor doc updates
+- **Minor** (0.3.x -> 0.4.0): New actions, flow features, capability enhancements
+- **Major** (0.x -> 1.0): Breaking changes to tree format, action contract, or API surface
+
+**Release workflow:**
+```
+1. Bump version in arc-manifest.yaml
+2. Commit: "chore: bump to vX.Y.Z"
+3. Push to main
+4. Create GitHub release: gh release create vX.Y.Z --title "Pulse vX.Y.Z -- Summary" --generate-notes --notes-start-tag <previous-tag>
+```
+
+**Rules:**
+- Every feature or fix commit should be followed by a version bump before deploying
+- GitHub releases use auto-generated notes (`--generate-notes`) plus a human-readable title
+- Tags are created by `gh release create` (don't manually `git tag`)
+- Release title format: `"Pulse vX.Y.Z -- Short Description"`
+- `arc-manifest.yaml` is the single source of truth for the current version
+
+## Multi-Agent Worktree Discipline (mandatory)
+
+Multiple agents may work on this repo concurrently. To prevent race conditions from branch switching, stashing, and file edits:
+
+**Rule: Never switch branches or stash in the main worktree when another agent might be active.** Use `git worktree` instead.
+
+**Setup:**
+```bash
+# Create a worktree for feature work (from the repo root):
+git worktree add ../pulse-{slug} -b feat/{branch-name} main
+
+# Install dependencies in the worktree:
+cd ../pulse-{slug} && bun install
+```
+
+**Conventions:**
+- Main worktree stays on whatever branch the primary agent is using. Do not touch it from a secondary agent.
+- Feature worktrees go in sibling directories (e.g., `../pulse-p302`).
+- Each worktree gets its own branch. Never check out the same branch in two worktrees.
+- Clean up worktrees when done: `git worktree remove ../pulse-{slug}`
+
+**Why:** Two agents on the same worktree cause branch switching conflicts, stash pop failures, and lost work. Worktrees give full isolation with zero overhead.
+
+## Bun
+
+Default to using Bun instead of Node.js.
+
+- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
+- Use `bun test` instead of `jest` or `vitest`
+- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
+- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
+- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
+- Use `bunx <package> <command>` instead of `npx <package> <command>`
+- Bun automatically loads .env, so don't use dotenv.
