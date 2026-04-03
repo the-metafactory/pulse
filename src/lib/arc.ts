@@ -1,5 +1,5 @@
 /**
- * Arc Integration — discover actions and pipelines from arc-installed packages.
+ * Arc Integration — discover actions, pipelines, and flows from arc-installed packages.
  *
  * Pulse calls arc's CLI (`arc list --json`) to discover installed packages,
  * then scans their repo directories for actions and pipelines.
@@ -14,7 +14,9 @@
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { loadPipeline, type PipelineDef } from "./pipeline";
+import { loadFlow } from "./flow";
 import type { ActionManifest } from "../types/action";
+import type { FlowDef } from "../types/flow";
 
 const DEFAULT_REPOS_DIR = `${process.env.HOME}/.config/arc/pkg/repos`;
 
@@ -46,6 +48,17 @@ export interface ArcPipeline {
   packageName: string;
 }
 
+export interface ArcFlow {
+  /** The flow definition (from flow.yaml) */
+  flow: FlowDef;
+  /** Full path to the flow.yaml */
+  yamlPath: string;
+  /** Directory containing the flow */
+  baseDir: string;
+  /** Name of the arc package */
+  packageName: string;
+}
+
 /**
  * Query arc for installed packages via CLI.
  *
@@ -65,8 +78,8 @@ async function getInstalledPackages(reposDir: string = DEFAULT_REPOS_DIR): Promi
           return data.packages;
         }
       }
-    } catch {
-      // arc CLI not available or doesn't support --json yet
+    } catch (_err) {
+      // arc CLI not available or doesn't support --json yet — fall through to directory scan
     }
   }
 
@@ -102,7 +115,8 @@ async function scanReposDirectory(reposDir: string): Promise<ArcPackage[]> {
             if (versionMatch) version = versionMatch[1].trim();
             break;
           }
-        } catch {
+        } catch (_err) {
+          // Manifest unreadable, try next name
           continue;
         }
       }
@@ -115,8 +129,8 @@ async function scanReposDirectory(reposDir: string): Promise<ArcPackage[]> {
         installPath: pkgDir,
       });
     }
-  } catch {
-    // Directory doesn't exist
+  } catch (_err) {
+    // Directory doesn't exist or isn't readable
   }
 
   return packages;
@@ -141,11 +155,11 @@ async function scanForActions(dir: string): Promise<Array<{ manifest: ActionMani
           const manifest = await manifestFile.json() as ActionManifest;
           actions.push({ manifest, actionDir });
         }
-      } catch {
-        // Invalid action.json, skip
+      } catch (_err) {
+        // Invalid action.json — skip this action directory
       }
     }
-  } catch {
+  } catch (_err) {
     // Directory doesn't exist or isn't readable
   }
 
@@ -187,12 +201,36 @@ export async function discoverArcPipelines(reposDir: string = DEFAULT_REPOS_DIR)
     try {
       const { pipeline, baseDir } = await loadPipeline(yamlPath);
       pipelines.push({ pipeline, yamlPath, baseDir, packageName: pkg.name });
-    } catch {
-      // No pipeline.yaml or invalid, skip
+    } catch (_err) {
+      // Expected: most packages don't have pipeline.yaml
     }
   }
 
   return pipelines;
+}
+
+/**
+ * Discover all flows from arc-installed packages.
+ *
+ * Scans active packages for flow.yaml files at the package root.
+ */
+export async function discoverArcFlows(reposDir: string = DEFAULT_REPOS_DIR): Promise<ArcFlow[]> {
+  const packages = await getInstalledPackages(reposDir);
+  const flows: ArcFlow[] = [];
+
+  for (const pkg of packages) {
+    if (pkg.status === "disabled") continue;
+
+    const yamlPath = join(pkg.installPath, "flow.yaml");
+    try {
+      const flow = await loadFlow(yamlPath);
+      flows.push({ flow, yamlPath, baseDir: pkg.installPath, packageName: pkg.name });
+    } catch (_err) {
+      // Expected: most packages don't have flow.yaml
+    }
+  }
+
+  return flows;
 }
 
 /**

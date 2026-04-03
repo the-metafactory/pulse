@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { createRunCommand } from "./commands/run";
 import { createValidateCommand } from "./commands/validate";
 import { createStatusCommand } from "./commands/status";
+import { createFlowCommand } from "./commands/flow";
 
 const program = new Command();
 
@@ -14,5 +15,6 @@ program
 program.addCommand(createRunCommand());
 program.addCommand(createValidateCommand());
 program.addCommand(createStatusCommand());
+program.addCommand(createFlowCommand());
 
 program.parse();
