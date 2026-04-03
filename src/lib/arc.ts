@@ -78,8 +78,8 @@ async function getInstalledPackages(reposDir: string = DEFAULT_REPOS_DIR): Promi
           return data.packages;
         }
       }
-    } catch {
-      // arc CLI not available or doesn't support --json yet
+    } catch (_err) {
+      // arc CLI not available or doesn't support --json yet — fall through to directory scan
     }
   }
 
@@ -115,7 +115,8 @@ async function scanReposDirectory(reposDir: string): Promise<ArcPackage[]> {
             if (versionMatch) version = versionMatch[1].trim();
             break;
           }
-        } catch {
+        } catch (_err) {
+          // Manifest unreadable, try next name
           continue;
         }
       }
@@ -128,8 +129,8 @@ async function scanReposDirectory(reposDir: string): Promise<ArcPackage[]> {
         installPath: pkgDir,
       });
     }
-  } catch {
-    // Directory doesn't exist
+  } catch (_err) {
+    // Directory doesn't exist or isn't readable
   }
 
   return packages;
@@ -154,11 +155,11 @@ async function scanForActions(dir: string): Promise<Array<{ manifest: ActionMani
           const manifest = await manifestFile.json() as ActionManifest;
           actions.push({ manifest, actionDir });
         }
-      } catch {
-        // Invalid action.json, skip
+      } catch (_err) {
+        // Invalid action.json — skip this action directory
       }
     }
-  } catch {
+  } catch (_err) {
     // Directory doesn't exist or isn't readable
   }
 
@@ -200,8 +201,8 @@ export async function discoverArcPipelines(reposDir: string = DEFAULT_REPOS_DIR)
     try {
       const { pipeline, baseDir } = await loadPipeline(yamlPath);
       pipelines.push({ pipeline, yamlPath, baseDir, packageName: pkg.name });
-    } catch {
-      // No pipeline.yaml or invalid, skip
+    } catch (_err) {
+      // Expected: most packages don't have pipeline.yaml
     }
   }
 
@@ -224,8 +225,8 @@ export async function discoverArcFlows(reposDir: string = DEFAULT_REPOS_DIR): Pr
     try {
       const flow = await loadFlow(yamlPath);
       flows.push({ flow, yamlPath, baseDir: pkg.installPath, packageName: pkg.name });
-    } catch {
-      // No flow.yaml or invalid, skip
+    } catch (_err) {
+      // Expected: most packages don't have flow.yaml
     }
   }
 

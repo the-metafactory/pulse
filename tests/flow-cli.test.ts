@@ -140,20 +140,14 @@ describe("discoverArcFlows", () => {
 describe("pulse flow CLI", () => {
   const cli = join(import.meta.dir, "..", "src", "cli.ts");
 
-  test("pulse flow list shows installed flows", async () => {
+  test("pulse flow list runs without crashing", async () => {
     const proc = Bun.spawn(
       ["bun", cli, "flow", "list"],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-        env: { ...process.env, PULSE_TEST_REPOS_DIR: TEST_DIR },
-      }
+      { stdout: "pipe", stderr: "pipe" }
     );
-    const stdout = await new Response(proc.stdout).text();
     await proc.exited;
-    // Will show "No flows found" since it uses default arc dir, not our test dir.
-    // The discoverArcFlows unit tests above cover the logic.
-    // This test just verifies the CLI command is wired up and doesn't crash.
+    // Smoke test: CLI is wired correctly and doesn't crash.
+    // Actual flow discovery is tested by discoverArcFlows unit tests above.
     expect(proc.exitCode).toBe(0);
   });
 

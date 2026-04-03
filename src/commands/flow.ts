@@ -2,6 +2,12 @@ import { Command } from "commander";
 import { loadFlow, runFlow } from "../lib/flow";
 import { discoverArcFlows, createArcActionDirs } from "../lib/arc";
 import { join, resolve, dirname } from "path";
+import type { FlowDef } from "../types/flow";
+
+interface ResolvedFlow {
+  flow: FlowDef;
+  resolvedDir: string | undefined;
+}
 
 /**
  * Create the `pulse flow` command group.
@@ -46,14 +52,25 @@ export function createFlowCommand(): Command {
     .option("--dry-run", "Validate flow without executing")
     .allowUnknownOption(true)
     .action(async (name: string, opts: { dryRun?: boolean }, cmd: Command) => {
-      // Resolve the flow: either by name from arc packages, or by path
-      const flowDef = await resolveFlow(name);
+      let resolved: ResolvedFlow;
+      try {
+        resolved = await resolveFlow(name);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+
+      const { flow: flowDef, resolvedDir } = resolved;
 
       if (opts.dryRun) {
+        const pipelineDisplay = typeof flowDef.pipeline === "string"
+          ? (resolvedDir && flowDef.pipeline.startsWith("./") ? join(resolvedDir, flowDef.pipeline) : flowDef.pipeline)
+          : flowDef.pipeline.actions.join(" → ");
+
         console.log(`Flow "${flowDef.name}" is valid`);
-        console.log(`  source:      ${(flowDef.source as any).type}`);
-        console.log(`  pipeline:    ${typeof flowDef.pipeline === "string" ? flowDef.pipeline : flowDef.pipeline.actions.join(" → ")}`);
-        console.log(`  destination: ${(flowDef.destination as any).type}`);
+        console.log(`  source:      ${flowDef.source.type}`);
+        console.log(`  pipeline:    ${pipelineDisplay}`);
+        console.log(`  destination: ${flowDef.destination.type}`);
         if (flowDef.schedule) {
           console.log(`  schedule:    ${flowDef.schedule.cron || `every ${flowDef.schedule.intervalSeconds}s`}`);
         }
@@ -66,9 +83,8 @@ export function createFlowCommand(): Command {
       // Build action dirs from arc packages
       const arcDirs = await createArcActionDirs();
 
-      // If the flow was loaded from a file, include its directory for action resolution
-      const flowDir = flowDef._resolvedDir;
-      const actionDirs = flowDir ? [flowDir, ...arcDirs] : arcDirs;
+      // Include the flow's directory for action resolution
+      const actionDirs = resolvedDir ? [resolvedDir, ...arcDirs] : arcDirs;
 
       // Merge passthrough args into flow input
       if (Object.keys(passthroughInput).length > 0) {
@@ -76,8 +92,8 @@ export function createFlowCommand(): Command {
       }
 
       // Resolve relative pipeline paths against the flow's directory
-      if (typeof flowDef.pipeline === "string" && flowDef.pipeline.startsWith("./") && flowDir) {
-        flowDef.pipeline = join(flowDir, flowDef.pipeline);
+      if (typeof flowDef.pipeline === "string" && flowDef.pipeline.startsWith("./") && resolvedDir) {
+        flowDef.pipeline = join(resolvedDir, flowDef.pipeline);
       }
 
       const result = await runFlow(flowDef, { actionDirs });
@@ -96,11 +112,11 @@ export function createFlowCommand(): Command {
 /**
  * Resolve a flow by name (from arc packages) or by file path.
  */
-async function resolveFlow(nameOrPath: string): Promise<any> {
+async function resolveFlow(nameOrPath: string): Promise<ResolvedFlow> {
   // If it looks like a path, load directly
   if (nameOrPath.includes("/") || nameOrPath.includes("\\") || nameOrPath.endsWith(".yaml") || nameOrPath.endsWith(".yml")) {
-    const flow = await loadFlow(resolve(nameOrPath));
-    return { ...flow, _resolvedDir: dirname(resolve(nameOrPath)) };
+    const flowDef = await loadFlow(resolve(nameOrPath));
+    return { flow: flowDef, resolvedDir: dirname(resolve(nameOrPath)) };
   }
 
   // Search arc-installed flows by name
@@ -108,21 +124,19 @@ async function resolveFlow(nameOrPath: string): Promise<any> {
   const match = flows.find((f) => f.flow.name === nameOrPath);
 
   if (!match) {
-    console.error(`Flow "${nameOrPath}" not found.`);
     const available = flows.map((f) => f.flow.name);
-    if (available.length > 0) {
-      console.error(`Available flows: ${available.join(", ")}`);
-    } else {
-      console.error("No flows installed. Install a package with arc first.");
-    }
-    process.exit(1);
+    const hint = available.length > 0
+      ? `Available flows: ${available.join(", ")}`
+      : "No flows installed. Install a package with arc first.";
+    throw new Error(`Flow "${nameOrPath}" not found. ${hint}`);
   }
 
-  return { ...match.flow, _resolvedDir: match.baseDir };
+  return { flow: match.flow, resolvedDir: match.baseDir };
 }
 
 /**
  * Parse remaining CLI args as key=value pairs or --key value pairs into a record.
+ * Coerces numeric-looking values to numbers.
  */
 function parsePassthroughArgs(args: string[]): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -137,11 +151,11 @@ function parsePassthroughArgs(args: string[]): Record<string, unknown> {
       // --key=value
       if (key.includes("=")) {
         const [k, ...vParts] = key.split("=");
-        result[k] = vParts.join("=");
+        result[k] = coerceValue(vParts.join("="));
       }
       // --key value (next arg is the value, unless it's another flag)
       else if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-        result[key] = args[i + 1];
+        result[key] = coerceValue(args[i + 1]);
         i++;
       }
       // --flag (boolean)
@@ -153,4 +167,13 @@ function parsePassthroughArgs(args: string[]): Record<string, unknown> {
   }
 
   return result;
+}
+
+/** Coerce string values to numbers/booleans where unambiguous. */
+function coerceValue(value: string): unknown {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  const num = Number(value);
+  if (value !== "" && !isNaN(num)) return num;
+  return value;
 }
