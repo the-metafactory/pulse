@@ -12,7 +12,7 @@
  */
 
 import { readdir } from "fs/promises";
-import { join } from "path";
+import { join, dirname } from "path";
 import { loadPipeline, type PipelineDef } from "./pipeline";
 import { loadFlow } from "./flow";
 import type { ActionManifest } from "../types/action";
@@ -247,7 +247,19 @@ export async function discoverArcFlows(reposDir: string = DEFAULT_REPOS_DIR): Pr
  */
 export async function createArcActionDirs(reposDir: string = DEFAULT_REPOS_DIR): Promise<string[]> {
   const packages = await getInstalledPackages(reposDir);
-  return packages
-    .filter((pkg) => pkg.status !== "disabled")
-    .map((pkg) => pkg.installPath);
+  // findAction() does join(dir, actionName) so we need parent directories
+  // that *contain* action subdirs, not the action paths themselves.
+  // arc list --json returns individual action installPaths — take their parent.
+  const dirs = new Set<string>();
+  for (const pkg of packages) {
+    if (pkg.status === "disabled") continue;
+    if (pkg.type === "action") {
+      dirs.add(dirname(pkg.installPath));
+    } else {
+      // For non-action packages (scanned via directory fallback), the
+      // installPath is the package root which may contain actions directly.
+      dirs.add(pkg.installPath);
+    }
+  }
+  return [...dirs];
 }
