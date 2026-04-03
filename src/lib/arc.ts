@@ -1,5 +1,5 @@
 /**
- * Arc Integration — discover actions and pipelines from arc-installed packages.
+ * Arc Integration — discover actions, pipelines, and flows from arc-installed packages.
  *
  * Pulse calls arc's CLI (`arc list --json`) to discover installed packages,
  * then scans their repo directories for actions and pipelines.
@@ -14,7 +14,9 @@
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { loadPipeline, type PipelineDef } from "./pipeline";
+import { loadFlow } from "./flow";
 import type { ActionManifest } from "../types/action";
+import type { FlowDef } from "../types/flow";
 
 const DEFAULT_REPOS_DIR = `${process.env.HOME}/.config/arc/pkg/repos`;
 
@@ -41,6 +43,17 @@ export interface ArcPipeline {
   /** Full path to the pipeline.yaml */
   yamlPath: string;
   /** Directory containing the pipeline */
+  baseDir: string;
+  /** Name of the arc package */
+  packageName: string;
+}
+
+export interface ArcFlow {
+  /** The flow definition (from flow.yaml) */
+  flow: FlowDef;
+  /** Full path to the flow.yaml */
+  yamlPath: string;
+  /** Directory containing the flow */
   baseDir: string;
   /** Name of the arc package */
   packageName: string;
@@ -193,6 +206,30 @@ export async function discoverArcPipelines(reposDir: string = DEFAULT_REPOS_DIR)
   }
 
   return pipelines;
+}
+
+/**
+ * Discover all flows from arc-installed packages.
+ *
+ * Scans active packages for flow.yaml files at the package root.
+ */
+export async function discoverArcFlows(reposDir: string = DEFAULT_REPOS_DIR): Promise<ArcFlow[]> {
+  const packages = await getInstalledPackages(reposDir);
+  const flows: ArcFlow[] = [];
+
+  for (const pkg of packages) {
+    if (pkg.status === "disabled") continue;
+
+    const yamlPath = join(pkg.installPath, "flow.yaml");
+    try {
+      const flow = await loadFlow(yamlPath);
+      flows.push({ flow, yamlPath, baseDir: pkg.installPath, packageName: pkg.name });
+    } catch {
+      // No flow.yaml or invalid, skip
+    }
+  }
+
+  return flows;
 }
 
 /**

@@ -38,7 +38,7 @@ async function fetchSource(source: FlowSource): Promise<Record<string, unknown>>
     }
 
     case "inline":
-      return source.data;
+      return source.data ?? {};
 
     case "custom":
       return source.fn();
