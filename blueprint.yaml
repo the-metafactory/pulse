@@ -138,3 +138,32 @@ features:
     iteration: 4
     depends: [P-303, meta-factory:F3-300]
     description: "Execute processes published on metafactory marketplace — the end-to-end lifecycle"
+
+  # Iteration 5: NATS Message Bus (DD-67, DD-69, DD-71 Stage 1)
+  - id: P-500
+    name: Transport abstraction layer (shared package)
+    status: planned
+    iteration: 5
+    depends: [P-103]
+    description: "TransportPublisher/TransportSubscriber interfaces, NATSTransport, InMemoryTransport, DualWriteTransport. Shared package consumed by all ecosystem components. DD-69."
+
+  - id: P-501
+    name: NATS-native cue consumer
+    status: planned
+    iteration: 5
+    depends: [P-500, P-300]
+    description: "Pulse subscribes to mf.{network_id}.cue.> for cue events via JetStream. AckExplicit with backoff. DD-67 Stage 1."
+
+  - id: P-502
+    name: Cue.fired event publisher
+    status: planned
+    iteration: 5
+    depends: [P-501]
+    description: "Pulse publishes cue.fired events to mf.{network_id}.cue.fired with CloudEvents envelope (DD-68). Closes the activation loop from DD-62."
+
+  - id: P-503
+    name: Process execution events on bus
+    status: planned
+    iteration: 5
+    depends: [P-502]
+    description: "Publish pulse.process.started/completed/failed events to NATS for Miner observability and Grove dashboard visibility."

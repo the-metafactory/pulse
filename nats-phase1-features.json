@@ -1,0 +1,26 @@
+[
+  {
+    "id": "P-500",
+    "name": "Transport abstraction layer",
+    "description": "Shared package (packages/transport/) with TransportPublisher/TransportSubscriber interfaces, NATSTransport (wrapping @nats-io/transport-node + @nats-io/jetstream), InMemoryTransport (EventEmitter-based for bun test), DualWriteTransport (primary + secondary for migration), and MetafactoryEvent type (CloudEvents v1.0 envelope with mf* extensions per DD-68). ~200 lines. This is the foundation all other P-5xx features build on.",
+    "priority": 1
+  },
+  {
+    "id": "P-501",
+    "name": "NATS-native cue consumer",
+    "description": "Pulse subscribes to mf.{network_id}.cue.> for cue events via JetStream consumer (pulse-cue-eval). AckExplicit with backoff. Build subscription interfaces + mock cue emitter for testing — cue evaluation logic is out of scope. NATS accounts configured from Stage 1 per DD-72. Depends on P-500.",
+    "priority": 2
+  },
+  {
+    "id": "P-502",
+    "name": "Cue.fired event publisher",
+    "description": "Pulse publishes cue.fired events to mf.{network_id}.cue.fired with CloudEvents envelope (DD-68). Closes the activation loop from DD-62. Subject pattern: mf.{net_id}.cue.fired per DD-69. Depends on P-501.",
+    "priority": 3
+  },
+  {
+    "id": "P-503",
+    "name": "Process execution events on bus",
+    "description": "Publish pulse.process.started/completed/failed events to NATS for Miner observability and Grove dashboard visibility. Subject: mf.{network_id}.pulse.process.{started|completed|failed}. CloudEvents envelope. Depends on P-502.",
+    "priority": 4
+  }
+]
