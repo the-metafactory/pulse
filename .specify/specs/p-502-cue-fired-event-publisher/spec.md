@@ -62,15 +62,51 @@ P-502 builds on P-501 (cue consumer) and uses P-500's transport abstraction. Whe
 | FR-9 | Support graceful degradation when transport is unavailable (log warning, continue execution) | Medium |
 | FR-10 | Work with all TransportPublisher implementations: NATSTransport, InMemoryTransport, DualWriteTransport | High |
 
+## In Scope
+
+- `CueFiredPublisher` class with `publish(cue: CueFiredPayload): Promise<void>`
+- CloudEvents v1.0 envelope construction with all required and optional `mf*` fields
+- ULID generation for event `id`
+- Subject routing to `mf.{network_id}.cue.fired`
+- Integration with P-500 `TransportPublisher` (all three implementations)
+- Unit tests via InMemoryTransport, integration test via local NATS
+
+## Out of Scope
+
+- Cue evaluation logic (determines whether to fire — separate subsystem)
+- Consumer-side handling of `cue.fired` events (Miner, Grove, Spawn responsibility)
+- Cross-network cue routing (Stage 4)
+- Dead letter queue for undeliverable events (Stage 3)
+- Cryptographic signing (`mfsignature` — reserved, not implemented)
+
+## Error Handling
+
+| Error State | Behavior | Recovery |
+|-------------|----------|----------|
+| NATS unavailable at publish time | `CueFiredPublisher.publish()` catches transport error, logs warning, returns without throwing | Cue evaluation is not blocked; event is lost (acceptable per fire-and-forget) |
+| DualWriteTransport primary fails | Falls through to P-500 DualWrite semantics (error on primary, warning on secondary) | JSONL fallback captures event if configured as secondary |
+| Invalid cue payload (missing cueId) | Rejects with `CuePublishValidationError` before reaching transport | Caller must fix input — this is a programming error |
+| ULID generation failure | Falls back to `crypto.randomUUID()` | Loses time-ordering but maintains uniqueness |
+| Event serialization failure | Rejects with error — should never happen with typed inputs | Programming error; fix the type |
+| Network ID not configured | Rejects at construction time (`CueFiredPublisher` requires `networkId` in constructor) | Must be provided before publisher can be used |
+
+### Edge Cases
+
+- **Rapid-fire cue events (burst)**: Each publishes independently; no batching. NATS handles throughput.
+- **Same cue fires twice in quick succession**: Both events published with unique IDs. Consumer-side dedup (via `mfcorrelationid` + cueId) if needed.
+- **Publisher used after transport closed**: Transport layer rejects with `TransportClosedError`; publisher logs and swallows.
+
 ## Non-Functional Requirements
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | NFR-1 | Publishing must not block cue evaluation — async fire-and-forget with error logging | High |
-| NFR-2 | Event serialization uses JSON (CloudEvents structured content mode for NATS) | High |
-| NFR-3 | Unit tests use InMemoryTransport exclusively — no NATS dependency in test suite | High |
-| NFR-4 | Code lives alongside P-501 consumer in same module area (e.g., `src/lib/nats/` or `packages/transport/pulse/`) | Medium |
-| NFR-5 | ULID generation uses standard library (e.g., `ulid` package) for consistency with ecosystem | Low |
+| NFR-2 | Publish overhead < 2ms (serialization + hand-off to transport) | High |
+| NFR-3 | Event serialization uses JSON (CloudEvents structured content mode for NATS) | High |
+| NFR-4 | Unit tests use InMemoryTransport exclusively — no NATS dependency in test suite | High |
+| NFR-5 | Code lives in `src/lib/nats/` alongside P-501 consumer | Medium |
+| NFR-6 | ULID generation uses `ulid` package for time-ordered unique IDs | Low |
+| NFR-7 | No sensitive data in event payloads (cue conditions may contain user data — redact if needed) | Medium |
 
 ## Event Schema
 
@@ -106,7 +142,7 @@ interface CueFiredEvent {
     cueType: string;             // "event" | "schedule" | "state" | "intent" | "programmatic" | "composed"
     triggerSource: string;       // What triggered evaluation
     bindingTarget?: string;      // Process ID if binding is resolved
-    [TO BE CLARIFIED: Additional payload fields needed by Miner/Grove?]
+    evaluationDurationMs?: number; // How long cue evaluation took
   };
 }
 ```
@@ -137,7 +173,7 @@ Per DD-69 and DD-70:
 - [ ] Unit tests pass using InMemoryTransport (no NATS in test)
 - [ ] Integration test with local NATS verifies end-to-end publish
 - [ ] TypeScript types exported for consumers (Miner, Grove)
-- [ ] [TO BE CLARIFIED: Performance benchmark target (events/second)?]
+- [ ] Publish throughput sustains > 100 events/second on local NATS
 
 ## Assumptions
 
@@ -147,12 +183,12 @@ Per DD-69 and DD-70:
 4. ULID generation library is available or can be added as dependency
 5. Cue evaluation logic exists (from P-501 or earlier iteration) — this feature adds publishing, not evaluation
 
-## Open Questions
+## Resolved Questions
 
-- [TO BE CLARIFIED] What additional payload fields does Miner require for provenance beyond cueId/cueType/triggerSource?
-- [TO BE CLARIFIED] Should `cue.fired` events be persisted in JetStream, or is fire-and-forget acceptable for this event type?
-- [TO BE CLARIFIED] Is there a performance target for publish throughput (events/second)?
-- [TO BE CLARIFIED] Should failed cue evaluations also publish events (e.g., `cue.evaluation.failed`)?
+- **Miner payload fields**: `evaluationDurationMs` added. Miner extracts provenance from standard CloudEvents fields (`source`, `mfsessionid`, `mfactor`).
+- **JetStream persistence**: Yes — `cue.fired` events are published to JetStream (they land in the `METAFACTORY` stream via `mf.>` subject match). Persistence is free since the stream already exists.
+- **Throughput target**: > 100 events/second on local NATS. Our actual volume is ~10/minute; this target validates no pathological bottleneck.
+- **Failed evaluation events**: Out of scope for P-502. If needed later, a separate `cue.evaluation.failed` event type can be added without changing P-502.
 
 ## References
 

@@ -112,15 +112,48 @@ The event envelope follows CloudEvents v1.0 specification with metafactory exten
 
 ---
 
+## In Scope
+
+- `TransportPublisher` and `TransportSubscriber` interfaces
+- Three implementations: `NATSTransport`, `InMemoryTransport`, `DualWriteTransport`
+- `MetafactoryEvent` type (CloudEvents v1.0 + mf* extensions)
+- `createTransport()` factory function
+- Shared package at `packages/transport/`
+- Unit tests (InMemory) and integration tests (NATS)
+
+## Error Handling
+
+| Error State | Behavior | Recovery |
+|-------------|----------|----------|
+| NATS connection refused | `NATSTransport.publish()` rejects with `TransportConnectionError` | Caller decides retry; transport does not retry internally |
+| NATS connection lost mid-session | Relies on `@nats-io` auto-reconnect (default: 10 retries, 2s backoff) | Events during disconnect buffer up to 8MB (NATS default); overflow rejects with `TransportBufferOverflowError` |
+| Invalid subject (empty, null) | `publish()` rejects synchronously with `TransportValidationError` | Caller must fix input |
+| Invalid event (missing required CloudEvents fields) | `publish()` rejects with `TransportValidationError` after Zod parse | Caller must fix event |
+| `DualWriteTransport` primary fails | Error propagated to caller | Secondary still attempted; secondary failure logged as warning |
+| `DualWriteTransport` secondary fails | Warning logged via `console.warn` | Primary success is sufficient; operation succeeds |
+| `InMemoryTransport` handler throws | Error propagated to subscriber | No retry; test should assert on the error |
+| `subscribe()` on closed transport | Rejects with `TransportClosedError` | Caller must create new transport instance |
+| Concurrent `close()` calls | Idempotent — second call resolves immediately | No error |
+
+### Edge Cases
+
+- **Empty subject string**: Rejected at validation layer before reaching NATS
+- **Event with unknown extension fields**: Passed through (CloudEvents allows extensions)
+- **Subscription to subject with no publishers**: Valid — handler simply never fires
+- **Multiple subscriptions to same subject**: Each gets independent delivery
+- **Publish after close**: Rejected with `TransportClosedError`
+
 ## Non-Functional Requirements
 
 | ID | Requirement | Target |
 |----|-------------|--------|
-| NFR-1 | Package size must remain minimal | ~200 lines total |
-| NFR-2 | Zero external dependencies beyond `@nats-io/*` packages | Minimize footprint |
-| NFR-3 | `InMemoryTransport` must be synchronous-enough for test determinism | No race conditions in tests |
-| NFR-4 | `NATSTransport` connection failures must surface clearly | Meaningful error messages |
-| NFR-5 | All implementations must pass identical test suites | Interface compliance |
+| NFR-1 | Package size must remain minimal | ~200 lines of interface + ~150 lines per implementation |
+| NFR-2 | Zero external dependencies beyond `@nats-io/*` packages and `zod` | Minimize footprint |
+| NFR-3 | `InMemoryTransport` must deliver events synchronously within the same tick for test determinism | `await publish()` → handler fires before next `await` |
+| NFR-4 | `NATSTransport` publish latency | < 5ms p99 for local NATS |
+| NFR-5 | `NATSTransport` subscribe-to-first-message latency | < 50ms after subscription established |
+| NFR-6 | All implementations must pass identical interface compliance test suite | Zero implementation-specific test skips |
+| NFR-7 | No sensitive data in error messages | Connection strings, credentials never logged |
 
 ---
 
