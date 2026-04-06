@@ -401,5 +401,9 @@ function parseFlowYaml(content: string): FlowDef {
     flow.schedule = result.schedule;
   }
 
+  if (result.input) {
+    flow.input = result.input;
+  }
+
   return flow;
 }
