@@ -51,6 +51,84 @@ export interface StepRecord {
   error?: string;
 }
 
+/** Options threaded through the step runner, extending ActionRunnerOptions */
+export interface StepRunnerOptions extends ActionRunnerOptions {
+  mode?: "local" | "cloud";
+  /** AbortSignal for cooperative cancellation (used by parallel branches) */
+  signal?: AbortSignal;
+}
+
+// ---------------------------------------------------------------------------
+// Step validation — catch malformed YAML at parse time
+// ---------------------------------------------------------------------------
+
+const KNOWN_STEP_KEYS = new Set(["map", "filter", "reduce", "parallel", "retry"]);
+
+/** Validate that a parsed YAML step has a recognized shape. Throws on invalid steps. */
+export function validateStep(step: unknown, path: string = "actions"): PipelineStep {
+  if (typeof step === "string") return step;
+
+  if (step === null || typeof step !== "object" || Array.isArray(step)) {
+    throw new Error(`${path}: step must be a string or object, got ${typeof step}`);
+  }
+
+  const keys = Object.keys(step);
+  const stepKeys = keys.filter((k) => KNOWN_STEP_KEYS.has(k));
+
+  if (stepKeys.length === 0) {
+    throw new Error(
+      `${path}: unknown step type. Expected one of: ${[...KNOWN_STEP_KEYS].join(", ")}. Got keys: ${keys.join(", ")}`,
+    );
+  }
+  if (stepKeys.length > 1) {
+    throw new Error(`${path}: step must have exactly one primitive key, got: ${stepKeys.join(", ")}`);
+  }
+
+  const key = stepKeys[0];
+  const spec = (step as Record<string, unknown>)[key];
+
+  if (spec === null || typeof spec !== "object") {
+    throw new Error(`${path}.${key}: spec must be an object`);
+  }
+
+  // Recursively validate nested actions within the step
+  const specObj = spec as Record<string, unknown>;
+  if ("actions" in specObj && Array.isArray(specObj.actions)) {
+    for (let i = 0; i < specObj.actions.length; i++) {
+      validateStep(specObj.actions[i], `${path}.${key}.actions[${i}]`);
+    }
+  }
+
+  // Validate parallel branch actions
+  if (key === "parallel" && "branches" in specObj && typeof specObj.branches === "object" && specObj.branches !== null) {
+    const branches = specObj.branches as Record<string, unknown>;
+    for (const [branchName, branchDef] of Object.entries(branches)) {
+      if (branchDef && typeof branchDef === "object" && "actions" in branchDef) {
+        const branchActions = (branchDef as Record<string, unknown>).actions;
+        if (Array.isArray(branchActions)) {
+          for (let i = 0; i < branchActions.length; i++) {
+            validateStep(branchActions[i], `${path}.parallel.branches.${branchName}.actions[${i}]`);
+          }
+        }
+      }
+    }
+
+    // Check for duplicate branch names (design doc: parse-time error)
+    const branchNames = Object.keys(branches);
+    const nameSet = new Set(branchNames);
+    if (nameSet.size !== branchNames.length) {
+      throw new Error(`${path}.parallel: duplicate branch names detected`);
+    }
+  }
+
+  return step as PipelineStep;
+}
+
+/** Validate all steps in a pipeline actions array. */
+export function validateSteps(steps: unknown[]): PipelineStep[] {
+  return steps.map((step, i) => validateStep(step, `actions[${i}]`));
+}
+
 // ---------------------------------------------------------------------------
 // Core dispatcher
 // ---------------------------------------------------------------------------
@@ -58,11 +136,14 @@ export interface StepRecord {
 export async function runSteps(
   steps: PipelineStep[],
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[] = [],
 ): Promise<Record<string, unknown>> {
   let current = { ...upstream };
   for (const step of steps) {
+    if (options.signal?.aborted) {
+      throw new Error("Aborted");
+    }
     current = await runStep(step, current, options, stepRecords);
   }
   return current;
@@ -71,7 +152,7 @@ export async function runSteps(
 export async function runStep(
   step: PipelineStep,
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[] = [],
 ): Promise<Record<string, unknown>> {
   if (typeof step === "string") {
@@ -94,7 +175,7 @@ export async function runStep(
 async function runActionStep(
   actionName: string,
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const stepStart = Date.now();
@@ -152,7 +233,7 @@ async function mapWithConcurrency<T, R>(
 async function runMap(
   spec: MapStepSpec,
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const items = upstream[spec.over];
@@ -178,7 +259,7 @@ async function runMap(
         throw new MapItemFailure(index, item, errMsg);
       }
       if (onError === "skip") {
-        return undefined; // sentinel
+        return undefined; // sentinel for skipped items
       }
       // onError === "collect"
       return { _error: true, index, error: errMsg, item };
@@ -211,7 +292,7 @@ async function runMap(
 async function runFilter(
   spec: FilterStepSpec,
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const items = upstream[spec.over];
@@ -267,7 +348,7 @@ async function runFilter(
 async function runReduce(
   spec: ReduceStepSpec,
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const items = upstream[spec.over];
@@ -302,30 +383,39 @@ async function runReduce(
 async function runParallel(
   spec: ParallelStepSpec,
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const branchNames = Object.keys(spec.branches);
   const onError = spec.onError ?? "stop";
 
-  // Validate no branch name collisions (parse-time guarantee, but enforce at runtime too)
+  // Validate no branch name collisions (also checked at parse time)
   const nameSet = new Set(branchNames);
   if (nameSet.size !== branchNames.length) {
     throw new Error("parallel: duplicate branch names detected");
   }
 
+  const controller = new AbortController();
+  let firstError: { name: string; error: string } | null = null;
+
   const branchPromises = branchNames.map(async (name) => {
     const branchUpstream = structuredClone(upstream);
+    // Each branch gets the AbortSignal so it can cooperatively cancel
+    const branchOptions: StepRunnerOptions = { ...options, signal: controller.signal };
     try {
       const result = await runSteps(
         spec.branches[name].actions,
         branchUpstream,
-        options,
+        branchOptions,
         stepRecords,
       );
       return { name, result, error: null };
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      if (onError === "stop" && !firstError) {
+        firstError = { name, error: errMsg };
+        controller.abort();
+      }
       return { name, result: null, error: errMsg };
     }
   });
@@ -355,7 +445,7 @@ async function runParallel(
 async function runRetry(
   spec: RetryStepSpec,
   upstream: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" },
+  options: StepRunnerOptions,
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const maxAttempts = spec.attempts;

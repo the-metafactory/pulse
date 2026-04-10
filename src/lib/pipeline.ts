@@ -18,7 +18,7 @@ import { readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { parse as parseYaml } from "yaml";
 import type { ActionRunnerOptions } from "./action-runner";
-import { runSteps, type StepRecord } from "./step-runner";
+import { runStep, validateSteps, type StepRecord, type StepRunnerOptions } from "./step-runner";
 import type { PipelineStep } from "../types/pipeline";
 
 export interface PipelineDef {
@@ -69,10 +69,13 @@ export async function loadPipeline(yamlPath: string): Promise<{
     throw new Error(`Pipeline YAML missing or empty 'actions' list: ${yamlPath}`);
   }
 
+  // Validate step shapes at parse time (catches typos like { mapp: ... } early)
+  const validatedActions = validateSteps(parsed.actions);
+
   return {
     pipeline: {
       name: parsed.name as string,
-      actions: parsed.actions as PipelineStep[],
+      actions: validatedActions,
       description: parsed.description as string | undefined,
     },
     baseDir: dirname(yamlPath),
@@ -164,18 +167,22 @@ export async function runPipeline(
   const startTime = Date.now();
   const stepRecords: StepRecord[] = [];
 
+  // Run steps one-by-one to preserve partial output on failure
+  let currentData = { ...initialInput };
   try {
-    const output = await runSteps(pipeline.actions, initialInput, options, stepRecords);
+    for (const step of pipeline.actions) {
+      currentData = await runStep(step, currentData, options as StepRunnerOptions, stepRecords);
+    }
     return {
       success: true,
-      output,
+      output: currentData,
       steps: stepRecords,
       durationMs: Date.now() - startTime,
     };
   } catch (err) {
     return {
       success: false,
-      output: undefined,
+      output: currentData,
       error: err instanceof Error ? err.message : String(err),
       steps: stepRecords,
       durationMs: Date.now() - startTime,

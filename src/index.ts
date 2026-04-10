@@ -24,8 +24,8 @@ export { runAction, listActions } from "./lib/action-runner";
 export type { ActionRunnerOptions } from "./lib/action-runner";
 export { runPipeline, loadPipeline, runPipelineFromYaml, discoverPipelines } from "./lib/pipeline";
 export type { PipelineDef, PipelineResult } from "./lib/pipeline";
-export { runSteps, runStep, StepFailure, MapItemFailure } from "./lib/step-runner";
-export type { StepRecord } from "./lib/step-runner";
+export { runSteps, runStep, StepFailure, MapItemFailure, validateSteps, validateStep } from "./lib/step-runner";
+export type { StepRecord, StepRunnerOptions } from "./lib/step-runner";
 export type {
   PipelineStep,
   MapStepSpec,

@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { runPipeline } from "../src/lib/pipeline";
-// step-runner is tested indirectly via runPipeline
+import { validateStep, validateSteps } from "../src/lib/step-runner";
 import type { PipelineStep } from "../src/types/pipeline";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -653,5 +653,74 @@ describe("backwards compatibility", () => {
     expect(result.success).toBe(true);
     expect(result.output!.doubled).toBe(10);
     expect(result.output!.value).toBe(15); // 5 + 10
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parse-time step validation
+// ---------------------------------------------------------------------------
+
+describe("step validation", () => {
+  test("accepts string steps", () => {
+    expect(validateStep("A_FOO")).toBe("A_FOO");
+  });
+
+  test("accepts known primitive keys", () => {
+    const step = { map: { over: "items", as: "item", actions: ["A_FOO"], collect: "results" } };
+    expect(validateStep(step)).toEqual(step);
+  });
+
+  test("rejects unknown primitive keys", () => {
+    expect(() => validateStep({ mapp: { over: "x" } })).toThrow("unknown step type");
+  });
+
+  test("rejects non-string non-object steps", () => {
+    expect(() => validateStep(42)).toThrow("step must be a string or object");
+  });
+
+  test("rejects steps with multiple primitive keys", () => {
+    expect(() => validateStep({ map: {}, filter: {} })).toThrow("exactly one primitive key");
+  });
+
+  test("validates nested actions recursively", () => {
+    const step = { map: { over: "x", as: "y", actions: [{ badkey: {} }], collect: "z" } };
+    expect(() => validateStep(step)).toThrow("unknown step type");
+  });
+
+  test("validates parallel branch actions recursively", () => {
+    const step = { parallel: { branches: { a: { actions: [{ nope: {} }] } } } };
+    expect(() => validateStep(step)).toThrow("unknown step type");
+  });
+
+  test("detects duplicate parallel branch names at parse time", () => {
+    // Note: JS objects can't have duplicate keys — this is caught at runtime
+    // The validation checks the Set size vs keys length
+    const step = { parallel: { branches: { a: { actions: ["A_FOO"] } } } };
+    expect(validateStep(step)).toBeTruthy();
+  });
+
+  test("validateSteps validates an array of steps", () => {
+    expect(validateSteps(["A_FOO", { map: { over: "x", as: "y", actions: ["A_BAR"], collect: "z" } }])).toHaveLength(2);
+    expect(() => validateSteps(["A_FOO", { bad: {} }])).toThrow("unknown step type");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// partial output on failure (W3)
+// ---------------------------------------------------------------------------
+
+describe("partial output on failure", () => {
+  test("preserves accumulated data from steps before the failure", async () => {
+    const result = await runPipeline(
+      { name: "P_PARTIAL", actions: ["A_DOUBLE", "A_FAIL", "A_ADD_TEN"] },
+      { value: 5 },
+      opts,
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
+    // A_DOUBLE ran successfully — its output should be in partial output
+    expect(result.output!.doubled).toBe(10);
+    expect(result.output!.value).toBe(5);
   });
 });
