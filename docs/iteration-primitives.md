@@ -1,9 +1,10 @@
 # Iteration Primitives for Pulse Pipelines
 
-**Status:** Design proposal — awaiting review
+**Status:** Design proposal — reviewed, approved with findings incorporated
 **Author:** Ivy (for Jens-Christian Fischer)
 **Reviewer:** Luna
 **Created:** 2026-04-09
+**Reviewed:** 2026-04-09
 **Scope:** Add functional composition primitives (`map`, `filter`, `reduce`, `parallel`) and step-level retry/timeout to pulse pipelines, without breaking the existing linear-pipe + TS-structure model.
 
 ---
@@ -56,7 +57,7 @@ Every one of these would benefit from the same small set of primitives. Adding t
 
 1. **Not adding `route` / `branch` / `if-else`.** Conditional routing is valuable but its use cases are thinner and its maintenance cost is higher. Defer until a concrete flow needs it.
 2. **Not adding `flatMap`, `zip`, `window`, `groupBy`.** Genuinely rare in the flows we run. Handle ad-hoc in an action when they come up.
-3. **Not supporting nested iteration in v1.** `map` inside `map` is intentionally unspecified. It will probably work accidentally; we don't commit to it.
+3. **Nested iteration is supported but not optimized.** The recursive `runStep -> runSteps -> runStep` dispatch naturally supports `map` inside `map`. It is not tested for deep nesting or performance-optimized, but we do not artificially restrict what the implementation naturally allows.
 4. **Not adding a pipeline-expression DSL.** No `where: "post.engagement > 5"`. Predicates are sub-pipelines that return a boolean field. This is more verbose but consistent with everything else.
 5. **Not changing the action interface.** Actions remain `(input, ctx) -> output`. No iterator protocols, no generators, no streaming output.
 
@@ -117,7 +118,14 @@ Apply a sub-pipeline to each element of a collection. Same cardinality in → ou
    - Run the sub-pipeline via `runPipeline`
    - Capture the sub-pipeline's terminal output
 3. If `concurrency > 1`, use a worker pool pattern (simple semaphore) to bound in-flight sub-pipelines. Ordering of results preserves input order regardless of completion order.
-4. On error (see §6), behavior depends on `onError`.
+4. On error (see §6), behavior depends on `onError`:
+   - `stop`: throw immediately (default)
+   - `skip`: omit the failed item from the collected output
+   - `collect`: include a structured error entry in place of the result, with the shape:
+     ```typescript
+     { _error: true, index: number, error: string, item: <original input item> }
+     ```
+     The `_error` discriminant lets downstream actions or reduce steps distinguish success items from failures. The `index` field identifies which input item failed without scanning. Without this, a subsequent `reduce` would get a cryptic failure trying to read fields from an error object.
 5. Write `upstream[collect] = [...subPipelineOutputs]`. Each element is the terminal upstream of its sub-pipeline, NOT just the last action's return value — so downstream actions can access any field any sub-action produced.
 6. Return the full upstream to the next step.
 
@@ -172,7 +180,7 @@ Sequentially combine items into a single accumulated value. Distinct from map-pl
 
 **Semantics:**
 
-1. Initialize `acc = init` (any JSON structure).
+1. Initialize `acc = init` (any JSON-compatible structure). Note: `init` is the first place in pulse where YAML values are structured data rather than flat strings or arrays. This is another argument for adopting the `yaml` package (see §8.5), since the hand-rolled parser cannot handle nested objects as values.
 2. For each item:
    - Build sub-input: `{...upstream, [item_as]: item, [acc_as]: acc}`
    - Run the sub-pipeline
@@ -216,8 +224,8 @@ Run N sub-pipelines concurrently from the same upstream, merging their outputs i
 
 1. Launch all branches concurrently, each with `{...upstream}` as input. Branches CANNOT see each other's intermediate state.
 2. Wait for all branches to complete.
-3. Merge outputs: for each branch `name`, write `upstream[name] = <terminal upstream of that branch>`. Branches NEVER overwrite upstream fields they didn't produce — results are namespaced.
-4. If any branch fails and `onError: stop` (default): cancel remaining branches (best-effort) and throw. If `onError: collect`: wait for all, then return `{...upstream, [name]: result_or_error}`.
+3. Merge outputs: for each branch `name`, write `upstream[name] = <terminal upstream of that branch>`. Branches NEVER overwrite upstream fields they didn't produce — results are namespaced. **Branch name collision is a parse-time error:** `loadPipeline` validates that branch names within a `parallel` block do not collide with each other. Branch names that shadow upstream fields from prior steps are permitted (later overwrites earlier, consistent with the passthrough model) but emit a parse-time warning.
+4. If any branch fails and `onError: stop` (default): cancel remaining branches via `AbortController` and throw. Each branch's sub-pipeline run receives an `AbortSignal` from a shared `AbortController`. On failure, the controller aborts remaining branches so they can tear down in-flight API calls rather than just discarding results while work continues. Without this, "cancel" wastes rate-limit budget on API-calling branches. If `onError: collect`: wait for all, then return `{...upstream, [name]: result_or_error}`.
 
 **Concurrency:** unlimited by default — that's the whole point of parallel. If you need to bound it (e.g. "run 3 research agents but no more"), do it with an explicit semaphore action or nested `map` with `concurrency: 3`.
 
@@ -247,7 +255,7 @@ Orthogonal to iteration but requested in the same design pass. Wraps a sub-pipel
 **Semantics:**
 
 1. Run the inner sub-pipeline.
-2. On failure: check if the error type is in `on` (or always retry if `on` is omitted). If retryable and attempts remain, wait per `backoff` policy, then re-run the ENTIRE inner sub-pipeline from the start. Sub-pipelines are NOT resumable mid-way.
+2. On failure: check if the error type is in `on` (or always retry if `on` is omitted). Error type matching uses `error.constructor.name`, which assumes direct Bun execution with no bundler in the path. Future cloud mode will need `error.code` matching instead, since class names can be mangled by bundlers and don't survive serialization. If retryable and attempts remain, wait per `backoff` policy, then re-run the ENTIRE inner sub-pipeline from the start. Sub-pipelines are NOT resumable mid-way.
 3. After `attempts` attempts, propagate the last error to the enclosing step.
 4. `timeout` on an action kills the action if it exceeds the duration and treats it as a retryable error (subject to the `on:` filter).
 
@@ -261,10 +269,10 @@ Orthogonal to iteration but requested in the same design pass. Wraps a sub-pipel
 
 | Step type | Default onError | Valid values | `skip` means | `collect` means |
 |---|---|---|---|---|
-| `map` | `stop` | stop, skip, collect | Omit the failed item from the collected output; continue | Include `{error: ...}` in place of the result |
+| `map` | `stop` | stop, skip, collect | Omit the failed item from the collected output; continue | Include `{ _error: true, index, error, item }` in place of the result (see §5.1) |
 | `filter` | `stop` | stop, skip | Treat failing predicate as "don't keep"; continue | n/a |
 | `reduce` | `stop` | stop | n/a | n/a |
-| `parallel` | `stop` | stop, collect | n/a | Include `{error: ...}` for failed branches |
+| `parallel` | `stop` | stop, collect | n/a | Include `{ _error: true, error, branch }` for failed branches |
 | `retry` | (N/A — error is the trigger) | — | — | — |
 
 **Principle:** `stop` is the default everywhere. Silent data loss is worse than loud failure. Users must explicitly ask for `skip` or `collect`.
@@ -389,10 +397,10 @@ export interface ParallelStepSpec {
 
 export interface RetryStepSpec {
   attempts: number;
-  backoff?: "constant" | "linear" | "exponential";
-  initial_delay_ms?: number;
-  max_delay_ms?: number;
-  on?: string[];                // error class names
+  backoff?: "constant" | "linear" | "exponential";  // default: "exponential"
+  initial_delay_ms?: number;    // default: 500
+  max_delay_ms?: number;        // default: 10000
+  on?: string[];                // error class names (constructor.name; assumes direct Bun execution)
   actions: PipelineStep[];
 }
 ```
@@ -580,25 +588,21 @@ actions:
 
 ---
 
-## 11. Open questions for review
+## 11. Resolved design questions
 
-1. **Should `reduce` support early termination via an `until:` predicate sub-pipeline?** Clean FP says yes. YAGNI says no. I lean no for v1.
+Questions raised during design and resolved during review (Luna + Ivy, 2026-04-09).
 
-2. **Should `parallel` branches share upstream copy-by-reference or copy-by-value?** Copy-by-value is safer (no accidental cross-branch mutation) but doubles memory for large upstreams. Copy-by-reference is cheaper but risky if actions mutate. JavaScript's lack of immutability makes this a real question. I lean copy-by-value via `structuredClone` at the branch boundary.
-
-3. **Concurrency > 1 on `filter`: is ordering preservation a hard requirement?** I specified yes. Alternative: return items in completion order. I prefer preservation for predictability; the cost is minor (`results[idx]` slot assignment).
-
-4. **Retry backoff policy defaults.** I proposed `exponential` as an example but specified no default. Should the default be `constant` (simpler mental model) or `exponential` (better for real APIs)? I lean exponential with `initial_delay_ms: 500, max_delay_ms: 10000`.
-
-5. **Where do step failures get reported in `PipelineResult.steps`?** Currently `steps: [{action, success, durationMs, error}]` assumes each step is a single action. With nested primitives, step granularity is murky. Option A: flat list with synthetic step names like `"map[3/10]: A_FOO"`. Option B: nested tree mirroring pipeline shape. Option A is simpler and more grep-friendly. Option B is more structured but harder to render. I lean A.
-
-6. **The hand-rolled `parseSimpleYaml` vs adopting the `yaml` npm package.** I recommended adopting `yaml`. Do we want to accept the dependency, or preserve zero-dep pipeline parsing and extend the hand-rolled parser? If we preserve zero-dep, nested step objects get awkward quickly.
-
-7. **Should there be an `--input field=value` CLI flag on `pulse flow run`** to unblock single-flow-per-URN workflows in the interim, independent of this primitive work? Strictly out of scope for this doc but the LinkedIn flow needs it regardless.
-
-8. **Nested iteration.** Does `map` inside `map` need to work in v1, or are we OK declaring it "undefined behavior, probably works, no guarantees"? My draft spec does not explicitly support it but the recursive dispatch in `runStep` means it'll probably work accidentally.
-
-9. **Is `command` source type (shown in the worked example) in-scope for this doc, or a separate proposal?** I've been treating it as a separate follow-up but it's needed to make the primitives useful in real flows.
+| # | Question | Resolution | Rationale |
+|---|----------|------------|-----------|
+| 1 | `reduce` early termination via `until:` | **No for v1** | YAGNI. Revisit when a flow needs it. |
+| 2 | `parallel` branch upstream: copy-by-reference or copy-by-value? | **Copy-by-value via `structuredClone` at branch boundary** | Cross-branch mutation bugs would be nearly impossible to reproduce. Perf cost is negligible at pulse's data sizes. |
+| 3 | `filter` ordering preservation with concurrency > 1 | **Preserve input order** | The `results[idx]` slot pattern is cheap. Predictability matters more than the minor simplification of completion-order. |
+| 4 | Retry backoff defaults | **Exponential, `initial_delay_ms: 500`, `max_delay_ms: 10000`** | Matches real API retry behavior. `constant` is available as an explicit opt-in for those who want it. |
+| 5 | Step failure reporting in `PipelineResult.steps` | **Flat list with synthetic names (e.g. `"map[3/10]: A_FOO"`)** | Greppable, renders cleanly in terminal output. Tree structure is available from the pipeline YAML itself if needed. |
+| 6 | `parseSimpleYaml` vs `yaml` npm package | **Adopt `yaml`** | The hand-rolled parser at `pipeline.ts:131` is already at its complexity ceiling. It cannot handle nested objects, and the new step types require nested objects (e.g. `reduce.init`). Extending it would be more code than the `yaml` package itself. |
+| 7 | `--input field=value` CLI flag | **Ship alongside this work** | Small scope, directly needed by the worked example. Don't ship primitives that can't be exercised from the CLI. |
+| 8 | Nested iteration (`map` inside `map`) | **Supported but not optimized** | The recursive dispatch naturally supports it. "Undefined behavior" is misleading when the implementation handles it correctly by construction. Not tested for deep nesting. See non-goal #3. |
+| 9 | `command` source type | **Separate doc, same release** | The primitives are useful without it (inline sources work), but the real flows need it. Don't block this design on it, but don't ship the LinkedIn flow without it either. |
 
 ---
 
@@ -611,7 +615,7 @@ For the record, so reviewers don't ask "why not X?":
 - **`zip` / `join`** — deferred. Ad-hoc in an action.
 - **`window` / `groupBy`** — streaming-specific. Pulse is batch.
 - **Expression DSL for predicates** (`where: "post.age > 7d"`) — deferred. Predicate sub-pipelines are consistent with everything else.
-- **Nested iteration as a formal feature** — see open question 8.
+- **Nested iteration optimization/testing** — supported by construction but not performance-tested for deep nesting. See resolved question 8.
 - **Streaming reduce / partial results** — deferred. Current batch model doesn't need it.
 - **Dynamic pipeline construction** (a pipeline built by an action at runtime) — explicitly rejected. Pipelines must be static and inspectable at load time.
 
@@ -653,21 +657,28 @@ Assuming the design above is approved, the work is:
 
 ---
 
-## 14. How to review this doc
+## 14. Review summary
 
-Luna, the three most valuable questions to weigh in on:
+Reviewed by Luna and Ivy on 2026-04-09. Verdict: **approved with findings incorporated.**
 
-1. **Scope of the primitive set.** Is `map + filter + reduce + parallel + retry` the right list? Would you add or remove any? Per §11 question 1 especially — is `reduce` pulling its weight as a distinct primitive or is it syntactic sugar for "map + final action"?
+**Key review outcomes:**
 
-2. **Error semantics defaults.** Is "stop by default, opt-in to skip/collect" the right call? Per §6. Alternative: "collect by default, opt-in to stop" — more forgiving but risks silent data loss.
+1. **Primitive set approved.** `map + filter + reduce + parallel + retry` is the right list. `reduce` stays for intent clarity and because the LinkedIn digest flow genuinely benefits from stateful accumulation, though it is the first primitive to cut if implementation scope needs trimming (map + terminal action is a viable substitute for every real flow listed).
 
-3. **The `parseSimpleYaml` vs `yaml` package decision.** Per open question 6. This affects every pulse flow going forward, not just iteration.
+2. **Error semantics approved.** "Stop by default, opt-in to skip/collect" is correct. Silent data loss in a personal workflow engine means you miss things and don't know it. Loud failure is always better.
 
-Secondary but valuable:
+3. **`yaml` package adoption approved.** The hand-rolled parser cannot handle the structured values these primitives require. Unanimously agreed.
 
-4. Naming — any of the keywords (`map`, `filter`, `reduce`, `parallel`, `retry`) should be renamed for clarity?
-5. Do you see a use case in the next 1-2 quarters that would need `route` / `branch`, such that we should include it now?
-6. Anything in §12 (explicitly excluded) that you think should be IN v1?
+4. **"Actions never know about iteration"** confirmed as the right abstraction boundary. The runner owns composition; actions stay pure.
+
+5. **Predicate sub-pipelines over expression DSL** confirmed as the right trade-off. One less parser, one less thing to break.
+
+**Findings incorporated into the spec above:**
+- §5.1: Error entry shape for `onError: collect` specified with `_error` discriminant and `index`
+- §5.4: Branch name collision is now a parse-time error; `AbortController` required for cancellation
+- §5.5: Class name matching caveat for cloud mode documented
+- §2/§11: Nested iteration reframed as "supported, not optimized"
+- §11: All open questions resolved with rationale
 
 ---
 
@@ -681,4 +692,12 @@ Secondary but valuable:
 | 2026-04-09 | Include `retry` in this design (not a separate one) | Requested by JC; orthogonal to iteration but composes with every other primitive |
 | 2026-04-09 | Predicate sub-pipelines instead of expression DSL | One less thing to maintain; consistent with the rest of the composition model |
 | 2026-04-09 | Flat `PipelineResult.steps` reporting | Grep-friendly; tree structure is available from the pipeline YAML itself if needed |
-| 2026-04-09 | Adopt `yaml` npm package (recommended, pending review) | Cheaper than maintaining a hand-rolled parser against increasingly structured YAML |
+| 2026-04-09 | Adopt `yaml` npm package | Cheaper than maintaining a hand-rolled parser against increasingly structured YAML; required for structured `init` values |
+| 2026-04-09 | `onError: collect` error shape: `{ _error, index, error, item }` | Review finding: downstream reduce/actions need a discriminant to distinguish success from failure entries |
+| 2026-04-09 | `parallel` branch name collision is a parse-time error | Review finding: runtime warnings are too easy to miss in batch mode; branch names are statically known from YAML |
+| 2026-04-09 | `parallel` cancellation requires `AbortController` | Review finding: without `AbortSignal`, "cancel" just discards results while API calls continue, wasting rate-limit budget |
+| 2026-04-09 | `structuredClone` at parallel branch boundary | Review resolution: cross-branch mutation bugs would be nearly impossible to reproduce; perf cost is negligible |
+| 2026-04-09 | Exponential backoff default (500ms initial, 10s max) | Review resolution: matches real API behavior; constant backoff is opt-in |
+| 2026-04-09 | Nested iteration: supported, not optimized | Review finding: recursive dispatch handles it by construction; "undefined behavior" is misleading |
+| 2026-04-09 | Ship `--input field=value` alongside primitives | Review resolution: small scope, directly needed by the worked example |
+| 2026-04-09 | `command` source type: separate doc, same release | Review resolution: don't block design, don't ship LinkedIn flow without it |

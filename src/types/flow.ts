@@ -8,6 +8,8 @@
  *   Source → Pipeline → Destination (on a schedule)
  */
 
+import type { PipelineStep } from "./pipeline";
+
 // ---------------------------------------------------------------------------
 // Source — where data comes from
 // ---------------------------------------------------------------------------
@@ -52,7 +54,7 @@ export interface FlowDef {
   /** Where data comes from */
   source: FlowSource;
   /** Pipeline name or inline pipeline definition */
-  pipeline: string | { actions: string[] };
+  pipeline: string | { actions: PipelineStep[] };
   /** Where results go */
   destination: FlowDestination;
   /** When to run (omit for single run) */
