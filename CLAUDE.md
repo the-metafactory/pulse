@@ -9,7 +9,7 @@ Process Execution Engine
 Pulse is the execution engine that animates processes in the metafactory ecosystem. Three composable primitives:
 
 1. **Action** — atomic unit of work with capability injection, runs locally (Bun) or on Cloudflare Workers
-2. **Pipeline** — linear chain of actions with the passthrough pipe model
+2. **Pipeline** — chain of actions with passthrough pipe model + iteration primitives (map, filter, reduce, parallel, retry)
 3. **Flow** — source → pipeline → destination, with scheduling
 
 Plus a **Tree Runner** for non-linear dependency graph execution.
@@ -28,8 +28,8 @@ miner captures traces → metafactory distributes → arc installs → pulse exe
 
 - **Runtime:** Bun
 - **Language:** TypeScript (strict)
-- **Test:** `bun test` (97 tests across 11 files)
-- **Dependencies:** commander, zod
+- **Test:** `bun test` (135 tests across 13 files)
+- **Dependencies:** commander, zod, yaml
 
 ## Architecture
 
@@ -43,11 +43,13 @@ src/
     cycles.ts         # DFS cycle detection
     action-runner.ts  # runAction() — load and execute actions locally or cloud
     pipeline.ts       # runPipeline(), loadPipeline(), runPipelineFromYaml(), discoverPipelines()
+    step-runner.ts    # runSteps(), runStep() — iteration/composition primitive dispatcher
     flow.ts           # runFlow(), scheduleFlow(), loadFlow()
     capabilities.ts   # Local/cloud capability providers
   types/
     pulse.ts          # Tree runner interfaces
     action.ts         # Action system interfaces (inspired by PAI)
+    pipeline.ts       # PipelineStep union + specs: Map, Filter, Reduce, Parallel, Retry
     flow.ts           # Flow types (FlowDef, FlowSource, FlowDestination, FlowSchedule)
   schemas/tree.ts     # Zod schemas for tree definitions
   commands/           # CLI commands (run, validate, status)
@@ -71,7 +73,7 @@ return { ...upstream, summary: result.text };
 Actions never import their dependencies. They declare `requires: ["llm", "fetch"]` and receive implementations via `ctx.capabilities`.
 
 ### Pipeline YAML
-Pipelines can be defined declaratively. Actions are resolved from the directory containing the YAML:
+Pipelines can be defined declaratively. Actions are resolved from the directory containing the YAML. Steps can be plain action names (strings) or iteration primitives (objects with a keyword):
 ```yaml
 name: P_RSS_DIGEST
 actions:
@@ -81,13 +83,23 @@ actions:
   - A_RECOMMEND
 ```
 
+### Iteration primitives
+Pipelines support 5 composition primitives that operate on collections while keeping actions pure:
+- **map** — apply a sub-pipeline to each item (`over`, `as`, `collect`, `concurrency`, `onError: stop|skip|collect`)
+- **filter** — keep items where sub-pipeline predicate is true (`keep_field`)
+- **reduce** — sequential fold with accumulator (`init`, `item_as`, `acc_as`)
+- **parallel** — run named branches concurrently, merge outputs (AbortController cancellation on failure)
+- **retry** — wrap sub-pipeline with backoff policy (`attempts`, `backoff: constant|linear|exponential`)
+
+Types in `src/types/pipeline.ts`, dispatcher in `src/lib/step-runner.ts`. Design rationale in `docs/iteration-primitives.md`.
+
 ### Flow
 Flows connect source → pipeline → destination. Sources: inline, file, RSS, custom. Destinations: stdout, file, webhook, custom. Scheduling via interval or cron approximation.
 
 ## Key commands
 
 ```bash
-bun test              # Run all 91 tests
+bun test              # Run all 135 tests
 bun run typecheck     # TypeScript check
 bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
@@ -97,8 +109,9 @@ bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
 
 - Tree runner tests in `tests/` mirroring `src/lib/`
 - Action/pipeline/flow tests create temp dirs in `beforeAll`, clean up in `afterAll`
-- Tree types in `src/types/pulse.ts`, action types in `src/types/action.ts`, flow types in `src/types/flow.ts`
-- No external runtime dependencies beyond commander + zod
+- Step runner tests in `tests/step-runner.test.ts` (iteration primitives)
+- Tree types in `src/types/pulse.ts`, action types in `src/types/action.ts`, pipeline step types in `src/types/pipeline.ts`, flow types in `src/types/flow.ts`
+- No external runtime dependencies beyond commander, zod, yaml
 
 
 ## Naming
@@ -215,6 +228,7 @@ Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration
 
 **Design specs:**
 - `design/cue-architecture.md` — Cue system (standalone artifacts, three-artifact model)
+- `docs/iteration-primitives.md` — Iteration primitives design (map, filter, reduce, parallel, retry)
 
 **Sync rule:** Iteration plans exist in two places — `iterations/` (repo artifact, agents read it) and a GitHub Issue (trackable, commentable). When a checkbox is completed, update both.
 

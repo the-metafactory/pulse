@@ -126,6 +126,66 @@ const result = await runPipeline(
 // result.output has ALL fields from ALL actions
 ```
 
+**Iterate over collections** — pipelines support 5 composition primitives that let you process collections, fan out to parallel branches, and wrap steps with retry policies. Actions stay pure — they never know iteration is happening.
+
+| Primitive | Purpose | Key options |
+|-----------|---------|-------------|
+| `map` | Apply a sub-pipeline to each item in a collection | `concurrency`, `onError: stop\|skip\|collect` |
+| `filter` | Keep items where a sub-pipeline predicate returns true | `keep_field`, `concurrency` |
+| `reduce` | Sequentially fold items into an accumulator | `init`, `item_as`, `acc_as` |
+| `parallel` | Run named branches concurrently, merge outputs | `onError: stop\|collect`, AbortController cancellation |
+| `retry` | Wrap a sub-pipeline with retry + backoff policy | `attempts`, `backoff`, `on` (error types) |
+
+**YAML example** — filter, map with retry, reduce into a report:
+```yaml
+name: P_LINKEDIN_PULSE_DIGEST
+actions:
+  - filter:
+      over: posts
+      as: post
+      actions: [A_POST_WITHIN_WINDOW]
+      keep_field: keep
+      collect: recent_posts
+
+  - map:
+      over: recent_posts
+      as: post
+      concurrency: 1
+      onError: collect
+      actions:
+        - retry:
+            attempts: 3
+            backoff: exponential
+            actions: [A_LINKEDIN_POST_ENGAGEMENT]
+        - A_LINKEDIN_DIGEST_DELTA
+      collect: per_post_digests
+
+  - reduce:
+      over: per_post_digests
+      init: { header: "# Daily Digest\n\n", body: "" }
+      item_as: digest
+      acc_as: report
+      actions: [A_APPEND_DIGEST_MD]
+      collect: final_report
+
+  - A_FORMAT_FINAL_REPORT
+```
+
+**Parallel branches** — fan out to heterogeneous work:
+```yaml
+- parallel:
+    branches:
+      calendar:
+        actions: [A_FETCH_CALENDAR]
+      email:
+        actions: [A_FETCH_EMAIL_DIGEST]
+      work:
+        actions: [A_FETCH_OPEN_WORK, A_RANK_WORK]
+    onError: stop
+```
+
+**Design principles:** Concurrency defaults to 1 (rate-limited APIs punish accidental parallelism). Errors stop by default (silent data loss is worse than loud failure). Primitives compose — `retry` inside `map`, `map` inside `parallel`, nesting is supported by the recursive dispatch. See `docs/iteration-primitives.md` for the full design rationale.
+
 ### 3. Flow — source, pipeline, destination, schedule
 
 The top-level orchestrator that connects everything:
@@ -205,13 +265,17 @@ The capability injection pattern means the same action code runs locally on Bun 
 
 ## Roadmap
 
-### Done (v0.3.0)
+### Done (v0.7.0)
 - Tree runner with dependency scheduling, parallel execution, retry/timeout
 - Action system with capability injection (local + cloud dispatch)
 - Pipeline primitive with passthrough pipe model
 - Pipeline YAML loader (declarative pipeline definitions)
 - Flow primitive: source → pipeline → destination with scheduling
-- 91 tests across 10 files, tsc clean
+- **Iteration primitives: map, filter, reduce, parallel, retry** — functional composition for pipelines
+- Step-level validation at parse time (catches unknown step types before execution)
+- Partial output preservation on pipeline failure
+- AbortController-based cancellation for parallel branches
+- 135 tests across 13 files, tsc clean
 
 ### Next
 - D/A/H step classification (from miner's trace types)
@@ -224,7 +288,7 @@ See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-r
 
 ```bash
 bun install
-bun test           # 97 tests across 11 files
+bun test           # 135 tests across 13 files
 bun run typecheck  # tsc --noEmit
 ```
 
