@@ -9,18 +9,23 @@
  *            {...upstream, ...a1}
  *                       {...upstream, ...a1, ...a2}
  *                                    {...upstream, ...a1, ...a2, ...a3}
+ *
+ * Steps can be action names (strings) or composition primitives:
+ *   map, filter, reduce, parallel, retry.
  */
 
 import { readdir } from "fs/promises";
 import { join, dirname } from "path";
-import { runAction, type ActionRunnerOptions } from "./action-runner";
-import type { ActionResult } from "../types/action";
+import { parse as parseYaml } from "yaml";
+import type { ActionRunnerOptions } from "./action-runner";
+import { runStep, validateSteps, type StepRecord, type StepRunnerOptions } from "./step-runner";
+import type { PipelineStep } from "../types/pipeline";
 
 export interface PipelineDef {
   /** Pipeline name (e.g. "P_LABEL_EMAIL") */
   name: string;
-  /** Ordered list of action names */
-  actions: string[];
+  /** Ordered list of pipeline steps (action names or composition primitives) */
+  actions: PipelineStep[];
   /** Optional description */
   description?: string;
 }
@@ -52,8 +57,11 @@ export async function loadPipeline(yamlPath: string): Promise<{
   }
 
   const content = await file.text();
-  const parsed = parseSimpleYaml(content);
+  const parsed = parseYaml(content) as Record<string, unknown>;
 
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(`Pipeline YAML is not a valid document: ${yamlPath}`);
+  }
   if (!parsed.name || typeof parsed.name !== "string") {
     throw new Error(`Pipeline YAML missing required 'name' field: ${yamlPath}`);
   }
@@ -61,11 +69,14 @@ export async function loadPipeline(yamlPath: string): Promise<{
     throw new Error(`Pipeline YAML missing or empty 'actions' list: ${yamlPath}`);
   }
 
+  // Validate step shapes at parse time (catches typos like { mapp: ... } early)
+  const validatedActions = validateSteps(parsed.actions);
+
   return {
     pipeline: {
-      name: parsed.name,
-      actions: parsed.actions,
-      description: parsed.description,
+      name: parsed.name as string,
+      actions: validatedActions,
+      description: parsed.description as string | undefined,
     },
     baseDir: dirname(yamlPath),
   };
@@ -112,67 +123,25 @@ export async function discoverPipelines(dir: string): Promise<Array<{
         try {
           const { pipeline, baseDir } = await loadPipeline(yamlPath);
           results.push({ pipeline, yamlPath, baseDir });
-        } catch {
-          // Not a pipeline directory, skip
+        } catch (_err) {
+          // Not a pipeline directory — no pipeline.yaml or invalid format
         }
       }
     }
-  } catch {
-    // Directory doesn't exist, return empty
+  } catch (_err) {
+    // Directory doesn't exist or isn't readable, return empty
   }
 
   return results;
-}
-
-/**
- * Minimal YAML parser for pipeline definitions.
- * Handles the simple flat structure we need without pulling in a YAML library.
- */
-function parseSimpleYaml(content: string): Record<string, any> {
-  const result: Record<string, any> = {};
-  let currentList: string[] | null = null;
-  let currentKey: string | null = null;
-
-  for (const rawLine of content.split("\n")) {
-    const line = rawLine.trimEnd();
-
-    // Skip comments and empty lines
-    if (!line.trim() || line.trim().startsWith("#")) continue;
-
-    // List item: "  - value"
-    if (line.match(/^\s+-\s+/) && currentKey && currentList) {
-      const value = line.replace(/^\s+-\s+/, "").trim();
-      currentList.push(value);
-      continue;
-    }
-
-    // Key-value: "key: value" or "key:"
-    const kvMatch = line.match(/^(\w[\w_-]*):\s*(.*)/);
-    if (kvMatch) {
-      const [, key, rawValue] = kvMatch;
-      const value = rawValue.trim().replace(/^["']|["']$/g, "");
-
-      if (value === "" || value === "[]") {
-        // Start of a list or empty value
-        currentKey = key;
-        currentList = [];
-        result[key] = currentList;
-      } else {
-        currentKey = null;
-        currentList = null;
-        result[key] = value;
-      }
-    }
-  }
-
-  return result;
 }
 
 export interface PipelineResult {
   success: boolean;
   /** Final accumulated output (all action fields merged) */
   output?: Record<string, unknown>;
-  /** Per-action results for debugging */
+  /** Error message if the pipeline failed */
+  error?: string;
+  /** Per-step results for debugging */
   steps: Array<{
     action: string;
     success: boolean;
@@ -184,11 +153,11 @@ export interface PipelineResult {
 }
 
 /**
- * Execute a pipeline: run actions in sequence with the passthrough pattern.
+ * Execute a pipeline: run steps in sequence with the passthrough pattern.
  *
- * Each action's output becomes the next action's input.
- * Data accumulates — the final action has access to every field from every
- * preceding action, not just the immediately previous one.
+ * Steps can be action names (strings) or composition primitives (map, filter,
+ * reduce, parallel, retry). Data accumulates through the pipeline — the final
+ * step has access to every field from every preceding step.
  */
 export async function runPipeline(
   pipeline: PipelineDef,
@@ -196,46 +165,27 @@ export async function runPipeline(
   options: ActionRunnerOptions & { mode?: "local" | "cloud" }
 ): Promise<PipelineResult> {
   const startTime = Date.now();
-  const steps: PipelineResult["steps"] = [];
+  const stepRecords: StepRecord[] = [];
+
+  // Run steps one-by-one to preserve partial output on failure
   let currentData = { ...initialInput };
-
-  for (let i = 0; i < pipeline.actions.length; i++) {
-    const actionName = pipeline.actions[i];
-    const stepStart = Date.now();
-
-    const result: ActionResult = await runAction(actionName, currentData, {
-      ...options,
-      traceId: crypto.randomUUID(),
-    });
-
-    const stepDuration = Date.now() - stepStart;
-
-    steps.push({
-      action: actionName,
-      success: result.success,
-      durationMs: stepDuration,
-      error: result.error,
-    });
-
-    if (!result.success) {
-      return {
-        success: false,
-        output: currentData,
-        steps,
-        durationMs: Date.now() - startTime,
-      };
+  try {
+    for (const step of pipeline.actions) {
+      currentData = await runStep(step, currentData, options as StepRunnerOptions, stepRecords);
     }
-
-    // Pipe model: merge action output into accumulated data
-    if (result.output && typeof result.output === "object") {
-      currentData = { ...currentData, ...(result.output as Record<string, unknown>) };
-    }
+    return {
+      success: true,
+      output: currentData,
+      steps: stepRecords,
+      durationMs: Date.now() - startTime,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      output: currentData,
+      error: err instanceof Error ? err.message : String(err),
+      steps: stepRecords,
+      durationMs: Date.now() - startTime,
+    };
   }
-
-  return {
-    success: true,
-    output: currentData,
-    steps,
-    durationMs: Date.now() - startTime,
-  };
 }
