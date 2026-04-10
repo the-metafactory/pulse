@@ -22,9 +22,9 @@ import type {
 export class StepFailure extends Error {
   constructor(
     public readonly step: string,
-    public readonly cause_error: string,
+    public readonly causeError: string,
   ) {
-    super(`Step failed: ${step} — ${cause_error}`);
+    super(`Step failed: ${step} — ${causeError}`);
     this.name = "StepFailure";
   }
 }
@@ -33,9 +33,9 @@ export class MapItemFailure extends Error {
   constructor(
     public readonly index: number,
     public readonly item: unknown,
-    public readonly cause_error: string,
+    public readonly causeError: string,
   ) {
-    super(`Map item ${index} failed: ${cause_error}`);
+    super(`Map item ${index} failed: ${causeError}`);
     this.name = "MapItemFailure";
   }
 }
@@ -423,11 +423,14 @@ async function runParallel(
   const outcomes = await Promise.all(branchPromises);
   let merged = { ...upstream };
 
+  // If onError:stop and a branch failed, throw the original failure (not an abort error)
+  if (onError === "stop" && firstError) {
+    const { name, error } = firstError as { name: string; error: string };
+    throw new StepFailure(`parallel/${name}`, error);
+  }
+
   for (const outcome of outcomes) {
     if (outcome.error) {
-      if (onError === "stop") {
-        throw new StepFailure(`parallel/${outcome.name}`, outcome.error);
-      }
       // collect mode
       merged[outcome.name] = { _error: true, error: outcome.error, branch: outcome.name };
     } else {
