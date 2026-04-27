@@ -33,7 +33,14 @@ export type {
   ReduceStepSpec,
   ParallelStepSpec,
   RetryStepSpec,
+  GateStepSpec,
+  GateProvider,
+  GateInput,
+  GateResult,
+  GateVerdict,
+  GateEvent,
 } from "./types/pipeline";
+export { StdinGateProvider } from "./lib/gate-provider";
 export { createLocalCapabilities, createCloudCapabilities } from "./lib/capabilities";
 export type {
   ActionCapabilities,

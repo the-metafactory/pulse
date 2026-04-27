@@ -13,7 +13,12 @@ import type {
   ReduceStepSpec,
   ParallelStepSpec,
   RetryStepSpec,
+  GateStepSpec,
+  GateProvider,
+  GateEvent,
+  GateResult,
 } from "../types/pipeline";
+import { StdinGateProvider } from "./gate-provider";
 
 // ---------------------------------------------------------------------------
 // Error types
@@ -56,13 +61,17 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
   mode?: "local" | "cloud";
   /** AbortSignal for cooperative cancellation (used by parallel branches) */
   signal?: AbortSignal;
+  /** Gate input source. Defaults to StdinGateProvider when omitted. */
+  gateProvider?: GateProvider;
+  /** Optional sink for gate lifecycle events. Hosts can pipe to traces, dashboards, etc. */
+  onGateEvent?: (event: GateEvent) => void;
 }
 
 // ---------------------------------------------------------------------------
 // Step validation — catch malformed YAML at parse time
 // ---------------------------------------------------------------------------
 
-const KNOWN_STEP_KEYS = new Set(["map", "filter", "reduce", "parallel", "retry"]);
+const KNOWN_STEP_KEYS = new Set(["map", "filter", "reduce", "parallel", "retry", "gate"]);
 
 /** Validate that a parsed YAML step has a recognized shape. Throws on invalid steps. */
 export function validateStep(step: unknown, path: string = "actions"): PipelineStep {
@@ -121,6 +130,21 @@ export function validateStep(step: unknown, path: string = "actions"): PipelineS
     }
   }
 
+  // Gate-specific validation — required fields must be strings
+  if (key === "gate") {
+    if (typeof specObj.name !== "string" || specObj.name.length === 0) {
+      throw new Error(`${path}.gate: 'name' must be a non-empty string`);
+    }
+    if (typeof specObj.prompt !== "string" || specObj.prompt.length === 0) {
+      throw new Error(`${path}.gate: 'prompt' must be a non-empty string`);
+    }
+    if ("timeout_ms" in specObj && specObj.timeout_ms !== undefined) {
+      if (typeof specObj.timeout_ms !== "number" || specObj.timeout_ms <= 0) {
+        throw new Error(`${path}.gate: 'timeout_ms' must be a positive number when set`);
+      }
+    }
+  }
+
   return step as PipelineStep;
 }
 
@@ -164,6 +188,7 @@ export async function runStep(
   if ("reduce" in step) return runReduce(step.reduce, upstream, options, stepRecords);
   if ("parallel" in step) return runParallel(step.parallel, upstream, options, stepRecords);
   if ("retry" in step) return runRetry(step.retry, upstream, options, stepRecords);
+  if ("gate" in step) return runGate(step.gate, upstream, options, stepRecords);
 
   throw new Error(`Unknown pipeline step shape: ${JSON.stringify(step)}`);
 }
@@ -507,4 +532,109 @@ function computeDelay(
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ---------------------------------------------------------------------------
+// gate — pause for operator verdict
+// ---------------------------------------------------------------------------
+
+async function runGate(
+  spec: GateStepSpec,
+  upstream: Record<string, unknown>,
+  options: StepRunnerOptions,
+  stepRecords: StepRecord[],
+): Promise<Record<string, unknown>> {
+  const provider = options.gateProvider ?? new StdinGateProvider();
+  const collectField = spec.collect ?? "gate";
+  const opened_at = new Date().toISOString();
+  const stepStart = Date.now();
+
+  options.onGateEvent?.({
+    type: "gate.opened",
+    name: spec.name,
+    prompt: spec.prompt,
+    opened_at,
+  });
+
+  // Wire timeout via AbortController so providers can cancel cooperatively.
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  if (spec.timeout_ms !== undefined) {
+    timer = setTimeout(() => controller.abort(), spec.timeout_ms);
+  }
+
+  // If the surrounding step runner already has an abort signal (parallel branch
+  // canceling on sibling failure), forward it.
+  if (options.signal) {
+    if (options.signal.aborted) controller.abort();
+    else options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
+
+  let input;
+  try {
+    input = await provider.requestVerdict({
+      name: spec.name,
+      prompt: spec.prompt,
+      timeout_ms: spec.timeout_ms,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const isTimeout = controller.signal.aborted && spec.timeout_ms !== undefined;
+    if (isTimeout) {
+      options.onGateEvent?.({
+        type: "gate.timeout",
+        name: spec.name,
+        opened_at,
+        timeout_ms: spec.timeout_ms!,
+      });
+      stepRecords.push({
+        action: `gate:${spec.name}`,
+        success: false,
+        durationMs: Date.now() - stepStart,
+        error: `gate timeout after ${spec.timeout_ms}ms`,
+      });
+      throw new StepFailure(`gate:${spec.name}`, `gate timeout after ${spec.timeout_ms}ms`);
+    }
+    stepRecords.push({
+      action: `gate:${spec.name}`,
+      success: false,
+      durationMs: Date.now() - stepStart,
+      error: errMsg,
+    });
+    throw new StepFailure(`gate:${spec.name}`, errMsg);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+
+  const closed_at = new Date().toISOString();
+  const result: GateResult = {
+    name: spec.name,
+    verdict: input.verdict,
+    notes: input.notes,
+    opened_at,
+    closed_at,
+  };
+
+  options.onGateEvent?.({
+    type: "gate.closed",
+    name: spec.name,
+    verdict: input.verdict,
+    notes: input.notes,
+    opened_at,
+    closed_at,
+  });
+
+  stepRecords.push({
+    action: `gate:${spec.name}`,
+    success: input.verdict === "pass",
+    durationMs: Date.now() - stepStart,
+    error: input.verdict === "fail" ? `gate ${spec.name} verdict=fail: ${input.notes}` : undefined,
+  });
+
+  if (input.verdict === "fail") {
+    throw new StepFailure(`gate:${spec.name}`, `verdict=fail — ${input.notes}`);
+  }
+
+  return { ...upstream, [collectField]: result };
 }

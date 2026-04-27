@@ -16,7 +16,8 @@ export type PipelineStep =
   | { filter: FilterStepSpec }
   | { reduce: ReduceStepSpec }
   | { parallel: ParallelStepSpec }
-  | { retry: RetryStepSpec };
+  | { retry: RetryStepSpec }
+  | { gate: GateStepSpec };
 
 // ---------------------------------------------------------------------------
 // Primitive specs
@@ -91,4 +92,65 @@ export interface RetryStepSpec {
   on?: string[];
   /** Sub-pipeline steps to wrap with retry */
   actions: PipelineStep[];
+}
+
+// ---------------------------------------------------------------------------
+// Gate primitive — pause execution and wait for operator verdict
+// ---------------------------------------------------------------------------
+
+/**
+ * Operator verdict on a gate. Pipeline continues when "pass"; the runner
+ * raises StepFailure when "fail" so the surrounding flow can react.
+ */
+export type GateVerdict = "pass" | "fail";
+
+export interface GateInput {
+  verdict: GateVerdict;
+  notes: string;
+}
+
+/**
+ * Captured gate result — what the runner merges into upstream context.
+ * Timestamps are ISO-8601 UTC.
+ */
+export interface GateResult extends GateInput {
+  name: string;
+  opened_at: string;
+  closed_at: string;
+}
+
+/**
+ * Pluggable input source. Default implementation reads stdin (CLI runner);
+ * meta-factory and other hosts can inject HTTP/UI providers.
+ *
+ * Implementations should reject the returned promise if the abort signal
+ * fires (timeout) so the runner can surface a clean error.
+ */
+export interface GateProvider {
+  requestVerdict(spec: {
+    name: string;
+    prompt: string;
+    timeout_ms?: number;
+    signal?: AbortSignal;
+  }): Promise<GateInput>;
+}
+
+/**
+ * Gate lifecycle event. Emitted via the optional StepRunnerOptions.onGateEvent
+ * hook so hosts can pipe gate activity into their own trace systems.
+ */
+export type GateEvent =
+  | { type: "gate.opened"; name: string; prompt: string; opened_at: string }
+  | { type: "gate.closed"; name: string; verdict: GateVerdict; notes: string; opened_at: string; closed_at: string }
+  | { type: "gate.timeout"; name: string; opened_at: string; timeout_ms: number };
+
+export interface GateStepSpec {
+  /** Stable identifier for this gate (used in events + traces) */
+  name: string;
+  /** Operator-facing prompt shown when the gate opens */
+  prompt: string;
+  /** Optional timeout in milliseconds. Omit for indefinite wait. */
+  timeout_ms?: number;
+  /** Field name to write the GateResult under (default: "gate") */
+  collect?: string;
 }

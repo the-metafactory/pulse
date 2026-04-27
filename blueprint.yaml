@@ -100,8 +100,15 @@ features:
     name: D/A/H step classification
     status: planned
     iteration: 3
-    depends: [P-200, miner:M-103]
-    description: "Respect miner's Deterministic/Agentic/Human-gate classification — auto-execute D, delegate A, pause at H"
+    depends: [P-200, miner:M-103, P-304]
+    description: "Respect miner's Deterministic/Agentic/Human-gate classification — auto-execute D, delegate A, pause at H. The H-gate primitive is implemented in P-304; this feature wires miner's classification into the dispatcher."
+
+  - id: P-304
+    name: Interactive gate primitive
+    status: done
+    iteration: 3
+    depends: [P-202]
+    description: "gate pipeline step that pauses execution for operator verdict + notes, with pluggable GateProvider (default: stdin), per-gate timeout, and gate.opened/closed/timeout lifecycle events. Unblocks meta-factory#412 (interactive journey-test runner). GH issue #9."
 
   - id: P-302
     name: Trace emission (JSONL)
