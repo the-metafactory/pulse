@@ -105,7 +105,7 @@ features:
 
   - id: P-304
     name: Interactive gate primitive
-    status: in-progress
+    status: done
     iteration: 3
     depends: [P-202]
     description: "gate pipeline step that pauses execution for operator verdict + notes, with pluggable GateProvider (default: stdin), per-gate timeout, and gate.opened/closed/timeout lifecycle events. Unblocks meta-factory#412 (interactive journey-test runner). GH issue #9."
