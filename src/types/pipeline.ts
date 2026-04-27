@@ -123,14 +123,15 @@ export interface GateResult extends GateInput {
  * Pluggable input source. Default implementation reads stdin (CLI runner);
  * meta-factory and other hosts can inject HTTP/UI providers.
  *
- * Implementations should reject the returned promise if the abort signal
- * fires (timeout) so the runner can surface a clean error.
+ * The runner owns the timeout — providers receive only the AbortSignal and
+ * MUST reject the returned promise when the signal fires. This keeps timeout
+ * semantics consistent across implementations regardless of how each provider
+ * tracks elapsed time internally.
  */
 export interface GateProvider {
   requestVerdict(spec: {
     name: string;
     prompt: string;
-    timeout_ms?: number;
     signal?: AbortSignal;
   }): Promise<GateInput>;
 }
@@ -151,6 +152,6 @@ export interface GateStepSpec {
   prompt: string;
   /** Optional timeout in milliseconds. Omit for indefinite wait. */
   timeout_ms?: number;
-  /** Field name to write the GateResult under (default: "gate") */
+  /** Field name to write the GateResult under (default: `gate_${name}`) */
   collect?: string;
 }

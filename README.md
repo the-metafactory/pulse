@@ -179,9 +179,12 @@ actions:
     name: smoke-check
     prompt: "Did staging come up clean? (pass/fail + notes)"
     timeout_ms: 600000   # optional; omit for indefinite wait
+    collect: smoke_decision   # optional; default: gate_${name}
 - A_PROMOTE_TO_PROD
 ```
-Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; default `StdinGateProvider` reads pass/fail + notes from stdin. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can capture them as traces.
+Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; the default `StdinGateProvider` reads pass/fail + notes from stdin. The result (`{ name, verdict, notes, opened_at, closed_at }`) is merged into upstream context under the `collect` field. `verdict: "fail"` halts the pipeline with a `StepFailure` carrying the operator's notes — there is no "fail but continue" branch yet; treat the gate as a hard stop. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can route them to traces; the verdict + notes are also captured on the corresponding `StepRecord` so callers without a hook still see them via `PipelineResult.steps`.
+
+Gate is the only leaf composition primitive (no nested `actions`). The other primitives wrap sub-pipelines; gate is a pause-and-collect terminal. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
 
 **Parallel branches** — fan out to heterogeneous work:
 ```yaml

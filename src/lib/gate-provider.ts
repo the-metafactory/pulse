@@ -6,108 +6,133 @@
  * the GateProvider interface and inject their own.
  */
 
+import { createInterface, type Interface as ReadlineInterface } from "readline";
+import type { Readable } from "stream";
 import type { GateProvider, GateInput, GateVerdict } from "../types/pipeline";
 
 /**
- * Reads the operator verdict from stdin. Wire format:
+ * Reads the operator verdict from stdin (or any Readable). Wire format:
  *
  *   <prompt is printed>
  *   pass|fail               <-- single line: the verdict
  *   <free-form notes...>    <-- zero or more lines of notes
- *   EOF                     <-- terminator on its own line
+ *   .                       <-- terminator on its own line
  *
- * The provider rejects with a clear error if stdin closes before EOF
- * or if the abort signal fires (timeout / cancel).
+ * Notes containing a literal "." on its own line will be truncated; document
+ * this constraint to operators or pick a custom provider for richer input.
+ *
+ * The provider serializes invocations through a single readline interface and
+ * an internal line queue so that multiple sequential gates in one process
+ * don't race on `process.stdin`'s data events. Concurrent gates are not
+ * supported via stdin (an operator can only answer one prompt at a time);
+ * the second concurrent `requestVerdict` call queues behind the first.
  */
 export class StdinGateProvider implements GateProvider {
+  private readonly input: Readable;
+  private readonly output: NodeJS.WritableStream;
+  private rl: ReadlineInterface | null = null;
+  private readonly buffered: string[] = [];
+  private waiter: ((line: string | null) => void) | null = null;
+  private closed = false;
+  private inFlight: Promise<unknown> = Promise.resolve();
+
+  constructor(opts?: { input?: Readable; output?: NodeJS.WritableStream }) {
+    this.input = opts?.input ?? process.stdin;
+    this.output = opts?.output ?? process.stdout;
+  }
+
   async requestVerdict(spec: {
     name: string;
     prompt: string;
-    timeout_ms?: number;
     signal?: AbortSignal;
   }): Promise<GateInput> {
-    process.stdout.write(`\n[gate ${spec.name}] ${spec.prompt}\n`);
-    process.stdout.write(`Enter 'pass' or 'fail' on the first line, then notes, then 'EOF' on its own line:\n`);
+    // Serialize sequential calls so we never race on the readline interface.
+    const myTurn = this.inFlight.then(() => this.runOne(spec));
+    this.inFlight = myTurn.catch(() => undefined);
+    return myTurn;
+  }
 
-    const lines = await readLinesUntilTerminator(spec.signal);
-    if (lines.length === 0) {
+  private async runOne(spec: {
+    name: string;
+    prompt: string;
+    signal?: AbortSignal;
+  }): Promise<GateInput> {
+    if (spec.signal?.aborted) throw new Error("aborted");
+
+    this.output.write(`\n[gate ${spec.name}] ${spec.prompt}\n`);
+    this.output.write(
+      `Enter 'pass' or 'fail' on the first line, then notes, then '.' on its own line:\n`,
+    );
+
+    this.ensureReadline();
+
+    const collected: string[] = [];
+    while (true) {
+      if (spec.signal?.aborted) throw new Error("aborted");
+      const line = await this.nextLine(spec.signal);
+      if (line === null) break; // stream closed
+      if (line.trim() === ".") break;
+      collected.push(line);
+    }
+
+    if (collected.length === 0) {
       throw new Error(`gate ${spec.name}: no input received`);
     }
 
-    const verdictLine = lines[0].trim().toLowerCase();
+    const verdictLine = collected[0].trim().toLowerCase();
     if (verdictLine !== "pass" && verdictLine !== "fail") {
       throw new Error(
-        `gate ${spec.name}: expected 'pass' or 'fail' as first line, got '${lines[0]}'`,
+        `gate ${spec.name}: expected 'pass' or 'fail' as first line, got '${collected[0]}'`,
       );
     }
     const verdict: GateVerdict = verdictLine;
-    const notes = lines.slice(1).join("\n").trim();
-
+    const notes = collected.slice(1).join("\n").trim();
     return { verdict, notes };
   }
-}
 
-/**
- * Reads stdin line by line until a single line "EOF" appears (or stdin closes).
- * Cancels and rejects when the signal aborts.
- */
-function readLinesUntilTerminator(signal?: AbortSignal): Promise<string[]> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new Error("aborted"));
-      return;
-    }
-
-    const lines: string[] = [];
-    let buffer = "";
-
-    const onAbort = () => {
-      cleanup();
-      reject(new Error("aborted"));
-    };
-
-    const onData = (chunk: Buffer | string) => {
-      buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      while (true) {
-        const nl = buffer.indexOf("\n");
-        if (nl === -1) break;
-        const line = buffer.slice(0, nl);
-        buffer = buffer.slice(nl + 1);
-        if (line.trim() === "EOF") {
-          cleanup();
-          resolve(lines);
-          return;
-        }
-        lines.push(line);
+  private ensureReadline(): void {
+    if (this.rl) return;
+    this.rl = createInterface({ input: this.input, output: this.output, terminal: false });
+    this.rl.on("line", (line) => {
+      if (this.waiter) {
+        const w = this.waiter;
+        this.waiter = null;
+        w(line);
+      } else {
+        this.buffered.push(line);
       }
-    };
-
-    const onEnd = () => {
-      // Treat any remaining buffered text as a final unterminated line, then resolve.
-      if (buffer.length > 0) {
-        const tail = buffer;
-        buffer = "";
-        if (tail.trim() !== "EOF") lines.push(tail);
+    });
+    this.rl.once("close", () => {
+      this.closed = true;
+      if (this.waiter) {
+        const w = this.waiter;
+        this.waiter = null;
+        w(null);
       }
-      cleanup();
-      resolve(lines);
-    };
+    });
+  }
 
-    const onError = (err: Error) => {
-      cleanup();
-      reject(err);
-    };
+  private nextLine(signal?: AbortSignal): Promise<string | null> {
+    if (this.buffered.length > 0) return Promise.resolve(this.buffered.shift()!);
+    if (this.closed) return Promise.resolve(null);
 
-    function cleanup() {
-      process.stdin.off("data", onData);
-      process.stdin.off("end", onEnd);
-      process.stdin.off("error", onError);
-      signal?.removeEventListener("abort", onAbort);
-    }
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        this.waiter = null;
+        signal?.removeEventListener("abort", onAbort);
+        reject(new Error("aborted"));
+      };
+      this.waiter = (line) => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve(line);
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
 
-    signal?.addEventListener("abort", onAbort, { once: true });
-    process.stdin.on("data", onData);
-    process.stdin.once("end", onEnd);
-    process.stdin.once("error", onError);
-  });
+  /** Close the underlying readline interface. Used by tests. */
+  close() {
+    this.rl?.close();
+    this.rl = null;
+  }
 }
