@@ -162,7 +162,7 @@ export interface PipelineResult {
 export async function runPipeline(
   pipeline: PipelineDef,
   initialInput: Record<string, unknown>,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud" }
+  options: StepRunnerOptions
 ): Promise<PipelineResult> {
   const startTime = Date.now();
   const stepRecords: StepRecord[] = [];
@@ -171,7 +171,7 @@ export async function runPipeline(
   let currentData = { ...initialInput };
   try {
     for (const step of pipeline.actions) {
-      currentData = await runStep(step, currentData, options as StepRunnerOptions, stepRecords);
+      currentData = await runStep(step, currentData, options, stepRecords);
     }
     return {
       success: true,

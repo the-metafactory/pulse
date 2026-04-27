@@ -126,7 +126,7 @@ const result = await runPipeline(
 // result.output has ALL fields from ALL actions
 ```
 
-**Iterate over collections** — pipelines support 5 composition primitives that let you process collections, fan out to parallel branches, and wrap steps with retry policies. Actions stay pure — they never know iteration is happening.
+**Compose with primitives** — pipelines support 6 composition primitives that let you process collections, fan out to parallel branches, wrap steps with retry policies, or pause for operator input. Actions stay pure — they never know composition is happening.
 
 | Primitive | Purpose | Key options |
 |-----------|---------|-------------|
@@ -135,6 +135,7 @@ const result = await runPipeline(
 | `reduce` | Sequentially fold items into an accumulator | `init`, `item_as`, `acc_as` |
 | `parallel` | Run named branches concurrently, merge outputs | `onError: stop\|collect`, AbortController cancellation |
 | `retry` | Wrap a sub-pipeline with retry + backoff policy | `attempts`, `backoff`, `on` (error types) |
+| `gate` | Pause for operator verdict (interactive H-step) | `name`, `prompt`, `timeout_ms?`, `collect?` |
 
 **YAML example** — filter, map with retry, reduce into a report:
 ```yaml
@@ -170,6 +171,20 @@ actions:
 
   - A_FORMAT_FINAL_REPORT
 ```
+
+**Interactive gates** — pause for operator verdict (used by journey-test specs):
+```yaml
+- A_DEPLOY_TO_STAGING
+- gate:
+    name: smoke-check
+    prompt: "Did staging come up clean? (pass/fail + notes)"
+    timeout_ms: 600000   # optional; omit for indefinite wait
+    collect: smoke_decision   # optional; default: gate_${name}
+- A_PROMOTE_TO_PROD
+```
+Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; the default `StdinGateProvider` reads pass/fail + notes from stdin. The result (`{ name, verdict, notes, opened_at, closed_at }`) is merged into upstream context under the `collect` field. `verdict: "fail"` halts the pipeline with a `StepFailure` carrying the operator's notes — there is no "fail but continue" branch yet; treat the gate as a hard stop. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can route them to traces; the verdict + notes are also captured on the corresponding `StepRecord` so callers without a hook still see them via `PipelineResult.steps`.
+
+Gate is the only leaf composition primitive (no nested `actions`). The other primitives wrap sub-pipelines; gate is a pause-and-collect terminal. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
 
 **Parallel branches** — fan out to heterogeneous work:
 ```yaml
@@ -271,11 +286,12 @@ The capability injection pattern means the same action code runs locally on Bun 
 - Pipeline primitive with passthrough pipe model
 - Pipeline YAML loader (declarative pipeline definitions)
 - Flow primitive: source → pipeline → destination with scheduling
-- **Iteration primitives: map, filter, reduce, parallel, retry** — functional composition for pipelines
+- **Composition primitives: map, filter, reduce, parallel, retry, gate** — functional + control-flow composition for pipelines
+- **Interactive gate primitive** — pause execution for operator verdict (pluggable GateProvider; default: stdin); emits gate.opened / gate.closed / gate.timeout events
 - Step-level validation at parse time (catches unknown step types before execution)
 - Partial output preservation on pipeline failure
 - AbortController-based cancellation for parallel branches
-- 135 tests across 13 files, tsc clean
+- 145 tests across 14 files, tsc clean
 
 ### Next
 - D/A/H step classification (from miner's trace types)
@@ -288,7 +304,7 @@ See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-r
 
 ```bash
 bun install
-bun test           # 135 tests across 13 files
+bun test           # 145 tests across 14 files
 bun run typecheck  # tsc --noEmit
 ```
 

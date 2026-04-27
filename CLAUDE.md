@@ -9,7 +9,7 @@ Process Execution Engine
 Pulse is the execution engine that animates processes in the metafactory ecosystem. Three composable primitives:
 
 1. **Action** — atomic unit of work with capability injection, runs locally (Bun) or on Cloudflare Workers
-2. **Pipeline** — chain of actions with passthrough pipe model + iteration primitives (map, filter, reduce, parallel, retry)
+2. **Pipeline** — chain of actions with passthrough pipe model + composition primitives (map, filter, reduce, parallel, retry, gate)
 3. **Flow** — source → pipeline → destination, with scheduling
 
 Plus a **Tree Runner** for non-linear dependency graph execution.
@@ -28,7 +28,7 @@ miner captures traces → metafactory distributes → arc installs → pulse exe
 
 - **Runtime:** Bun
 - **Language:** TypeScript (strict)
-- **Test:** `bun test` (135 tests across 13 files)
+- **Test:** `bun test` (145 tests across 14 files)
 - **Dependencies:** commander, zod, yaml
 
 ## Architecture
@@ -83,15 +83,16 @@ actions:
   - A_RECOMMEND
 ```
 
-### Iteration primitives
-Pipelines support 5 composition primitives that operate on collections while keeping actions pure:
+### Composition primitives
+Pipelines support 6 composition primitives that operate on collections or control execution while keeping actions pure:
 - **map** — apply a sub-pipeline to each item (`over`, `as`, `collect`, `concurrency`, `onError: stop|skip|collect`)
 - **filter** — keep items where sub-pipeline predicate is true (`keep_field`)
 - **reduce** — sequential fold with accumulator (`init`, `item_as`, `acc_as`)
 - **parallel** — run named branches concurrently, merge outputs (AbortController cancellation on failure)
 - **retry** — wrap sub-pipeline with backoff policy (`attempts`, `backoff: constant|linear|exponential`)
+- **gate** — pause for operator verdict (`name`, `prompt`, `timeout_ms?`, `collect?`); pluggable `GateProvider` (default: stdin); emits `gate.opened` / `gate.closed` / `gate.timeout` events via `onGateEvent`
 
-Types in `src/types/pipeline.ts`, dispatcher in `src/lib/step-runner.ts`. Design rationale in `docs/iteration-primitives.md`.
+Types in `src/types/pipeline.ts`, dispatcher in `src/lib/step-runner.ts`, gate provider in `src/lib/gate-provider.ts`. Design rationale in `docs/iteration-primitives.md`.
 
 ### Flow
 Flows connect source → pipeline → destination. Sources: inline, file, RSS, custom. Destinations: stdout, file, webhook, custom. Scheduling via interval or cron approximation.
@@ -99,7 +100,7 @@ Flows connect source → pipeline → destination. Sources: inline, file, RSS, c
 ## Key commands
 
 ```bash
-bun test              # Run all 135 tests
+bun test              # Run all 145 tests
 bun run typecheck     # TypeScript check
 bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
