@@ -155,11 +155,12 @@ features:
     description: "TransportPublisher/TransportSubscriber interfaces, NATSTransport, InMemoryTransport, DualWriteTransport. Shared package consumed by all ecosystem components. DD-69."
 
   - id: P-501
-    name: NATS-native cue consumer
+    name: cue.fired executor (subscribe-only, no trigger evaluation)
     status: planned
     iteration: 5
-    depends: [P-500, P-300]
-    description: "Pulse subscribes to mf.{network_id}.cue.> for cue events via JetStream. AckExplicit with backoff. DD-67 Stage 1."
+    issue: 12
+    depends: [P-500, P-300, cue:C-1]
+    description: "Pulse subscribes to mf.{network_id}.cue.fired via JetStream and executes the referenced flow — executor-only scope. Trigger evaluation lives in the cue daemon (cue:C-1), not in Pulse. AckExplicit with backoff. Closes the activation loop from DD-62 / DD-67 Stage 1."
 
   - id: P-502
     name: Cue.fired event publisher
