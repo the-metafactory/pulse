@@ -76,10 +76,11 @@ features:
 
   - id: P-207
     name: "CLI: pulse flow <name> command"
-    status: planned
+    status: done
     iteration: 2
+    issue: 6
     depends: [P-206, P-303]
-    description: "Add 'pulse flow <name>' CLI command that discovers installed flows from arc pipelines dir (~/.config/arc/pipelines/), loads their pipeline.yaml via runPipelineFromYaml, and executes. Bridges the gap between arc-installed metafactory-actions flows and pulse CLI."
+    description: "Add 'pulse flow <name>' CLI command that discovers installed flows from arc pipelines dir (~/.config/arc/pipelines/), loads their pipeline.yaml via runPipelineFromYaml, and executes. Bridges the gap between arc-installed metafactory-actions flows and pulse CLI. Shipped in PR #7 (2026-04-03): pulse flow list/run/--dry-run, discoverArcFlows() helper."
 
   - id: P-203
     name: Miner process import
