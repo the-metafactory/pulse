@@ -176,3 +176,18 @@ features:
     iteration: 5
     depends: [P-502]
     description: "Publish pulse.process.started/completed/failed events to NATS for Miner observability and Grove dashboard visibility."
+
+  # aPaaS: Marketplace composition (earned by usage — deferred until manual wiring reveals patterns)
+  - id: P-600
+    name: Myelin envelope integration
+    status: planned
+    iteration: 6
+    depends: [P-500, myelin:MY-102]
+    description: "Pulse actions produce and consume Myelin envelopes. Process events carry sovereignty metadata. Typed action contracts (P-200) extended to include envelope interface declarations when available. Prerequisite for marketplace job publishing."
+
+  - id: P-601
+    name: Job publishing to NATS
+    status: planned
+    iteration: 6
+    depends: [P-600, myelin:MY-101]
+    description: "Pulse publishes jobs to federated.{org}.{domain}.{capability}.request with Myelin envelope. Jobs include capability requirements, sovereignty constraints, and optional budget. First step toward marketplace pattern — manual wiring replaced by published requests."
