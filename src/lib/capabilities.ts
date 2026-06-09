@@ -56,6 +56,9 @@ export async function createLocalCapabilities(
  */
 function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLMResponse> {
   return async (prompt: string, options?: LLMOptions): Promise<LLMResponse> => {
+    const debug = process.env.PULSE_LLM_DEBUG === "1";
+    const log = (msg: string) => { if (debug) console.error(`[pulse:llm] ${msg}`); };
+
     // 1. Try claude -p (CC subscription — no per-token cost)
     const ccResult = await tryClaudeCLI(prompt, options);
     if (ccResult) return ccResult;
@@ -64,7 +67,9 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
     const inferPath = `${process.env.HOME}/.claude/PAI/Tools/Inference.ts`;
     try {
       const file = Bun.file(inferPath);
-      if (await file.exists()) {
+      if (!(await file.exists())) {
+        log(`stage2 skipped: ${inferPath} not found`);
+      } else {
         const { inference } = await import(inferPath);
         const tierMap = { fast: "fast", standard: "standard", smart: "smart" } as const;
         const result = await inference({
@@ -77,13 +82,15 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
         if (result.success) {
           return { text: result.output || "", json: result.parsed, usage: result.usage };
         }
+        log(`stage2 failed: ${result.error || "inference returned success=false"} (latency=${result.latencyMs}ms)`);
       }
-    } catch {
-      // PAI not available, fall through
+    } catch (err) {
+      log(`stage2 threw: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // 3. Fallback: direct Anthropic API
     let apiKey = process.env.ANTHROPIC_API_KEY;
+    let apiKeySource = apiKey ? "env:ANTHROPIC_API_KEY" : "";
     if (!apiKey) {
       for (const envPath of [
         `${process.cwd()}/.env`,
@@ -95,15 +102,19 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
           if (await envFile.exists()) {
             const content = await envFile.text();
             const match = content.match(/^ANTHROPIC_API_KEY=(.+)$/m);
-            if (match) { apiKey = match[1].trim(); break; }
+            if (match) { apiKey = match[1].trim(); apiKeySource = envPath; break; }
           }
-        } catch {}
+        } catch (_err) {
+          // .env unreadable or missing — try next candidate
+        }
       }
     }
 
     if (!apiKey) {
       throw new Error("LLM capability requires claude CLI, PAI Inference tool, or ANTHROPIC_API_KEY");
     }
+
+    log(`stage3: using API key from ${apiKeySource} (prefix=${apiKey.slice(0, 12)}…)`);
 
     const modelMap = { fast: "claude-haiku-4-5-20251001", standard: "claude-sonnet-4-6", smart: "claude-opus-4-6" } as const;
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -122,7 +133,7 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
     });
 
     if (!response.ok) {
-      throw new Error(`Anthropic API error: ${response.status}`);
+      throw new Error(`Anthropic API error: ${response.status} (key from ${apiKeySource})`);
     }
 
     const data = await response.json() as any;
@@ -156,11 +167,16 @@ const CLAUDE_CLI_TIMEOUT_MS = 180_000; // 3 minutes
  */
 async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMResponse | null> {
   const modelMap = { fast: "haiku", standard: "sonnet", smart: "opus" } as const;
+  const debug = process.env.PULSE_LLM_DEBUG === "1";
+  const log = (msg: string) => { if (debug) console.error(`[pulse:llm] ${msg}`); };
 
   // Resolve claude to absolute path to prevent PATH injection
   const whichProc = Bun.spawnSync(["which", "claude"], { stdout: "pipe" });
   const claudePath = whichProc.stdout.toString().trim();
-  if (!claudePath || whichProc.exitCode !== 0) return null;
+  if (!claudePath || whichProc.exitCode !== 0) {
+    log(`stage1 skipped: \`which claude\` failed (exit=${whichProc.exitCode})`);
+    return null;
+  }
 
   const args = [
     claudePath, "-p",
@@ -180,6 +196,9 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
   const cleanEnv = { ...process.env };
   delete cleanEnv.CLAUDECODE;
 
+  const startedAt = Date.now();
+  let timedOut = false;
+
   try {
     const proc = Bun.spawn(args, {
       stdout: "pipe",
@@ -188,19 +207,27 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
     });
 
     const timeout = setTimeout(() => {
+      timedOut = true;
       proc.kill();
       // Force kill if SIGTERM doesn't work after 5s
       const forceKill = setTimeout(() => proc.kill(9), 5_000);
       proc.exited.then(() => clearTimeout(forceKill));
     }, CLAUDE_CLI_TIMEOUT_MS);
 
-    const [rawStdout, exitCode] = await Promise.all([
+    const [rawStdout, rawStderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
       proc.exited,
     ]);
     clearTimeout(timeout);
 
-    if (exitCode !== 0) return null;
+    if (exitCode !== 0) {
+      const elapsed = Date.now() - startedAt;
+      const reason = timedOut ? `timeout after ${CLAUDE_CLI_TIMEOUT_MS}ms` : `exit=${exitCode}`;
+      const stderrTail = rawStderr.slice(-1000).trim();
+      log(`stage1 failed (${reason}, elapsed=${elapsed}ms, tier=${options?.tier || "fast"}, model=${modelMap[options?.tier || "fast"]})${stderrTail ? `\n  stderr: ${stderrTail}` : ""}`);
+      return null;
+    }
 
     // Extract from CC JSON wrapper: {"type":"result","result":"<content>"}
     const text = extractClaudeOutput(rawStdout);
@@ -217,8 +244,8 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
     }
 
     return { text, json };
-  } catch (_err) {
-    // claude CLI not installed or spawn failed — fall through to next provider
+  } catch (err) {
+    log(`stage1 spawn threw: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
