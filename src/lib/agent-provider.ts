@@ -13,9 +13,9 @@
  * correlation_id = task_id — that is the contract this provider awaits.
  */
 
-import type { AgentProvider, AgentTaskSpec, AgentTaskResult, AgentSovereignty } from "../types/agent";
+import type { AgentProvider, AgentTaskSpec, AgentTaskResult, AgentSovereignty, AgentDispatchOptions } from "../types/agent";
 
-export type { AgentProvider, AgentTaskSpec, AgentTaskResult, AgentSovereignty } from "../types/agent";
+export type { AgentProvider, AgentTaskSpec, AgentTaskResult, AgentSovereignty, AgentDispatchOptions } from "../types/agent";
 
 // ---------------------------------------------------------------------------
 // Transport seam — keeps NATS optional and tests hermetic
@@ -54,7 +54,15 @@ export class InMemoryAgentTransport implements AgentTransport {
     const matching = this.subs.filter((s) => subjectMatches(s.pattern, subject));
     for (const sub of matching) {
       // Async delivery preserves NATS semantics: publish never re-enters handlers.
-      queueMicrotask(() => sub.handler(subject, data));
+      queueMicrotask(() => {
+        try {
+          sub.handler(subject, data);
+        } catch (err) {
+          // Isolate a throwing handler so it can't disrupt sibling subscribers
+          // (NATS delivers per-subscription; one bad consumer ≠ bus failure).
+          console.error(`[pulse:transport] subscription handler threw on '${subject}':`, err);
+        }
+      });
     }
   }
 
@@ -157,9 +165,13 @@ export interface MyelinAgentProviderConfig {
   sovereigntyDefaults?: AgentSovereignty;
 }
 
+// Safe-by-default base: confidential-until-declared. data_residency is left
+// generic ("ZZ" = unknown per ISO 3166 user-assigned) so no deployment-specific
+// jurisdiction leaks into the shared codebase — each deployment sets its own
+// via `sovereigntyDefaults` (the SOC demo sets "CH").
 const SOVEREIGNTY_BASE: Required<AgentSovereignty> = {
   classification: "local",
-  data_residency: "CH",
+  data_residency: "ZZ",
   max_hop: 0,
   frontier_ok: false,
   model_class: "local-only",
@@ -187,6 +199,15 @@ export class MyelinAgentProvider implements AgentProvider {
   }
 
   taskSubject(spec: AgentTaskSpec): string {
+    // A capability maps onto subject tokens (dots are the token separator and
+    // legal: "soc.triage.email" → ...tasks.soc.triage.email). But NATS
+    // wildcards and whitespace would produce a malformed subject that fails
+    // opaquely on the wire — reject them at dispatch time instead.
+    if (/[*>\s]/.test(spec.capability) || spec.capability.split(".").some((t) => t.length === 0)) {
+      throw new Error(
+        `agent dispatch: capability '${spec.capability}' is not a valid subject fragment (no wildcards, whitespace, or empty tokens)`,
+      );
+    }
     const base = `local.${this.principal}.${this.stack}.tasks`;
     const mode = spec.distribution_mode ?? "offer";
     if (mode === "direct" || mode === "delegate") {
@@ -224,7 +245,7 @@ export class MyelinAgentProvider implements AgentProvider {
     };
   }
 
-  async dispatch(spec: AgentTaskSpec, opts: { signal?: AbortSignal } = {}): Promise<AgentTaskResult> {
+  async dispatch(spec: AgentTaskSpec, opts: AgentDispatchOptions = {}): Promise<AgentTaskResult> {
     const taskId = crypto.randomUUID();
     const startedAt = Date.now();
     const envelope = this.buildEnvelope(spec, taskId);
@@ -273,6 +294,10 @@ export class MyelinAgentProvider implements AgentProvider {
             }
             return this.transport.publish(subject, JSON.stringify(envelope));
           })
+          .then(() => {
+            // Task is on the wire — report the real id so observers can correlate.
+            opts.onDispatched?.({ task_id: taskId });
+          })
           .catch(reject);
       });
       return result;
@@ -301,10 +326,11 @@ export class MockAgentProvider implements AgentProvider {
     private opts: { delayMs?: number; failCapabilities?: string[] } = {},
   ) {}
 
-  async dispatch(spec: AgentTaskSpec, dispatchOpts: { signal?: AbortSignal } = {}): Promise<AgentTaskResult> {
+  async dispatch(spec: AgentTaskSpec, dispatchOpts: AgentDispatchOptions = {}): Promise<AgentTaskResult> {
     this.dispatched.push(spec);
     const taskId = crypto.randomUUID();
     const startedAt = Date.now();
+    dispatchOpts.onDispatched?.({ task_id: taskId });
 
     if (this.opts.delayMs) {
       await new Promise<void>((resolve, reject) => {

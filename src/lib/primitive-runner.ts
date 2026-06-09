@@ -748,17 +748,21 @@ async function runAgent(
   const dispatched_at = new Date().toISOString();
   let result: AgentTaskResult;
   try {
-    const dispatchPromise = provider.dispatch(taskSpec, { signal: controller.signal });
-    // Event carries the provider's task only after dispatch resolves; the
-    // dispatched event uses the step name as the stable identifier.
-    options.onAgentEvent?.({
-      type: "agent.dispatched",
-      name: spec.name,
-      capability: spec.capability,
-      task_id: "pending",
-      dispatched_at,
+    // The provider mints the task_id and reports it through onDispatched the
+    // moment the task hits the wire — so the dispatched event carries the real
+    // id and observers can correlate it with the completed/failed event.
+    result = await provider.dispatch(taskSpec, {
+      signal: controller.signal,
+      onDispatched: ({ task_id }) => {
+        options.onAgentEvent?.({
+          type: "agent.dispatched",
+          name: spec.name,
+          capability: spec.capability,
+          task_id,
+          dispatched_at,
+        });
+      },
     });
-    result = await dispatchPromise;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     cleanup();

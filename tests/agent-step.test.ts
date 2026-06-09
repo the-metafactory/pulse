@@ -144,6 +144,19 @@ describe("agent step", () => {
     expect(events.map((e) => e.type)).toEqual(["agent.dispatched", "agent.completed"]);
   });
 
+  test("dispatched event carries the real task_id, correlatable with completed", async () => {
+    const provider = new MockAgentProvider({ c: "ok" });
+    const events: AgentEvent[] = [];
+    const steps = [{ agent: { name: "t", capability: "c", prompt: "x" } }];
+
+    await runSteps(steps, {}, options({ agentProvider: provider, onAgentEvent: (e) => events.push(e) }));
+
+    const dispatched = events.find((e) => e.type === "agent.dispatched")!;
+    const completed = events.find((e) => e.type === "agent.completed")!;
+    expect(dispatched.task_id).not.toBe("pending");
+    expect(dispatched.task_id).toBe(completed.task_id); // correlation works
+  });
+
   test("records step in stepRecords as agent:{name}", async () => {
     const provider = new MockAgentProvider({ c: "ok" });
     const records: StepRecord[] = [];

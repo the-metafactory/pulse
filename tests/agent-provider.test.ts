@@ -120,6 +120,22 @@ describe("MyelinAgentProvider envelope", () => {
       /requires target_assistant/,
     );
   });
+
+  test("rejects capability with wildcard or whitespace (malformed subject)", () => {
+    const provider = makeProvider(new InMemoryAgentTransport());
+    expect(() => provider.taskSubject({ ...baseSpec, capability: "soc.*.email" })).toThrow(/not a valid subject/);
+    expect(() => provider.taskSubject({ ...baseSpec, capability: "soc triage" })).toThrow(/not a valid subject/);
+    expect(() => provider.taskSubject({ ...baseSpec, capability: "soc..email" })).toThrow(/not a valid subject/);
+    // dotted capabilities are legal — dots are the subject token separator
+    expect(provider.taskSubject({ ...baseSpec, capability: "soc.triage.email" })).toContain("tasks.soc.triage.email");
+  });
+
+  test("default sovereignty base carries no deployment-specific residency", () => {
+    const provider = makeProvider(new InMemoryAgentTransport());
+    const envelope = provider.buildEnvelope({ capability: "c", prompt: "p" }, "t1");
+    expect(envelope.sovereignty.data_residency).toBe("ZZ"); // generic, not "CH"
+    expect(envelope.sovereignty.model_class).toBe("local-only"); // safe-by-default
+  });
 });
 
 describe("MyelinAgentProvider dispatch", () => {

@@ -74,9 +74,19 @@ export interface AgentTaskResult {
  * dispatch() resolves with the task result (status "completed" or "failed");
  * it rejects only on transport errors and aborts. Step-level semantics
  * (raising StepFailure on status "failed") belong to the runner.
+ *
+ * The provider mints the task_id, so it reports it back through `onDispatched`
+ * the moment the task is on the wire — this is what lets the runner emit an
+ * `agent.dispatched` event that observers can correlate with `agent.completed`.
  */
+export interface AgentDispatchOptions {
+  signal?: AbortSignal;
+  /** Called once, with the minted task_id, immediately after the task is published. */
+  onDispatched?: (info: { task_id: string }) => void;
+}
+
 export interface AgentProvider {
-  dispatch(spec: AgentTaskSpec, opts?: { signal?: AbortSignal }): Promise<AgentTaskResult>;
+  dispatch(spec: AgentTaskSpec, opts?: AgentDispatchOptions): Promise<AgentTaskResult>;
 }
 
 // ---------------------------------------------------------------------------

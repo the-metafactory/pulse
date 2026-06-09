@@ -110,6 +110,16 @@ on a federated bus, at the replication boundary — myelin L2). Pulse declares,
 the bus enforces. See `examples/soc-triage/` for the full
 local→sanitize→frontier→human pattern, including the refusal path (`--violate`).
 
+> **The NATS subject ACLs are the actual confidentiality boundary.** The
+> sovereignty block is *policy that the fleet honors* — it is not encryption.
+> Payloads travel as plaintext JSON on the bus. A deployment carrying
+> confidential data MUST configure NATS account/subject permissions so that
+> only authorized consumers can subscribe to `local.{principal}.{stack}.tasks.>`
+> (and the dispatch lifecycle). Without subject ACLs, `model_class: local-only`
+> is policy theater — any bus client could read the very data the block exists
+> to protect. Envelope signing (ed25519, myelin L4) is out of scope for v1 on a
+> trusted local bus and becomes mandatory before federation.
+
 ## Transports
 
 - `InMemoryAgentTransport` — NATS-semantics pub/sub in-process. Tests and
