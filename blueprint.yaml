@@ -14,28 +14,28 @@ features:
     name: Topological scheduler
     status: done
     iteration: 1
-    depends: [P-100]
+    depends: [ P-100 ]
     description: "Dependency-aware scheduling, parallel readiness detection, cascade skip on failure"
 
   - id: P-102
     name: Node executor with retry and timeout
     status: done
     iteration: 1
-    depends: [P-101]
+    depends: [ P-101 ]
     description: "Per-node retry logic (0-10 attempts), timeout via Promise.race, timer cleanup"
 
   - id: P-103
     name: PulseRunner orchestrator
     status: done
     iteration: 1
-    depends: [P-101, P-102]
+    depends: [ P-101, P-102 ]
     description: "Main execution loop, event emission (node-start/complete/failed, tree-complete), parallel sibling execution"
 
   - id: P-104
     name: CLI skeleton
     status: done
     iteration: 1
-    depends: [P-103]
+    depends: [ P-103 ]
     description: "pulse validate / pulse run / pulse status commands via Commander.js"
 
   # Iteration 2: Pipe Model & Action Contract
@@ -43,35 +43,35 @@ features:
     name: Typed Action contract with capability injection
     status: done
     iteration: 2
-    depends: [P-103]
+    depends: [ P-103 ]
     description: "ActionManifest + ActionContext + capability injection (llm, fetch, shell, readFile, writeFile, kv). Adapted from Daniel Miessler's PAI Actions."
 
   - id: P-201
     name: Passthrough pipe model
     status: done
     iteration: 2
-    depends: [P-200]
+    depends: [ P-200 ]
     description: "Accumulating {...upstream, ...myFields} data flow — actions receive and forward all ancestor data"
 
   - id: P-202
     name: Pipeline primitive
     status: done
     iteration: 2
-    depends: [P-201]
+    depends: [ P-201 ]
     description: "runPipeline() chains actions linearly with pipe model. Per-step timing and error reporting."
 
   - id: P-205
     name: Local/cloud dispatch
     status: done
     iteration: 2
-    depends: [P-200]
+    depends: [ P-200 ]
     description: "runAction with mode local|cloud. Local uses Bun APIs, cloud dispatches to Cloudflare Worker via HTTPS POST."
 
   - id: P-206
     name: Pipeline YAML loader
     status: done
     iteration: 2
-    depends: [P-202]
+    depends: [ P-202 ]
     description: "loadPipeline(), runPipelineFromYaml(), discoverPipelines(). Loads pipeline.yaml, resolves actions from bundled directory."
 
   - id: P-207
@@ -79,14 +79,14 @@ features:
     status: done
     iteration: 2
     issue: 6
-    depends: [P-206, P-303]
+    depends: [ P-206, P-303 ]
     description: "Add 'pulse flow <name>' CLI command that discovers installed flows from arc pipelines dir (~/.config/arc/pipelines/), loads their pipeline.yaml via runPipelineFromYaml, and executes. Bridges the gap between arc-installed metafactory-actions flows and pulse CLI. Shipped in PR #7 (2026-04-03): pulse flow list/run/--dry-run, discoverArcFlows() helper."
 
   - id: P-203
     name: Miner process import
     status: planned
     iteration: 3
-    depends: [P-206, miner:M-301]
+    depends: [ P-206, miner:M-301 ]
     description: "Accept miner's composed process format and map it to pulse pipeline definitions"
 
   # Iteration 3: Flow Orchestration & Ecosystem Integration
@@ -94,35 +94,35 @@ features:
     name: Flow primitive with scheduling
     status: done
     iteration: 3
-    depends: [P-202]
+    depends: [ P-202 ]
     description: "runFlow() + scheduleFlow() + loadFlow(). Source adapters (inline, file, RSS, custom), destination adapters (stdout, file, webhook, custom), interval scheduling."
 
   - id: P-301
     name: D/A/H step classification
     status: planned
     iteration: 3
-    depends: [P-200, miner:M-103, P-304]
+    depends: [ P-200, miner:M-103, P-304 ]
     description: "Respect miner's Deterministic/Agentic/Human-gate classification — auto-execute D, delegate A, pause at H. The H-gate primitive is implemented in P-304; this feature wires miner's classification into the dispatcher."
 
   - id: P-304
     name: Interactive gate primitive
     status: done
     iteration: 3
-    depends: [P-202]
+    depends: [ P-202 ]
     description: "gate pipeline step that pauses execution for operator verdict + notes, with pluggable GateProvider (default: stdin), per-gate timeout, and gate.opened/closed/timeout lifecycle events. Unblocks meta-factory#412 (interactive journey-test runner). GH issue #9."
 
   - id: P-302
     name: Trace emission (JSONL)
     status: planned
     iteration: 3
-    depends: [P-103, miner:M-101]
+    depends: [ P-103, miner:M-101 ]
     description: "Every execution emits JSONL traces that miner can re-ingest — closing the feedback loop"
 
   - id: P-303
     name: Arc package integration
     status: done
     iteration: 3
-    depends: [P-200, arc:A-101]
+    depends: [ P-200, arc:A-101 ]
     description: "discoverArcActions(), discoverArcPipelines(), createArcActionDirs(). Reads arc's SQLite DB, scans repos for actions."
 
   # Iteration 4: Runtime & Distribution
@@ -130,21 +130,21 @@ features:
     name: Runtime-agnostic adapter layer
     status: planned
     iteration: 4
-    depends: [P-300]
+    depends: [ P-300 ]
     description: "Abstract execution target — run same pipeline on Bun, Node, Cloudflare Workers, or Deno"
 
   - id: P-401
     name: Grove event bridge
     status: planned
     iteration: 4
-    depends: [P-302, grove:G-101]
+    depends: [ P-302, grove:G-101 ]
     description: "Publish execution events to Grove for multi-agent visibility and human-in-the-loop via Discord/Mattermost. Design note: P-302's JSONL events (beat-start/complete/failed, pulse-complete) are natural Grove relay signals — Grove can pipe execution status to dashboards and Discord without Pulse knowing about destinations. Also support programmatic invocation so Grove can trigger Pulse executions on behalf of agents."
 
   - id: P-402
     name: Metafactory process runner
     status: planned
     iteration: 4
-    depends: [P-303, meta-factory:F3-300]
+    depends: [ P-303, meta-factory:F3-300 ]
     description: "Execute processes published on metafactory marketplace — the end-to-end lifecycle"
 
   # Iteration 5: NATS Message Bus (DD-67, DD-69, DD-71 Stage 1)
@@ -152,7 +152,7 @@ features:
     name: Transport abstraction layer (shared package)
     status: planned
     iteration: 5
-    depends: [P-103]
+    depends: [ P-103 ]
     description: "TransportPublisher/TransportSubscriber interfaces, NATSTransport, InMemoryTransport, DualWriteTransport. Shared package consumed by all ecosystem components. DD-69."
 
   - id: P-501
@@ -160,34 +160,34 @@ features:
     status: planned
     iteration: 5
     issue: 12
-    depends: [P-500, P-300, cue:C-1]
+    depends: [ P-500, P-300, cue:C-1 ]
     description: "Pulse subscribes to mf.{network_id}.cue.fired via JetStream and executes the referenced flow — executor-only scope. Trigger evaluation lives in the cue daemon (cue:C-1), not in Pulse. AckExplicit with backoff. Closes the activation loop from DD-62 / DD-67 Stage 1."
 
   - id: P-502
     name: Cue.fired event publisher
     status: planned
     iteration: 5
-    depends: [P-501]
+    depends: [ P-501 ]
     description: "Pulse publishes cue.fired events to mf.{network_id}.cue.fired with CloudEvents envelope (DD-68). Closes the activation loop from DD-62."
 
   - id: P-503
     name: Process execution events on bus
     status: planned
     iteration: 5
-    depends: [P-502]
+    depends: [ P-502 ]
     description: "Publish pulse.process.started/completed/failed events to NATS for Miner observability and Grove dashboard visibility."
 
   # aPaaS: Marketplace composition (earned by usage — deferred until manual wiring reveals patterns)
   - id: P-600
     name: Myelin envelope integration
-    status: in-progress
+    status: done
     iteration: 6
-    depends: [P-500, myelin:MY-102]
+    depends: [ P-500, myelin:MY-102 ]
     description: "Pulse actions produce and consume Myelin envelopes. Process events carry sovereignty metadata. Typed action contracts (P-200) extended to include envelope interface declarations when available. Prerequisite for marketplace job publishing."
 
   - id: P-601
     name: Job publishing to NATS
-    status: in-progress
+    status: done
     iteration: 6
-    depends: [P-600, myelin:MY-101]
+    depends: [ P-600, myelin:MY-101 ]
     description: "Pulse publishes jobs to federated.{org}.{domain}.{capability}.request with Myelin envelope. Jobs include capability requirements, sovereignty constraints, and optional budget. First step toward marketplace pattern — manual wiring replaced by published requests."
