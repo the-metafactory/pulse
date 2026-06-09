@@ -8,6 +8,8 @@
  * Pulse generalizes this into the metafactory ecosystem's execution engine.
  */
 
+import type { AgentTaskSpec, AgentTaskResult } from "./agent";
+
 // ---------------------------------------------------------------------------
 // Capabilities — what actions can request from the runtime
 // ---------------------------------------------------------------------------
@@ -15,6 +17,14 @@
 export interface ActionCapabilities {
   /** LLM inference — prompt in, response out */
   llm?: (prompt: string, options?: LLMOptions) => Promise<LLMResponse>;
+
+  /**
+   * Agent task dispatch — capability-addressed, sovereignty-constrained work
+   * executed by the fleet (myelin envelopes over NATS). Unlike `llm` (a
+   * synchronous, stateless completion), an agent task is routed by the bus
+   * and tracked through the dispatch lifecycle. See src/types/agent.ts.
+   */
+  agent?: (task: AgentTaskSpec) => Promise<AgentTaskResult>;
 
   /** HTTP fetch */
   fetch?: typeof globalThis.fetch;
@@ -36,7 +46,7 @@ export interface ActionCapabilities {
   };
 }
 
-export type CapabilityName = "llm" | "fetch" | "shell" | "readFile" | "writeFile" | "kv";
+export type CapabilityName = "llm" | "agent" | "fetch" | "shell" | "readFile" | "writeFile" | "kv";
 
 export interface LLMOptions {
   /** Model tier: fast (haiku), standard (sonnet), smart (opus) */

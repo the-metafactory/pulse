@@ -84,15 +84,19 @@ actions:
 ```
 
 ### Composition primitives
-Pipelines support 6 composition primitives that operate on collections or control execution while keeping actions pure:
+Pipelines support 7 composition primitives that operate on collections or control execution while keeping actions pure:
 - **map** — apply a sub-pipeline to each item (`over`, `as`, `collect`, `concurrency`, `onError: stop|skip|collect`)
 - **filter** — keep items where sub-pipeline predicate is true (`keep_field`)
 - **reduce** — sequential fold with accumulator (`init`, `item_as`, `acc_as`)
 - **parallel** — run named branches concurrently, merge outputs (AbortController cancellation on failure)
 - **retry** — wrap sub-pipeline with backoff policy (`attempts`, `backoff: constant|linear|exponential`)
 - **gate** — pause for operator verdict (`name`, `prompt`, `timeout_ms?`, `collect?`); pluggable `GateProvider` (default: stdin); emits `gate.opened` / `gate.closed` / `gate.timeout` events via `onGateEvent`
+- **agent** — dispatch an LLM/agent task to the fleet (`name`, `capability`, `prompt` template, `sovereignty?`, `timeout_ms?`, `collect?`); pluggable `AgentProvider` (no default — fail fast); `MyelinAgentProvider` publishes myelin v3 task envelopes over NATS and awaits the dispatch lifecycle; emits `agent.dispatched` / `agent.completed` / `agent.failed` / `agent.timeout` via `onAgentEvent`
 
-Types in `src/types/pipeline.ts`, dispatcher in `src/lib/step-runner.ts`, gate provider in `src/lib/gate-provider.ts`. Design rationale in `docs/iteration-primitives.md`.
+Types in `src/types/pipeline.ts` + `src/types/agent.ts`, dispatcher in `src/lib/step-runner.ts`, gate provider in `src/lib/gate-provider.ts`, agent providers in `src/lib/agent-provider.ts`. Design rationale in `docs/iteration-primitives.md` and `docs/agent-actions.md`.
+
+### Agent actions (D/A/H complete)
+Miner's step taxonomy maps 1:1 to pipeline steps: **D**eterministic = action, **A**gentic = `agent:`, **H**uman = `gate:`. Agent tasks are capability-addressed (`soc.triage.email`), sovereignty-constrained (`model_class: local-only` keeps confidential data off frontier models), and travel as myelin envelopes on `local.{principal}.{stack}.tasks.{capability}`. Pulse never talks to agents directly — it asks the bus. The `agent` capability (`requires: ["agent"]`) gives actions programmatic dispatch via `ctx.capabilities.agent(taskSpec)`. Demo: `examples/soc-triage/`.
 
 ### Flow
 Flows connect source → pipeline → destination. Sources: inline, file, RSS, custom. Destinations: stdout, file, webhook, custom. Scheduling via interval or cron approximation.

@@ -41,6 +41,26 @@ export type {
   GateEvent,
 } from "./types/pipeline";
 export { StdinGateProvider } from "./lib/gate-provider";
+
+// Agent actions (iteration 6, P-600/P-601) — fleet tasks via myelin envelopes
+export type {
+  AgentStepSpec,
+  AgentSovereignty,
+  AgentTaskSpec,
+  AgentTaskResult,
+  AgentProvider,
+  AgentEvent,
+} from "./types/agent";
+export {
+  MyelinAgentProvider,
+  MockAgentProvider,
+  InMemoryAgentTransport,
+  NatsAgentTransport,
+  encodeDidSegment,
+  subjectMatches,
+} from "./lib/agent-provider";
+export type { AgentTransport, MyelinAgentProviderConfig, MyelinEnvelope } from "./lib/agent-provider";
+export { renderPromptTemplate } from "./lib/primitive-runner";
 export { createLocalCapabilities, createCloudCapabilities } from "./lib/capabilities";
 export type {
   ActionCapabilities,

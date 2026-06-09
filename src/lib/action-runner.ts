@@ -16,6 +16,7 @@ import type {
   ActionContext,
   ActionResult,
 } from "../types/action";
+import type { AgentProvider } from "../types/agent";
 
 export interface ActionRunnerOptions {
   /** Directories to search for actions (checked in order, first match wins) */
@@ -24,6 +25,12 @@ export interface ActionRunnerOptions {
   defaultMode?: "local" | "cloud";
   /** Cloud worker URL pattern. Use {name} as placeholder. */
   cloudUrlPattern?: string;
+  /**
+   * Agent task dispatcher, injected as the `agent` capability for actions
+   * that declare `requires: ["agent"]`. Also consumed by `agent:` pipeline
+   * steps. No default — a missing provider fails fast at execution time.
+   */
+  agentProvider?: AgentProvider;
 }
 
 /**
@@ -99,6 +106,19 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
 
     // Create capabilities for what this action needs
     const capabilities = await createLocalCapabilities(manifest.requires);
+
+    // Agent dispatch comes from the host-configured provider, not the
+    // environment — same injection rule as every other capability.
+    if (manifest.requires?.includes("agent")) {
+      const provider = options.agentProvider;
+      if (!provider) {
+        return {
+          success: false,
+          error: `Action ${name} requires 'agent' capability but no agentProvider is configured`,
+        };
+      }
+      capabilities.agent = (task) => provider.dispatch(task);
+    }
 
     const ctx: ActionContext = {
       capabilities,

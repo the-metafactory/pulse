@@ -1,0 +1,20 @@
+From: "SWITCH IT-Support" <it-support@swiitch-security-portal.net>
+To: anna.muster@example-university.ch
+Subject: Dringend: Ihr Hochschul-Konto wird in 24 Stunden gesperrt
+Date: Mon, 8 Jun 2026 14:32:11 +0200
+
+Sehr geehrte/r Mitarbeiter/in,
+
+unser Sicherheitssystem hat ungewoehnliche Anmeldeaktivitaeten auf Ihrem
+Konto festgestellt. Um eine Sperrung zu vermeiden, bestaetigen Sie bitte
+innerhalb von 24 Stunden Ihre Zugangsdaten:
+
+    https://swiitch-security-portal.net/sso/verify?token=a8f3e2
+
+Alternativ koennen Sie das Sicherheitsupdate direkt herunterladen:
+
+    http://cdn.update-mirror.ru/swiss-edu/SecurityUpdate.exe
+    (SHA-256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855)
+
+Mit freundlichen Gruessen
+IT-Support Team

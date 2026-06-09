@@ -17,7 +17,6 @@
 import { readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { parse as parseYaml } from "yaml";
-import type { ActionRunnerOptions } from "./action-runner";
 import { runStep, validateSteps, type StepRecord, type StepRunnerOptions } from "./step-runner";
 import type { PipelineStep } from "../types/pipeline";
 
@@ -91,9 +90,8 @@ export async function loadPipeline(yamlPath: string): Promise<{
 export async function runPipelineFromYaml(
   yamlPath: string,
   initialInput: Record<string, unknown>,
-  options: Omit<ActionRunnerOptions, "actionDirs"> & {
+  options: Omit<StepRunnerOptions, "actionDirs"> & {
     actionDirs?: string[];
-    mode?: "local" | "cloud";
   }
 ): Promise<PipelineResult> {
   const { pipeline, baseDir } = await loadPipeline(yamlPath);

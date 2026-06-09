@@ -1,0 +1,66 @@
+# P_PHISH_TRIAGE — CommunitySOC phishing triage with sovereignty-routed agents.
+#
+# The D/A/H taxonomy, literal:
+#   D (deterministic)  = plain actions        (A_SANITIZE_IOCS, A_PUBLISH_ADVISORY)
+#   A (agentic)        = `agent:` steps       (triage local-only, enrich frontier-ok)
+#   H (human)          = `gate:` step         (analyst verdict)
+#
+# Sovereignty is the plot: the raw member email never reaches a frontier
+# model (model_class: local-only, frontier_ok: false). Only after the
+# deterministic sanitize step strips PII may a frontier model see the IOCs.
+
+name: P_PHISH_TRIAGE
+description: Triage a reported phishing email — local LLM on raw mail, frontier model on sanitized IOCs, analyst gate before publishing.
+
+actions:
+  # A — confidential: raw email analyzed by a LOCAL model only
+  - agent:
+      name: triage
+      capability: soc.triage.email
+      prompt: |
+        You are a SOC analyst. Analyze this reported phishing email.
+        Extract IOCs (URLs, domains, sender addresses, hashes) and classify
+        the email (phishing / spam / benign) with confidence 0-1.
+        Respond as JSON: { "verdict", "confidence", "iocs": { "urls", "domains", "senders" }, "summary" }
+
+        Email:
+        {email_raw}
+      sovereignty:
+        classification: local
+        data_residency: CH
+        model_class: local-only
+        frontier_ok: false
+      timeout_ms: 120000
+      collect: triage
+
+  # D — deterministic: strip PII, keep only shareable IOCs
+  - A_SANITIZE_IOCS
+
+  # A — shareable: sanitized IOCs may go to a frontier model
+  - agent:
+      name: enrich
+      capability: soc.enrich.iocs
+      prompt: |
+        You are a threat intelligence analyst for a national research network SOC.
+        Enrich these IOCs (known campaigns, infrastructure patterns, TTPs) and
+        draft a short community advisory (EN) for SOC members.
+        Respond as JSON: { "enrichment", "advisory" }
+
+        IOCs (sanitized, no member data):
+        {iocs_sanitized}
+      sovereignty:
+        classification: local
+        data_residency: CH
+        model_class: any
+        frontier_ok: true
+      timeout_ms: 120000
+      collect: enrichment
+
+  # H — human: analyst approves before anything leaves the SOC
+  - gate:
+      name: analyst-approval
+      prompt: "Advisory drafted from enriched IOCs. Publish to the community? (verdict + notes)"
+      collect: approval
+
+  # D — deterministic: publish
+  - A_PUBLISH_ADVISORY
