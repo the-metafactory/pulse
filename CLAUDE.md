@@ -28,7 +28,7 @@ miner captures traces → metafactory distributes → arc installs → pulse exe
 
 - **Runtime:** Bun
 - **Language:** TypeScript (strict)
-- **Test:** `bun test` (145 tests across 14 files)
+- **Test:** `bun test` (191 tests across 16 files)
 - **Dependencies:** commander, zod, yaml
 
 ## Architecture
@@ -63,10 +63,10 @@ src/
 Actions are `action.json` (manifest) + `action.ts` (implementation) pairs. The manifest declares required capabilities; the runtime injects them. Same code runs locally or on Workers.
 
 ### Passthrough pattern
-Actions destructure what they need, spread the rest as `upstream`:
+Actions destructure what they need, spread the rest as `payload`:
 ```typescript
-const { content, ...upstream } = input;
-return { ...upstream, summary: result.text };
+const { content, ...payload } = input;
+return { ...payload, summary: result.text };
 ```
 
 ### Capability injection
@@ -104,7 +104,7 @@ Flows connect source → pipeline → destination. Sources: inline, file, RSS, c
 ## Key commands
 
 ```bash
-bun test              # Run all 145 tests
+bun test              # Run all 191 tests
 bun run typecheck     # TypeScript check
 bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo

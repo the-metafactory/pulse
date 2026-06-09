@@ -86,12 +86,12 @@ For composable, portable actions that run locally or in the cloud:
 ```typescript
 export default {
   async execute(input, ctx) {
-    const { content, ...upstream } = input;
+    const { content, ...payload } = input;
     const result = await ctx.capabilities.llm!(content, {
       system: "Summarize in 2-3 sentences.",
       tier: "fast",
     });
-    return { ...upstream, summary: result.text };
+    return { ...payload, summary: result.text };
   },
 };
 ```
@@ -126,7 +126,7 @@ const result = await runPipeline(
 // result.output has ALL fields from ALL actions
 ```
 
-**Compose with primitives** — pipelines support 6 composition primitives that let you process collections, fan out to parallel branches, wrap steps with retry policies, or pause for operator input. Actions stay pure — they never know composition is happening.
+**Compose with primitives** — pipelines support 7 composition primitives that let you process collections, fan out to parallel branches, wrap steps with retry policies, pause for operator input, or dispatch an agent task to the fleet. Actions stay pure — they never know composition is happening.
 
 | Primitive | Purpose | Key options |
 |-----------|---------|-------------|
@@ -136,6 +136,9 @@ const result = await runPipeline(
 | `parallel` | Run named branches concurrently, merge outputs | `onError: stop\|collect`, AbortController cancellation |
 | `retry` | Wrap a sub-pipeline with retry + backoff policy | `attempts`, `backoff`, `on` (error types) |
 | `gate` | Pause for operator verdict (interactive H-step) | `name`, `prompt`, `timeout_ms?`, `collect?` |
+| `agent` | Dispatch an LLM/agent task to the fleet (agentic A-step) | `capability`, `prompt`, `sovereignty?`, `timeout_ms?`, `collect?` |
+
+The three step kinds map onto miner's D/A/H process taxonomy: **D**eterministic = action, **A**gentic = `agent`, **H**uman = `gate`. Agent tasks travel as myelin envelopes over NATS via a pluggable `AgentProvider` — see [`docs/agent-actions.md`](docs/agent-actions.md) and [`examples/soc-triage/`](examples/soc-triage/).
 
 **YAML example** — filter, map with retry, reduce into a report:
 ```yaml
@@ -182,7 +185,7 @@ actions:
     collect: smoke_decision   # optional; default: gate_${name}
 - A_PROMOTE_TO_PROD
 ```
-Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; the default `StdinGateProvider` reads pass/fail + notes from stdin. The result (`{ name, verdict, notes, opened_at, closed_at }`) is merged into upstream context under the `collect` field. `verdict: "fail"` halts the pipeline with a `StepFailure` carrying the operator's notes — there is no "fail but continue" branch yet; treat the gate as a hard stop. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can route them to traces; the verdict + notes are also captured on the corresponding `StepRecord` so callers without a hook still see them via `PipelineResult.steps`.
+Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; the default `StdinGateProvider` reads pass/fail + notes from stdin. The result (`{ name, verdict, notes, opened_at, closed_at }`) is merged into payload context under the `collect` field. `verdict: "fail"` halts the pipeline with a `StepFailure` carrying the operator's notes — there is no "fail but continue" branch yet; treat the gate as a hard stop. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can route them to traces; the verdict + notes are also captured on the corresponding `StepRecord` so callers without a hook still see them via `PipelineResult.steps`.
 
 Gate is the only leaf composition primitive (no nested `actions`). The other primitives wrap sub-pipelines; gate is a pause-and-collect terminal. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
 
@@ -291,7 +294,7 @@ The capability injection pattern means the same action code runs locally on Bun 
 - Step-level validation at parse time (catches unknown step types before execution)
 - Partial output preservation on pipeline failure
 - AbortController-based cancellation for parallel branches
-- 145 tests across 14 files, tsc clean
+- 191 tests across 16 files, tsc clean
 
 ### Next
 - D/A/H step classification (from miner's trace types)
@@ -304,7 +307,7 @@ See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-r
 
 ```bash
 bun install
-bun test           # 145 tests across 14 files
+bun test           # 191 tests across 16 files
 bun run typecheck  # tsc --noEmit
 ```
 
