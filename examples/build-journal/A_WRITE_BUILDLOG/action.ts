@@ -33,6 +33,14 @@ interface ManifestEntry {
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** Truncate at a word boundary with an ellipsis — no mid-word cuts in meta descriptions or excerpts. */
+function excerptOf(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > max * 0.6 ? lastSpace : max).trimEnd()}…`;
+}
+
 function pageShell(title: string, description: string, body: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -99,7 +107,7 @@ ${e.additions.length ? `      <ul>\n${additions}\n      </ul>` : ""}
       </ul>
       <p class="meta">Active repos: ${e.stats.active_repos.map(esc).join(", ")}</p>
     </article>`;
-  return pageShell(e.headline, e.narrative.slice(0, 150), body);
+  return pageShell(e.headline, excerptOf(e.narrative, 150), body);
 }
 
 function indexPage(entries: ManifestEntry[]): string {
@@ -155,7 +163,7 @@ export default {
       date: e.date,
       slug: e.slug,
       headline: e.headline,
-      excerpt: e.narrative.slice(0, 220),
+      excerpt: excerptOf(e.narrative, 220),
     };
     manifest = [record, ...manifest.filter((m) => m.slug !== e.slug)].sort((a, b) => b.date.localeCompare(a.date));
 
