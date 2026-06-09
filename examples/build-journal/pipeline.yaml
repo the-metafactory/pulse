@@ -79,3 +79,6 @@ actions:
 
   # D — write the entry into the myelin-cortex-site build log
   - A_WRITE_BUILDLOG
+
+  # D — commit + push + wrangler deploy (skipped unless --deploy)
+  - A_DEPLOY_SITE

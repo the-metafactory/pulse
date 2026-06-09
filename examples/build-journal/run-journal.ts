@@ -7,6 +7,7 @@
  *   bun examples/build-journal/run-journal.ts --live         # real NATS bus (localhost:4222), simulated agents
  *   bun examples/build-journal/run-journal.ts --no-fleet     # real fleets claim the tasks (needs andreas' stack federated)
  *   bun examples/build-journal/run-journal.ts --post         # actually post to Discord (public!)
+ *   bun examples/build-journal/run-journal.ts --deploy       # commit+push site repo, wrangler deploy (public!)
  *   bun examples/build-journal/run-journal.ts --interactive  # type the editor gate verdict yourself
  *   bun examples/build-journal/run-journal.ts --days 14      # journal period (default 7)
  *
@@ -37,6 +38,7 @@ const live = args.has("--live");
 const useLLM = args.has("--llm");
 const noFleet = args.has("--no-fleet");
 const post = args.has("--post");
+const deploy = args.has("--deploy");
 const interactive = args.has("--interactive");
 const daysIdx = argv.indexOf("--days");
 const days = daysIdx >= 0 ? Number(argv[daysIdx + 1]) || 7 : 7;
@@ -84,7 +86,15 @@ async function main() {
   banner("Running P_BUILD_JOURNAL");
   const result = await runPipelineFromYaml(
     join(import.meta.dir, "pipeline.yaml"),
-    { days, discord_post: post, discord_channel: process.env.DISCORD_CHANNEL ?? "general" },
+    {
+      days,
+      discord_post: post,
+      site_deploy: deploy,
+      // Without --deploy, pages land in a local preview dir — demo runs must
+      // never dirty the site repo (a later --deploy would ship stale content).
+      ...(deploy ? {} : { site_dir: join(import.meta.dir, "preview-site") }),
+      discord_channel: process.env.DISCORD_CHANNEL ?? "general",
+    },
     {
       agentProvider,
       gateProvider: interactive ? new StdinGateProvider() : new AutoGateProvider(),

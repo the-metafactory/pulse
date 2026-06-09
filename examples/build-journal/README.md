@@ -52,8 +52,12 @@ his real fleet claims `ecosystem.perspective` over the leaf node.
   to teaser+link: the build-log page is the long form.
 - **Build log** — writes `build-log/{date}-build-journal.html` plus a
   regenerated index into `~/work/mf/myelin-cortex-site` (same stylesheet and
-  markup as the site's blog). `entries.json` is the manifest. Deploy stays a
-  human step: preview, then ship the site with wrangler.
+  markup as the site's blog). `entries.json` is the manifest.
+- **Deploy** — `--deploy` runs `A_DEPLOY_SITE`: commit new build-log content
+  in the site repo (no-op when clean), push, then `bun run deploy` (wrangler
+  → Cloudflare Pages → stack.meta-factory.ai). Opt-in like `--post`:
+  publishing is an explicit decision, never a side effect. Needs a
+  wrangler-authenticated environment.
 
 Every entry carries provenance: which agent drafted, which agent answered
 over federation, which gate approved, which pipeline assembled.

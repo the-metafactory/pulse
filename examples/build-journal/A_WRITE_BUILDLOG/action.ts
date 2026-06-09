@@ -145,10 +145,6 @@ export default {
     }
 
     const siteDir = (site_dir as string | undefined) ?? `${process.env.HOME}/work/mf/myelin-cortex-site`;
-    const check = await shell(`test -d '${siteDir}' && echo yes || echo no`);
-    if (check.stdout.trim() !== "yes") {
-      throw new Error(`A_WRITE_BUILDLOG: site directory not found: ${siteDir}`);
-    }
     const dir = `${siteDir}/build-log`;
     await shell(`mkdir -p '${dir}'`);
 

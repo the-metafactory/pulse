@@ -1,0 +1,14 @@
+{
+  "name": "A_DEPLOY_SITE",
+  "version": "1.0.0",
+  "description": "Ship the build log: commit new build-log content in the site repo, push, and deploy via wrangler (Cloudflare Pages). Skipped unless site_deploy is true — publishing stays an explicit decision",
+  "input": {
+    "site_deploy": { "type": "boolean" },
+    "site_dir": { "type": "string" }
+  },
+  "output": {
+    "deploy": { "type": "object" }
+  },
+  "requires": ["shell"],
+  "tags": ["ecosystem", "journal", "deploy", "publish"]
+}
