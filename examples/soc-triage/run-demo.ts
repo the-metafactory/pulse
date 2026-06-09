@@ -6,7 +6,7 @@
  *   bun examples/soc-triage/run-demo.ts --llm            # + real models (Ollama local, claude frontier)
  *   bun examples/soc-triage/run-demo.ts --live           # real NATS bus (localhost:4222), simulated fleet
  *   bun examples/soc-triage/run-demo.ts --live --no-fleet # real NATS + real cortex fleet handles tasks
- *   bun examples/soc-triage/run-demo.ts --auto-approve   # non-interactive analyst gate (CI / smoke test)
+ *   bun examples/soc-triage/run-demo.ts --interactive    # type the analyst gate verdict yourself
  *
  * Watch the envelopes live on a real bus:
  *   nats sub 'local.switch-soc.>'
@@ -34,7 +34,8 @@ const args = new Set(process.argv.slice(2));
 const live = args.has("--live");
 const useLLM = args.has("--llm");
 const noFleet = args.has("--no-fleet");
-const autoApprove = args.has("--auto-approve");
+// Gate auto-passes by default — pass --interactive to type the analyst verdict yourself.
+const interactive = args.has("--interactive");
 
 const banner = (s: string) => console.log(`\n━━━ ${s} ${"━".repeat(Math.max(0, 56 - s.length))}`);
 
@@ -42,8 +43,8 @@ const banner = (s: string) => console.log(`\n━━━ ${s} ${"━".repeat(Math.
 class AutoGateProvider implements GateProvider {
   async requestVerdict(spec: { name: string; prompt: string }): Promise<GateInput> {
     console.log(`\n🚧 GATE [${spec.name}]: ${spec.prompt}`);
-    console.log(`   --auto-approve: verdict=pass`);
-    return { verdict: "pass", notes: "auto-approved (demo flag)" };
+    console.log(`   auto-approve (demo default — use --interactive for a real verdict): verdict=pass`);
+    return { verdict: "pass", notes: "auto-approved (demo default)" };
   }
 }
 
@@ -144,7 +145,7 @@ async function main() {
     { email_raw: emailRaw, ...mattermost },
     {
       agentProvider,
-      gateProvider: autoApprove ? new AutoGateProvider() : new StdinGateProvider(),
+      gateProvider: interactive ? new StdinGateProvider() : new AutoGateProvider(),
       onAgentEvent: (e) => {
         if (e.type === "agent.dispatched") {
           console.log(`\n📤 [pulse] agent step '${e.name}' → capability ${e.capability} (envelope on bus)`);

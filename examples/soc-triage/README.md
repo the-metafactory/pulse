@@ -16,10 +16,11 @@ reported email ──► agent: triage ──► A_SANITIZE_IOCS ──► agent
 
 ```bash
 # Offline, deterministic (in-memory bus, simulated fleet, canned model answers)
-bun examples/soc-triage/run-demo.ts --auto-approve
+# Analyst gate auto-passes by default.
+bun examples/soc-triage/run-demo.ts
 
 # Interactive analyst gate (type verdict + notes at the pause)
-bun examples/soc-triage/run-demo.ts
+bun examples/soc-triage/run-demo.ts --interactive
 
 # Real models: Ollama (local agent) + claude CLI (frontier agent)
 bun examples/soc-triage/run-demo.ts --llm
@@ -31,7 +32,7 @@ bun examples/soc-triage/run-demo.ts --live
 bun examples/soc-triage/run-demo.ts --live --no-fleet
 
 # Show sovereignty ENFORCEMENT: raw email offered to the frontier → refused
-bun examples/soc-triage/run-demo.ts --auto-approve --violate
+bun examples/soc-triage/run-demo.ts --violate
 ```
 
 ## Mattermost notification (optional)
@@ -45,7 +46,7 @@ cp examples/soc-triage/.env.example examples/soc-triage/.env
 # edit .env: MATTERMOST_URL, MATTERMOST_BOT_TOKEN, MATTERMOST_CHANNEL_ID
 # (channel ID, not channel name; the demo .env is gitignored)
 
-bun examples/soc-triage/run-demo.ts --auto-approve
+bun examples/soc-triage/run-demo.ts
 ```
 
 Environment variables take precedence over the demo `.env`. The SWITCH demo
@@ -69,14 +70,14 @@ three terminal panes.
    capability. `gate:` pauses for a human. Deterministic / Agentic / Human —
    the whole agentic-OS taxonomy is five YAML keywords."*
 
-3. **Pane 3 — run it live:** `bun examples/soc-triage/run-demo.ts --live --llm`
+3. **Pane 3 — run it live:** `bun examples/soc-triage/run-demo.ts --live --llm --interactive`
    Talk track while it runs: *"The raw phishing mail contains member data — the
    envelope says `model_class: local-only`, so it's analyzed by Ollama on this
    laptop. A deterministic action strips PII. Only then do the IOCs — now
    shareable — go to a frontier model for enrichment. And nothing leaves the
    SOC until the analyst says so."* Type the gate verdict live.
 
-4. **The punchline:** `bun examples/soc-triage/run-demo.ts --live --violate --auto-approve`
+4. **The punchline:** `bun examples/soc-triage/run-demo.ts --live --violate`
    Watch pane 1: the frontier agent **refuses** the raw email because the
    envelope demands local-only. *"The policy travels with the data. The fleet
    enforces it. That's sovereignty as infrastructure, not as a compliance
