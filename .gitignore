@@ -2,5 +2,9 @@ node_modules/
 dist/
 .specflow/
 
+# Secrets — per-demo env files (commit only .env.example)
+.env
+examples/**/.env
+
 # PAI Algorithm working scratch (agent-internal, not project source)
 MEMORY/

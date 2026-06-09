@@ -64,3 +64,7 @@ actions:
 
   # D — deterministic: publish
   - A_PUBLISH_ADVISORY
+
+  # D — deterministic: post advisory to Mattermost channel
+  # (needs MATTERMOST_URL, MATTERMOST_BOT_TOKEN, MATTERMOST_CHANNEL_ID; skips itself when unset)
+  - A_NOTIFY_MATTERMOST

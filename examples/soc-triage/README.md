@@ -6,9 +6,9 @@ confidential member data on local models while shareable IOCs go to a frontier
 model.
 
 ```
-reported email ──► agent: triage ──► A_SANITIZE_IOCS ──► agent: enrich ──► gate ──► A_PUBLISH_ADVISORY
-(confidential)     local-only LLM    strips member PII   frontier model    analyst   community advisory
-                   frontier_ok:false (sovereignty         frontier_ok:true verdict
+reported email ──► agent: triage ──► A_SANITIZE_IOCS ──► agent: enrich ──► gate ──► A_PUBLISH_ADVISORY ──► A_NOTIFY_MATTERMOST
+(confidential)     local-only LLM    strips member PII   frontier model    analyst   community advisory     post to channel
+                   frontier_ok:false (sovereignty         frontier_ok:true verdict                          (skips when unset)
                                       boundary)
 ```
 
@@ -33,6 +33,26 @@ bun examples/soc-triage/run-demo.ts --live --no-fleet
 # Show sovereignty ENFORCEMENT: raw email offered to the frontier → refused
 bun examples/soc-triage/run-demo.ts --auto-approve --violate
 ```
+
+## Mattermost notification (optional)
+
+The final step posts the approved advisory to a Mattermost channel via a bot
+account. Without config the step logs a skip and passes through — every run
+mode above stays offline-safe.
+
+```bash
+cp examples/soc-triage/.env.example examples/soc-triage/.env
+# edit .env: MATTERMOST_URL, MATTERMOST_BOT_TOKEN, MATTERMOST_CHANNEL_ID
+# (channel ID, not channel name; the demo .env is gitignored)
+
+bun examples/soc-triage/run-demo.ts --auto-approve
+```
+
+Environment variables take precedence over the demo `.env`. The SWITCH demo
+uses the Sage bot on `securechat-test.switch.ch` (VPN required).
+
+When configured, a failed post fails the pipeline — a SOC that believes it
+notified members but didn't is worse than a visible error.
 
 ## NetSecWG demo script (~5 min)
 

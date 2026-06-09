@@ -47,6 +47,46 @@ class AutoGateProvider implements GateProvider {
   }
 }
 
+/**
+ * Mattermost config for A_NOTIFY_MATTERMOST. Precedence:
+ *   1. MATTERMOST_URL / MATTERMOST_BOT_TOKEN / MATTERMOST_CHANNEL_ID env vars
+ *   2. examples/soc-triage/.env (gitignored — copy .env.example and fill in)
+ *   3. nothing — the action skips itself
+ *
+ * The demo-local .env is loaded explicitly because Bun only auto-loads .env
+ * from the cwd, and this demo is normally run from the repo root.
+ */
+async function loadMattermostConfig(): Promise<Record<string, string>> {
+  const vars: Record<string, string | undefined> = {
+    MATTERMOST_URL: process.env.MATTERMOST_URL,
+    MATTERMOST_BOT_TOKEN: process.env.MATTERMOST_BOT_TOKEN,
+    MATTERMOST_CHANNEL_ID: process.env.MATTERMOST_CHANNEL_ID,
+  };
+  let source = "environment variables";
+
+  if (!vars.MATTERMOST_URL || !vars.MATTERMOST_BOT_TOKEN || !vars.MATTERMOST_CHANNEL_ID) {
+    const envPath = join(import.meta.dir, ".env");
+    try {
+      for (const line of (await Bun.file(envPath).text()).split("\n")) {
+        const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+        if (m && m[1] in vars && !vars[m[1]]) vars[m[1]] = m[2];
+      }
+      source = "examples/soc-triage/.env";
+    } catch (_err) {
+      // no .env — fall through to unconfigured (action logs the skip)
+      return {};
+    }
+  }
+
+  if (!vars.MATTERMOST_URL || !vars.MATTERMOST_BOT_TOKEN || !vars.MATTERMOST_CHANNEL_ID) return {};
+  console.log(`📬 Mattermost config: ${source} (${vars.MATTERMOST_URL}, channel ${vars.MATTERMOST_CHANNEL_ID.slice(0, 8)}…)`);
+  return {
+    mattermost_url: vars.MATTERMOST_URL,
+    mattermost_bot_token: vars.MATTERMOST_BOT_TOKEN,
+    mattermost_channel_id: vars.MATTERMOST_CHANNEL_ID,
+  };
+}
+
 async function main() {
   banner("CommunitySOC Phishing Triage — pulse agentic flow");
   console.log(`mode: ${live ? "LIVE NATS bus" : "in-memory bus"} | fleet: ${noFleet ? "external (cortex)" : "simulated"} | models: ${useLLM ? "real (ollama + frontier)" : "canned"}`);
@@ -96,10 +136,12 @@ async function main() {
     console.log("The policy travelled with the data. The fleet enforced it.\n");
   }
 
+  const mattermost = await loadMattermostConfig();
+
   banner("Running P_PHISH_TRIAGE");
   const result = await runPipelineFromYaml(
     join(import.meta.dir, "pipeline.yaml"),
-    { email_raw: emailRaw },
+    { email_raw: emailRaw, ...mattermost },
     {
       agentProvider,
       gateProvider: autoApprove ? new AutoGateProvider() : new StdinGateProvider(),
