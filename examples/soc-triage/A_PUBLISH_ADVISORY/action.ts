@@ -12,12 +12,24 @@ interface EnrichmentOutput {
   advisory?: string;
 }
 
+/** Parse agent output: object as-is; string parsed as JSON (markdown fences stripped); non-JSON text becomes the advisory body. */
+function parseEnrichment(output: unknown): EnrichmentOutput {
+  if (typeof output !== "string") return (output ?? {}) as EnrichmentOutput;
+  const cleaned = output.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+  try {
+    return JSON.parse(cleaned) as EnrichmentOutput;
+  } catch (_err) {
+    // model returned prose instead of JSON — publish it verbatim rather than failing the pipeline
+    return { advisory: cleaned };
+  }
+}
+
 export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { enrichment, approval, ...payload } = input;
     const result = enrichment as AgentTaskResult;
     const gate = approval as GateResult;
-    const out = (typeof result.output === "string" ? JSON.parse(result.output) : result.output) as EnrichmentOutput;
+    const out = parseEnrichment(result.output);
 
     const advisory = {
       title: "CommunitySOC Advisory — Phishing Campaign",

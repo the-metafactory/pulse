@@ -71,7 +71,8 @@ async function tryFrontierLLM(prompt: string): Promise<string | null> {
     const caps = await createLocalCapabilities(["llm"]);
     if (!caps.llm) return null;
     const res = await caps.llm(prompt, { tier: "standard", json: true });
-    return res.text;
+    // Prefer the fence-stripped parsed JSON; res.text may still carry ```json fences
+    return res.json !== undefined ? JSON.stringify(res.json) : res.text;
   } catch (_err) {
     return null; // no claude CLI / API key — caller falls back to canned answer
   }
@@ -166,9 +167,11 @@ export async function startFleetSim(
         const prompt = String(task.payload.prompt ?? "");
         const { text, model } = await agent.answer(prompt);
 
+        // Strip markdown code fences some models wrap around JSON answers
+        const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
         let output: unknown = text;
         try {
-          output = JSON.parse(text);
+          output = JSON.parse(cleaned);
         } catch (_err) {
           // model returned non-JSON — pass raw text through; downstream actions handle both
         }
