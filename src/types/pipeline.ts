@@ -6,6 +6,19 @@
  * based on which keyword is present.
  */
 
+import type { AgentStepSpec } from "./agent";
+
+// Agent step types live in ./agent (shared with the capability surface);
+// re-exported here so pipeline consumers see one vocabulary.
+export type {
+  AgentStepSpec,
+  AgentSovereignty,
+  AgentTaskSpec,
+  AgentTaskResult,
+  AgentProvider,
+  AgentEvent,
+} from "./agent";
+
 // ---------------------------------------------------------------------------
 // Step type — discriminated union
 // ---------------------------------------------------------------------------
@@ -17,7 +30,8 @@ export type PipelineStep =
   | { reduce: ReduceStepSpec }
   | { parallel: ParallelStepSpec }
   | { retry: RetryStepSpec }
-  | { gate: GateStepSpec };
+  | { gate: GateStepSpec }
+  | { agent: AgentStepSpec };
 
 // ---------------------------------------------------------------------------
 // Primitive specs

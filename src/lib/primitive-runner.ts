@@ -11,6 +11,9 @@ import type {
   GateProvider,
   GateEvent,
   GateResult,
+  AgentStepSpec,
+  AgentEvent,
+  AgentTaskResult,
 } from "../types/pipeline";
 
 export class StepFailure extends Error {
@@ -52,6 +55,8 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
   gateProvider?: GateProvider;
   /** Optional sink for gate lifecycle events. Hosts can pipe to traces, dashboards, etc. */
   onGateEvent?: (event: GateEvent) => void;
+  /** Optional sink for agent lifecycle events. */
+  onAgentEvent?: (event: AgentEvent) => void;
 }
 
 type ValidateStep = (step: unknown, path?: string) => PipelineStep;
@@ -72,7 +77,8 @@ type PrimitiveSpec =
   | ReduceStepSpec
   | ParallelStepSpec
   | RetryStepSpec
-  | GateStepSpec;
+  | GateStepSpec
+  | AgentStepSpec;
 
 interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
   validate?: (spec: Record<string, unknown>, path: string, validateStep: ValidateStep) => void;
@@ -109,6 +115,10 @@ const PRIMITIVES = {
   gate: {
     validate: validateGate,
     run: runGate,
+  },
+  agent: {
+    validate: validateAgent,
+    run: runAgent,
   },
 } satisfies Record<string, PrimitiveHandler<any>>;
 
@@ -616,5 +626,188 @@ async function runGate(
     throw new StepFailure(`gate:${spec.name}`, `verdict=fail — ${input.notes}`);
   }
 
+  return { ...payload, [collectField]: result };
+}
+
+// ---------------------------------------------------------------------------
+// Agent primitive — dispatch a task to the fleet and await the result
+// ---------------------------------------------------------------------------
+
+function validateAgent(spec: Record<string, unknown>, path: string): void {
+  if (typeof spec.name !== "string" || spec.name.length === 0) {
+    throw new Error(`${path}: 'name' must be a non-empty string`);
+  }
+  if (typeof spec.capability !== "string" || spec.capability.length === 0) {
+    throw new Error(`${path}: 'capability' must be a non-empty string`);
+  }
+  if (typeof spec.prompt !== "string" || spec.prompt.length === 0) {
+    throw new Error(`${path}: 'prompt' must be a non-empty string`);
+  }
+  if ("timeout_ms" in spec && spec.timeout_ms !== undefined) {
+    if (typeof spec.timeout_ms !== "number" || spec.timeout_ms <= 0) {
+      throw new Error(`${path}: 'timeout_ms' must be a positive number when set`);
+    }
+  }
+  if ("distribution_mode" in spec && spec.distribution_mode !== undefined) {
+    const mode = spec.distribution_mode;
+    if (mode !== "offer" && mode !== "direct" && mode !== "delegate") {
+      throw new Error(`${path}: 'distribution_mode' must be offer, direct, or delegate`);
+    }
+    if ((mode === "direct" || mode === "delegate") && typeof spec.target_assistant !== "string") {
+      throw new Error(`${path}: distribution_mode '${mode}' requires 'target_assistant'`);
+    }
+  }
+}
+
+/**
+ * Render `{field}` / `{dotted.path}` placeholders from payload context.
+ * Object values are JSON-encoded; missing paths throw — a silently empty
+ * prompt section is worse than a loud failure.
+ */
+export function renderPromptTemplate(template: string, payload: Record<string, unknown>): string {
+  return template.replace(/\{([\w.]+)\}/g, (_match, pathExpr: string) => {
+    let value: unknown = payload;
+    for (const segment of pathExpr.split(".")) {
+      if (value === null || typeof value !== "object" || !(segment in (value as Record<string, unknown>))) {
+        throw new Error(`agent prompt template: payload has no field '${pathExpr}'`);
+      }
+      value = (value as Record<string, unknown>)[segment];
+    }
+    if (typeof value === "string") return value;
+    return JSON.stringify(value, null, 2);
+  });
+}
+
+async function runAgent(
+  spec: AgentStepSpec,
+  payload: Record<string, unknown>,
+  options: StepRunnerOptions,
+  stepRecords: StepRecord[],
+): Promise<Record<string, unknown>> {
+  const provider = options.agentProvider;
+  const stepStart = Date.now();
+
+  const recordAndThrow = (errMsg: string): never => {
+    stepRecords.push({
+      action: `agent:${spec.name}`,
+      success: false,
+      durationMs: Date.now() - stepStart,
+      error: errMsg,
+    });
+    throw new StepFailure(`agent:${spec.name}`, errMsg);
+  };
+
+  if (!provider) {
+    return recordAndThrow(
+      "no agentProvider configured — pipelines with agent steps require one (StepRunnerOptions.agentProvider)",
+    );
+  }
+
+  const prompt = renderPromptTemplate(spec.prompt, payload);
+  const taskSpec = {
+    capability: spec.capability,
+    prompt,
+    sovereignty: spec.sovereignty,
+    distribution_mode: spec.distribution_mode,
+    target_assistant: spec.target_assistant,
+    timeout_ms: spec.timeout_ms,
+  };
+
+  // Runner owns the timeout — provider only sees the AbortSignal (gate precedent).
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  if (spec.timeout_ms !== undefined) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, spec.timeout_ms);
+  }
+
+  let parentAbortListener: (() => void) | null = null;
+  if (options.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      parentAbortListener = () => controller.abort();
+      options.signal.addEventListener("abort", parentAbortListener, { once: true });
+    }
+  }
+
+  const cleanup = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (parentAbortListener && options.signal) {
+      options.signal.removeEventListener("abort", parentAbortListener);
+      parentAbortListener = null;
+    }
+  };
+
+  const dispatched_at = new Date().toISOString();
+  let result: AgentTaskResult;
+  try {
+    const dispatchPromise = provider.dispatch(taskSpec, { signal: controller.signal });
+    // Event carries the provider's task only after dispatch resolves; the
+    // dispatched event uses the step name as the stable identifier.
+    options.onAgentEvent?.({
+      type: "agent.dispatched",
+      name: spec.name,
+      capability: spec.capability,
+      task_id: "pending",
+      dispatched_at,
+    });
+    result = await dispatchPromise;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    cleanup();
+    if (timedOut) {
+      options.onAgentEvent?.({
+        type: "agent.timeout",
+        name: spec.name,
+        capability: spec.capability,
+        task_id: "unknown",
+        timeout_ms: spec.timeout_ms!,
+      });
+      return recordAndThrow(`agent task timeout after ${spec.timeout_ms}ms`);
+    }
+    options.onAgentEvent?.({
+      type: "agent.failed",
+      name: spec.name,
+      capability: spec.capability,
+      task_id: "unknown",
+      error: errMsg,
+    });
+    return recordAndThrow(errMsg);
+  }
+  cleanup();
+
+  if (result.status === "failed") {
+    options.onAgentEvent?.({
+      type: "agent.failed",
+      name: spec.name,
+      capability: spec.capability,
+      task_id: result.task_id,
+      error: result.error ?? "agent task failed",
+    });
+    return recordAndThrow(result.error ?? "agent task failed");
+  }
+
+  options.onAgentEvent?.({
+    type: "agent.completed",
+    name: spec.name,
+    capability: spec.capability,
+    task_id: result.task_id,
+    duration_ms: result.duration_ms,
+  });
+
+  stepRecords.push({
+    action: `agent:${spec.name}`,
+    success: true,
+    durationMs: Date.now() - stepStart,
+  });
+
+  const collectField = spec.collect ?? `agent_${spec.name}`;
   return { ...payload, [collectField]: result };
 }

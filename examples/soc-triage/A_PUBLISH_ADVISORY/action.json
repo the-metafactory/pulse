@@ -1,0 +1,13 @@
+{
+  "name": "A_PUBLISH_ADVISORY",
+  "version": "1.0.0",
+  "description": "Publish the analyst-approved community advisory (demo: render to stdout)",
+  "input": {
+    "enrichment": { "type": "object", "required": true },
+    "approval": { "type": "object", "required": true }
+  },
+  "output": {
+    "published": { "type": "object" }
+  },
+  "tags": ["soc", "advisory", "publish"]
+}
