@@ -23,7 +23,7 @@ interface WorkItem {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { org, repos, ...upstream } = input;
+    const { org, repos, ...payload } = input;
     const shell = ctx.capabilities.shell;
     if (!shell) throw new Error("Shell capability required");
 
@@ -112,7 +112,7 @@ export default {
     console.log(`    Handovers: ${workItems.filter((w) => w.type === "handover").length}`);
 
     return {
-      ...upstream,
+      ...payload,
       org,
       repos,
       workItems,

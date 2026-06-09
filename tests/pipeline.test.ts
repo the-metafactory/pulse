@@ -24,9 +24,9 @@ beforeAll(() => {
     join(extractDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { content, ...upstream } = input;
+        const { content, ...payload } = input;
         return {
-          ...upstream,
+          ...payload,
           extracted: content.trim(),
           word_count: content.trim().split(/\\s+/).length,
         };
@@ -52,9 +52,9 @@ beforeAll(() => {
     join(labelDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { extracted, ...upstream } = input;
+        const { extracted, ...payload } = input;
         const label = extracted.length > 20 ? "long" : "short";
-        return { ...upstream, extracted, label, confidence: 0.95 };
+        return { ...payload, extracted, label, confidence: 0.95 };
       }
     };`
   );
@@ -77,9 +77,9 @@ beforeAll(() => {
     join(formatDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { extracted, label, word_count, confidence, ...upstream } = input;
+        const { extracted, label, word_count, confidence, ...payload } = input;
         return {
-          ...upstream,
+          ...payload,
           extracted, label, word_count, confidence,
           formatted: "[" + label + "] " + extracted + " (" + word_count + " words, " + (confidence * 100) + "% confidence)",
         };

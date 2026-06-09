@@ -49,7 +49,7 @@ Every one of these would benefit from the same small set of primitives. Adding t
 
 1. **Add `map`, `filter`, `reduce`, `parallel` as pipeline step primitives.** These cover the iteration patterns that actually recur across real pulse flows.
 2. **Add step-level `retry` and `timeout`.** Orthogonal to iteration but immediately relevant once map runs real actions against rate-limited APIs.
-3. **Preserve the `{...upstream, ...new}` TS-structure contract.** Actions see plain TS objects in and out. They never know about iteration. Composition lives in the pipeline runner.
+3. **Preserve the `{...payload, ...new}` TS-structure contract.** Actions see plain TS objects in and out. They never know about iteration. Composition lives in the pipeline runner.
 4. **Preserve backwards compatibility.** Every existing flow must run unchanged. New primitives are opt-in and only appear when flows use them.
 5. **Keep the surface area small.** One new step-type dispatcher in `runPipeline`, four new step handlers, one new YAML parser branch. No DSL, no expression language, no type magic.
 
@@ -81,12 +81,12 @@ Every one of these would benefit from the same small set of primitives. Adding t
 
 ## 4. Design principles
 
-1. **Actions are pure TS-structure transformers.** They receive `{...upstream}` and return `{...new}`. They never see iteration, concurrency, retry, or error-handling concerns. Those live in the runner.
+1. **Actions are pure TS-structure transformers.** They receive `{...payload}` and return `{...new}`. They never see iteration, concurrency, retry, or error-handling concerns. Those live in the runner.
 2. **Composition is declarative YAML.** Control flow is visible in the pipeline.yaml without reading any TypeScript. A reader can trace data flow top-to-bottom.
 3. **Step types are a discriminated union, not inheritance.** A pipeline step is either a string (action name) or an object with a single keyword (`map:`, `filter:`, `reduce:`, `parallel:`, `retry:`). Parser looks at the keyword to dispatch. No polymorphism.
 4. **Fail loud by default.** Errors stop the pipeline. Opt-in to `skip` or `collect`. No silent data loss, ever.
 5. **Concurrency is opt-in.** Default `concurrency: 1` (sequential). Deliberate — rate-limited APIs (LinkedIn, GitHub, Anthropic) punish accidental parallelism.
-6. **Terminal reduction via regular actions is still valid.** A pipeline that ends with `A_FORMAT_REPORT` reading an upstream collection is just as legitimate as one using a `reduce:` step. The reduce primitive is for streaming / stateful aggregation; a terminal action is for "consume all at once". Both patterns should work.
+6. **Terminal reduction via regular actions is still valid.** A pipeline that ends with `A_FORMAT_REPORT` reading an payload collection is just as legitimate as one using a `reduce:` step. The reduce primitive is for streaming / stateful aggregation; a terminal action is for "consume all at once". Both patterns should work.
 
 ---
 
@@ -100,7 +100,7 @@ Apply a sub-pipeline to each element of a collection. Same cardinality in → ou
 
 ```yaml
 - map:
-    over: posts              # field in upstream context holding the array
+    over: posts              # field in payload context holding the array
     as: post                 # name bound in each sub-pipeline invocation
     actions:                 # the sub-pipeline — a list of steps (strings or nested primitives)
       - A_LINKEDIN_POST_ENGAGEMENT
@@ -112,9 +112,9 @@ Apply a sub-pipeline to each element of a collection. Same cardinality in → ou
 
 **Semantics:**
 
-1. Read `upstream[over]`. If it's not an array, throw. If empty, write `upstream[collect] = []` and continue.
+1. Read `payload[over]`. If it's not an array, throw. If empty, write `payload[collect] = []` and continue.
 2. For each item `i` in the array:
-   - Build sub-input: `{...upstream, [as]: item}`
+   - Build sub-input: `{...payload, [as]: item}`
    - Run the sub-pipeline via `runPipeline`
    - Capture the sub-pipeline's terminal output
 3. If `concurrency > 1`, use a worker pool pattern (simple semaphore) to bound in-flight sub-pipelines. Ordering of results preserves input order regardless of completion order.
@@ -126,10 +126,10 @@ Apply a sub-pipeline to each element of a collection. Same cardinality in → ou
      { _error: true, index: number, error: string, item: <original input item> }
      ```
      The `_error` discriminant lets downstream actions or reduce steps distinguish success items from failures. The `index` field identifies which input item failed without scanning. Without this, a subsequent `reduce` would get a cryptic failure trying to read fields from an error object.
-5. Write `upstream[collect] = [...subPipelineOutputs]`. Each element is the terminal upstream of its sub-pipeline, NOT just the last action's return value — so downstream actions can access any field any sub-action produced.
-6. Return the full upstream to the next step.
+5. Write `payload[collect] = [...subPipelineOutputs]`. Each element is the terminal payload of its sub-pipeline, NOT just the last action's return value — so downstream actions can access any field any sub-action produced.
+6. Return the full payload to the next step.
 
-**TS-structure preservation:** each sub-pipeline run sees a normal linear pipeline with one extra upstream field (`post`). Actions inside the sub-pipeline receive and return TS objects as usual. The runner is the only code that knows iteration is happening.
+**TS-structure preservation:** each sub-pipeline run sees a normal linear pipeline with one extra payload field (`post`). Actions inside the sub-pipeline receive and return TS objects as usual. The runner is the only code that knows iteration is happening.
 
 ### 5.2 `filter` — drop items that fail a predicate
 
@@ -151,9 +151,9 @@ Same shape as `map` but the sub-pipeline is a predicate: it must produce a boole
 
 **Semantics:**
 
-1. For each item, run the sub-pipeline with `{...upstream, post: item}`.
+1. For each item, run the sub-pipeline with `{...payload, post: item}`.
 2. Read the sub-pipeline terminal output's `keep_field`. Must be a boolean. Anything else throws.
-3. Collect only items whose predicate returned `true` into `upstream[collect]`.
+3. Collect only items whose predicate returned `true` into `payload[collect]`.
 4. Original array order is preserved.
 
 **Note:** we explicitly do NOT support inline predicate expressions (`where: "post.age > 7d"`). The cost of introducing an expression DSL outweighs the syntactic savings for the number of filter steps we expect. If someone writes 20 similar filter predicates and the boilerplate hurts, we revisit.
@@ -170,11 +170,11 @@ Sequentially combine items into a single accumulated value. Distinct from map-pl
     init:
       header: "# LinkedIn Daily Digest\n\n"
       body: ""
-    item_as: digest          # each iteration sees upstream.digest
-    acc_as: report           # each iteration sees upstream.report (== current accumulator)
+    item_as: digest          # each iteration sees payload.digest
+    acc_as: report           # each iteration sees payload.report (== current accumulator)
     actions:
       - A_APPEND_DIGEST_MD   # reads report + digest, returns { report: <newReport> }
-    collect: final_report    # after last iteration, write acc to upstream[collect]
+    collect: final_report    # after last iteration, write acc to payload[collect]
     onError: stop
 ```
 
@@ -182,10 +182,10 @@ Sequentially combine items into a single accumulated value. Distinct from map-pl
 
 1. Initialize `acc = init` (any JSON-compatible structure). Note: `init` is the first place in pulse where YAML values are structured data rather than flat strings or arrays. This is another argument for adopting the `yaml` package (see §8.5), since the hand-rolled parser cannot handle nested objects as values.
 2. For each item:
-   - Build sub-input: `{...upstream, [item_as]: item, [acc_as]: acc}`
+   - Build sub-input: `{...payload, [item_as]: item, [acc_as]: acc}`
    - Run the sub-pipeline
    - Read `<subOutput>[acc_as]` as the new accumulator (must be present)
-3. After the last item, write `upstream[collect] = acc`.
+3. After the last item, write `payload[collect] = acc`.
 4. `reduce` is always sequential. `concurrency` is not meaningful here — fold is order-dependent by definition.
 
 **Why reduce is distinct from "map + final action":**
@@ -202,7 +202,7 @@ For pulse's current batch-oriented world, the memory and streaming distinctions 
 
 ### 5.4 `parallel` — heterogeneous named branches
 
-Run N sub-pipelines concurrently from the same upstream, merging their outputs into named fields. This is NOT iteration — it's fan-out to different work.
+Run N sub-pipelines concurrently from the same payload, merging their outputs into named fields. This is NOT iteration — it's fan-out to different work.
 
 **YAML:**
 
@@ -222,10 +222,10 @@ Run N sub-pipelines concurrently from the same upstream, merging their outputs i
 
 **Semantics:**
 
-1. Launch all branches concurrently, each with `{...upstream}` as input. Branches CANNOT see each other's intermediate state.
+1. Launch all branches concurrently, each with `{...payload}` as input. Branches CANNOT see each other's intermediate state.
 2. Wait for all branches to complete.
-3. Merge outputs: for each branch `name`, write `upstream[name] = <terminal upstream of that branch>`. Branches NEVER overwrite upstream fields they didn't produce — results are namespaced. **Branch name collision is a parse-time error:** `loadPipeline` validates that branch names within a `parallel` block do not collide with each other. Branch names that shadow upstream fields from prior steps are permitted (later overwrites earlier, consistent with the passthrough model) but emit a parse-time warning.
-4. If any branch fails and `onError: stop` (default): cancel remaining branches via `AbortController` and throw. Each branch's sub-pipeline run receives an `AbortSignal` from a shared `AbortController`. On failure, the controller aborts remaining branches so they can tear down in-flight API calls rather than just discarding results while work continues. Without this, "cancel" wastes rate-limit budget on API-calling branches. If `onError: collect`: wait for all, then return `{...upstream, [name]: result_or_error}`.
+3. Merge outputs: for each branch `name`, write `payload[name] = <terminal payload of that branch>`. Branches NEVER overwrite payload fields they didn't produce — results are namespaced. **Branch name collision is a parse-time error:** `loadPipeline` validates that branch names within a `parallel` block do not collide with each other. Branch names that shadow payload fields from prior steps are permitted (later overwrites earlier, consistent with the passthrough model) but emit a parse-time warning.
+4. If any branch fails and `onError: stop` (default): cancel remaining branches via `AbortController` and throw. Each branch's sub-pipeline run receives an `AbortSignal` from a shared `AbortController`. On failure, the controller aborts remaining branches so they can tear down in-flight API calls rather than just discarding results while work continues. Without this, "cancel" wastes rate-limit budget on API-calling branches. If `onError: collect`: wait for all, then return `{...payload, [name]: result_or_error}`.
 
 **Concurrency:** unlimited by default — that's the whole point of parallel. If you need to bound it (e.g. "run 3 research agents but no more"), do it with an explicit semaphore action or nested `map` with `concurrency: 3`.
 
@@ -412,10 +412,10 @@ The core change to `runPipeline` is replacing the existing linear loop with a st
 ```typescript
 async function runSteps(
   steps: PipelineStep[],
-  upstream: Record<string, unknown>,
+  payload: Record<string, unknown>,
   options: ActionRunnerOptions
 ): Promise<Record<string, unknown>> {
-  let current = { ...upstream };
+  let current = { ...payload };
   for (const step of steps) {
     current = await runStep(step, current, options);
   }
@@ -424,21 +424,21 @@ async function runSteps(
 
 async function runStep(
   step: PipelineStep,
-  upstream: Record<string, unknown>,
+  payload: Record<string, unknown>,
   options: ActionRunnerOptions
 ): Promise<Record<string, unknown>> {
   if (typeof step === "string") {
     // Existing action path — no change
-    const result = await runAction(step, upstream, options);
+    const result = await runAction(step, payload, options);
     if (!result.success) throw new StepFailure(step, result.error);
-    return { ...upstream, ...(result.output ?? {}) };
+    return { ...payload, ...(result.output ?? {}) };
   }
 
-  if ("map" in step) return runMap(step.map, upstream, options);
-  if ("filter" in step) return runFilter(step.filter, upstream, options);
-  if ("reduce" in step) return runReduce(step.reduce, upstream, options);
-  if ("parallel" in step) return runParallel(step.parallel, upstream, options);
-  if ("retry" in step) return runRetry(step.retry, upstream, options);
+  if ("map" in step) return runMap(step.map, payload, options);
+  if ("filter" in step) return runFilter(step.filter, payload, options);
+  if ("reduce" in step) return runReduce(step.reduce, payload, options);
+  if ("parallel" in step) return runParallel(step.parallel, payload, options);
+  if ("retry" in step) return runRetry(step.retry, payload, options);
 
   throw new Error(`Unknown pipeline step shape: ${JSON.stringify(step)}`);
 }
@@ -595,7 +595,7 @@ Questions raised during design and resolved during review (Luna + Ivy, 2026-04-0
 | # | Question | Resolution | Rationale |
 |---|----------|------------|-----------|
 | 1 | `reduce` early termination via `until:` | **No for v1** | YAGNI. Revisit when a flow needs it. |
-| 2 | `parallel` branch upstream: copy-by-reference or copy-by-value? | **Copy-by-value via `structuredClone` at branch boundary** | Cross-branch mutation bugs would be nearly impossible to reproduce. Perf cost is negligible at pulse's data sizes. |
+| 2 | `parallel` branch payload: copy-by-reference or copy-by-value? | **Copy-by-value via `structuredClone` at branch boundary** | Cross-branch mutation bugs would be nearly impossible to reproduce. Perf cost is negligible at pulse's data sizes. |
 | 3 | `filter` ordering preservation with concurrency > 1 | **Preserve input order** | The `results[idx]` slot pattern is cheap. Predictability matters more than the minor simplification of completion-order. |
 | 4 | Retry backoff defaults | **Exponential, `initial_delay_ms: 500`, `max_delay_ms: 10000`** | Matches real API retry behavior. `constant` is available as an explicit opt-in for those who want it. |
 | 5 | Step failure reporting in `PipelineResult.steps` | **Flat list with synthetic names (e.g. `"map[3/10]: A_FOO"`)** | Greppable, renders cleanly in terminal output. Tree structure is available from the pipeline YAML itself if needed. |

@@ -7,7 +7,7 @@ interface Input {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { org = "the-metafactory", ...upstream } = input;
+    const { org = "the-metafactory", ...payload } = input;
     const shell = ctx.capabilities.shell;
     if (!shell) throw new Error("Shell capability required");
 
@@ -29,7 +29,7 @@ export default {
     console.log(`  Discovered ${repos.length} repos: ${repos.join(", ")}`);
 
     return {
-      ...upstream,
+      ...payload,
       org,
       repos,
       discoveredAt: new Date().toISOString(),

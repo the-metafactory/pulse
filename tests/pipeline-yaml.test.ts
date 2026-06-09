@@ -38,8 +38,8 @@ actions:
     join(greetDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { name, ...upstream } = input;
-        return { ...upstream, greeting: "Hello, " + name + "!" };
+        const { name, ...payload } = input;
+        return { ...payload, greeting: "Hello, " + name + "!" };
       }
     };`
   );
@@ -62,8 +62,8 @@ actions:
     join(formatDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { greeting, ...upstream } = input;
-        return { ...upstream, greeting, formatted: "**" + greeting + "**" };
+        const { greeting, ...payload } = input;
+        return { ...payload, greeting, formatted: "**" + greeting + "**" };
       }
     };`
   );

@@ -103,7 +103,7 @@ const COMMIT_PATTERNS: Array<{
 
 export default {
   async execute(input: Input, _ctx: ActionContext) {
-    const { repoActivity, ...upstream } = input;
+    const { repoActivity, ...payload } = input;
     const actions: OperatorAction[] = [];
     const seen = new Set<string>(); // dedupe by command
 
@@ -160,7 +160,7 @@ export default {
     actions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
 
     return {
-      ...upstream,
+      ...payload,
       repoActivity,
       operatorActions: actions,
       actionsExtractedAt: new Date().toISOString(),

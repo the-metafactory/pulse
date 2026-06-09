@@ -87,21 +87,21 @@ import type { ActionContext } from "../types";
 interface Input {
   url: string;
   limit?: number;
-  [key: string]: unknown;  // ← Accept upstream fields
+  [key: string]: unknown;  // ← Accept payload fields
 }
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
     // 1. Destructure what you need, spread the rest
-    const { url, limit = 10, ...upstream } = input;
+    const { url, limit = 10, ...payload } = input;
 
     // 2. Use capabilities (never import dependencies directly)
     const response = await ctx.capabilities.fetch!(url);
     const data = await response.json();
 
-    // 3. Return upstream + your new fields
+    // 3. Return payload + your new fields
     return {
-      ...upstream,        // Everything from previous actions
+      ...payload,        // Everything from previous actions
       items: data.items,  // Your contribution
       fetchedAt: new Date().toISOString(),
     };
@@ -110,9 +110,9 @@ export default {
 ```
 
 **Three rules:**
-1. **Destructure + spread**: `const { myField, ...upstream } = input` — take what you need, keep the rest
+1. **Destructure + spread**: `const { myField, ...payload } = input` — take what you need, keep the rest
 2. **Use capabilities**: `ctx.capabilities.llm!(...)` — never `import anthropic` or `import { $ } from "bun"`
-3. **Return merged**: `{ ...upstream, ...myFields }` — pass everything forward
+3. **Return merged**: `{ ...payload, ...myFields }` — pass everything forward
 
 ### The passthrough pattern in practice
 
@@ -265,7 +265,7 @@ When an action needs LLM, declare `"requires": ["llm"]` and use `ctx.capabilitie
 ```typescript
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { content, ...upstream } = input;
+    const { content, ...payload } = input;
     const llm = ctx.capabilities.llm;
     if (!llm) throw new Error("LLM capability required");
 
@@ -277,7 +277,7 @@ export default {
     });
 
     // result.text = raw text, result.json = parsed if json: true
-    return { ...upstream, summary: result.text };
+    return { ...payload, summary: result.text };
   },
 };
 ```

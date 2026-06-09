@@ -22,7 +22,7 @@ interface Input {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { articles, ...upstream } = input;
+    const { articles, ...payload } = input;
     const llm = ctx.capabilities.llm;
     if (!llm) throw new Error("LLM capability required");
 
@@ -65,7 +65,7 @@ Respond in JSON format only:
     }
 
     return {
-      ...upstream,
+      ...payload,
       rated,
       ratedAt: new Date().toISOString(),
     };

@@ -28,8 +28,8 @@ beforeAll(() => {
     join(doubleDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { value, ...upstream } = input;
-        return { ...upstream, value, doubled: value * 2 };
+        const { value, ...payload } = input;
+        return { ...payload, value, doubled: value * 2 };
       }
     };`
   );
@@ -52,8 +52,8 @@ beforeAll(() => {
     join(formatDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { doubled, ...upstream } = input;
-        return { ...upstream, doubled, digest: "Result: " + doubled };
+        const { doubled, ...payload } = input;
+        return { ...payload, doubled, digest: "Result: " + doubled };
       }
     };`
   );

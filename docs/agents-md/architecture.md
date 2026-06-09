@@ -55,10 +55,10 @@ src/
 Actions are `action.json` (manifest) + `action.ts` (implementation) pairs. The manifest declares required capabilities; the runtime injects them. Same code runs locally or on Workers.
 
 ### Passthrough pattern
-Actions destructure what they need, spread the rest as `upstream`:
+Actions destructure what they need, spread the rest as `payload`:
 ```typescript
-const { content, ...upstream } = input;
-return { ...upstream, summary: result.text };
+const { content, ...payload } = input;
+return { ...payload, summary: result.text };
 ```
 
 ### Capability injection

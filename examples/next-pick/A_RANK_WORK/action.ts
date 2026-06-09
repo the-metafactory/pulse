@@ -118,7 +118,7 @@ function scoreItems(items: WorkItem[]): ScoredItem[] {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { workItems, ...upstream } = input;
+    const { workItems, ...payload } = input;
     const llm = ctx.capabilities.llm;
     if (!llm) throw new Error("LLM capability required");
 
@@ -187,7 +187,7 @@ Return ONLY valid JSON.`;
     }
 
     return {
-      ...upstream,
+      ...payload,
       workItems,
       rankedItems: scored,
       topPick,

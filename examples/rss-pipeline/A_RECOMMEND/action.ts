@@ -17,7 +17,7 @@ interface Input {
 
 export default {
   async execute(input: Input, _ctx: ActionContext) {
-    const { rated, feedTitle, ...upstream } = input;
+    const { rated, feedTitle, ...payload } = input;
 
     // Rank by combined score (relevance 60% + quality 40%)
     const ranked = [...rated]
@@ -55,7 +55,7 @@ export default {
     }
 
     return {
-      ...upstream,
+      ...payload,
       feedTitle,
       topPicks,
       ranked,

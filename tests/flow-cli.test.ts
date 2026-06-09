@@ -48,8 +48,8 @@ beforeAll(() => {
     join(doubleDir, "action.ts"),
     `export default {
       async execute(input) {
-        const { value, ...upstream } = input;
-        return { ...upstream, value, doubled: Number(value) * 2 };
+        const { value, ...payload } = input;
+        return { ...payload, value, doubled: Number(value) * 2 };
       }
     };`
   );

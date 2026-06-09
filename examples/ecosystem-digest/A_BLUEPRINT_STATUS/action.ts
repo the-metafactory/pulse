@@ -29,7 +29,7 @@ interface BlueprintHealth {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { ...upstream } = input;
+    const { ...payload } = input;
     const shell = ctx.capabilities.shell;
     if (!shell) throw new Error("Shell capability required");
 
@@ -68,7 +68,7 @@ export default {
     }
 
     return {
-      ...upstream,
+      ...payload,
       blueprintHealth,
       reposPulled: pullResults.length,
       blueprintStatusAt: blueprintHealth ? new Date().toISOString() : null,

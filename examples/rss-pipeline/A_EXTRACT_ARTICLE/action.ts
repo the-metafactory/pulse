@@ -19,7 +19,7 @@ interface Input {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { items, ...upstream } = input;
+    const { items, ...payload } = input;
     const fetchFn = ctx.capabilities.fetch!;
 
     const articles: Article[] = [];
@@ -68,7 +68,7 @@ export default {
     }
 
     return {
-      ...upstream,
+      ...payload,
       articles,
       extractedAt: new Date().toISOString(),
     };

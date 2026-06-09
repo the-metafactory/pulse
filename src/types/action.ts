@@ -145,13 +145,13 @@ export interface ActionContext {
  * The execute function signature.
  *
  * Actions use the passthrough pattern: destructure what you need from input,
- * spread the rest as `upstream`, and return `{...upstream, ...yourFields}`.
+ * spread the rest as `payload`, and return `{...payload, ...yourFields}`.
  *
  * ```typescript
  * async execute(input, ctx) {
- *   const { content, ...upstream } = input;
+ *   const { content, ...payload } = input;
  *   const summary = await ctx.capabilities.llm!(content, { tier: "fast" });
- *   return { ...upstream, summary: summary.text };
+ *   return { ...payload, summary: summary.text };
  * }
  * ```
  */

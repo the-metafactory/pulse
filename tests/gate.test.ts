@@ -17,7 +17,7 @@ const TEST_DIR = join(import.meta.dir, ".test-gate-actions");
 beforeAll(() => {
   mkdirSync(TEST_DIR, { recursive: true });
 
-  // A_PRELUDE: sets a marker so we can verify upstream survives the gate
+  // A_PRELUDE: sets a marker so we can verify payload survives the gate
   const preludeDir = join(TEST_DIR, "A_PRELUDE");
   mkdirSync(preludeDir, { recursive: true });
   writeFileSync(join(preludeDir, "action.json"), JSON.stringify({

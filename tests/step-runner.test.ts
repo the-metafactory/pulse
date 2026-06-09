@@ -14,8 +14,8 @@ beforeAll(() => {
     output: { doubled: { type: "number" } },
   }, `export default {
     async execute(input) {
-      const { value, ...upstream } = input;
-      return { ...upstream, value, doubled: value * 2 };
+      const { value, ...payload } = input;
+      return { ...payload, value, doubled: value * 2 };
     }
   };`);
 
@@ -25,8 +25,8 @@ beforeAll(() => {
     output: { value: { type: "number" } },
   }, `export default {
     async execute(input) {
-      const { value, ...upstream } = input;
-      return { ...upstream, value: value + 10 };
+      const { value, ...payload } = input;
+      return { ...payload, value: value + 10 };
     }
   };`);
 
@@ -36,8 +36,8 @@ beforeAll(() => {
     output: { keep: { type: "boolean" } },
   }, `export default {
     async execute(input) {
-      const { item, ...upstream } = input;
-      return { ...upstream, item, keep: item.value % 2 === 0 };
+      const { item, ...payload } = input;
+      return { ...payload, item, keep: item.value % 2 === 0 };
     }
   };`);
 
@@ -47,8 +47,8 @@ beforeAll(() => {
     output: {},
   }, `export default {
     async execute(input) {
-      const { entry, acc, ...upstream } = input;
-      return { ...upstream, entry, acc: { labels: acc.labels + entry.label + "," } };
+      const { entry, acc, ...payload } = input;
+      return { ...payload, entry, acc: { labels: acc.labels + entry.label + "," } };
     }
   };`);
 
@@ -88,8 +88,8 @@ beforeAll(() => {
     output: { doubled: { type: "number" } },
   }, `export default {
     async execute(input) {
-      const { item, ...upstream } = input;
-      return { ...upstream, item, doubled: item.value * 2 };
+      const { item, ...payload } = input;
+      return { ...payload, item, doubled: item.value * 2 };
     }
   };`);
 
@@ -461,7 +461,7 @@ describe("parallel primitive", () => {
     const branchB = output.branch_b as any;
     expect(branchA.data).toBe("alpha");
     expect(branchB.data).toBe("beta");
-    // Original upstream preserved
+    // Original payload preserved
     expect(output.seed).toBe("test");
   });
 

@@ -89,18 +89,18 @@ Every action follows the same shape:
 ```typescript
 export default {
   async execute(input, ctx) {
-    const { fieldINeed, anotherField, ...upstream } = input;
+    const { fieldINeed, anotherField, ...payload } = input;
 
     // Do your work using capabilities
     const result = doSomething(fieldINeed);
 
-    // Return upstream + your fields
-    return { ...upstream, myNewField: result };
+    // Return payload + your fields
+    return { ...payload, myNewField: result };
   },
 };
 ```
 
-**Why this matters:** In a pipeline, actions run in sequence. Each action receives *everything* from all previous actions. By spreading `...upstream`, you guarantee nothing is lost. The last action in a pipeline has access to every field produced by every preceding action.
+**Why this matters:** In a pipeline, actions run in sequence. Each action receives *everything* from all previous actions. By spreading `...payload`, you guarantee nothing is lost. The last action in a pipeline has access to every field produced by every preceding action.
 
 ## Input validation
 
@@ -133,7 +133,7 @@ try {
 } catch {
   // Non-fatal — pipeline continues
 }
-return { ...upstream, posted };
+return { ...payload, posted };
 ```
 
 ## Naming conventions

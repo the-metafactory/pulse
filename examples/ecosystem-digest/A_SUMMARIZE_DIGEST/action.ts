@@ -15,7 +15,7 @@ interface Input {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { repoActivity, blueprintStatus, blueprintHealth, since, ...upstream } = input;
+    const { repoActivity, blueprintStatus, blueprintHealth, since, ...payload } = input;
     const llm = ctx.capabilities.llm;
     if (!llm) throw new Error("LLM capability required");
 
@@ -83,7 +83,7 @@ Return ONLY valid JSON.`;
     } | undefined;
 
     return {
-      ...upstream,
+      ...payload,
       repoActivity,
       blueprintStatus,
       since,

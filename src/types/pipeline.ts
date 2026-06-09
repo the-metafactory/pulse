@@ -38,7 +38,7 @@ export type PipelineStep =
 // ---------------------------------------------------------------------------
 
 export interface MapStepSpec {
-  /** Field in upstream context holding the array to iterate */
+  /** Field in payload context holding the array to iterate */
   over: string;
   /** Name bound in each sub-pipeline invocation */
   as: string;
@@ -53,7 +53,7 @@ export interface MapStepSpec {
 }
 
 export interface FilterStepSpec {
-  /** Field in upstream context holding the array to filter */
+  /** Field in payload context holding the array to filter */
   over: string;
   /** Name bound in each sub-pipeline invocation */
   as: string;
@@ -70,7 +70,7 @@ export interface FilterStepSpec {
 }
 
 export interface ReduceStepSpec {
-  /** Field in upstream context holding the array to fold */
+  /** Field in payload context holding the array to fold */
   over: string;
   /** Initial accumulator value */
   init: unknown;
@@ -124,7 +124,7 @@ export interface GateInput {
 }
 
 /**
- * Captured gate result — what the runner merges into upstream context.
+ * Captured gate result — what the runner merges into payload context.
  * Timestamps are ISO-8601 UTC.
  */
 export interface GateResult extends GateInput {

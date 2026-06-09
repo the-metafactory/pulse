@@ -20,7 +20,7 @@ interface Input {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { summary, highlights, blockers, nextUp, operatorActions, since, ...upstream } = input;
+    const { summary, highlights, blockers, nextUp, operatorActions, since, ...payload } = input;
     const shell = ctx.capabilities.shell;
 
     const today = new Date().toLocaleDateString("en-CH", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
@@ -116,7 +116,7 @@ export default {
     }
 
     return {
-      ...upstream,
+      ...payload,
       summary,
       highlights,
       blockers,

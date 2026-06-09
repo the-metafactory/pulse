@@ -17,7 +17,7 @@ interface Input {
 
 export default {
   async execute(input: Input, _ctx: ActionContext) {
-    const { upgradeResults, repos, ...upstream } = input;
+    const { upgradeResults, repos, ...payload } = input;
 
     const lines: string[] = [];
     lines.push("╔═══════════════════════════════════════════════════════════╗");
@@ -51,6 +51,6 @@ export default {
     lines.push("");
 
     const digest = lines.join("\n");
-    return { ...upstream, repos, upgradeResults, digest };
+    return { ...payload, repos, upgradeResults, digest };
   },
 };

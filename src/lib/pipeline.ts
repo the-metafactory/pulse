@@ -2,13 +2,13 @@
  * Pipeline — linear chain of actions using the pipe model.
  *
  * Data flows forward, context accumulates, nothing is lost.
- * Each action receives all upstream data and adds its own fields.
+ * Each action receives all payload data and adds its own fields.
  *
  * This is the Unix pipe philosophy applied to cloud functions:
  *   Input → Action1 → Action2 → Action3 → Output
- *            {...upstream, ...a1}
- *                       {...upstream, ...a1, ...a2}
- *                                    {...upstream, ...a1, ...a2, ...a3}
+ *            {...payload, ...a1}
+ *                       {...payload, ...a1, ...a2}
+ *                                    {...payload, ...a1, ...a2, ...a3}
  *
  * Steps can be action names (strings) or composition primitives:
  *   map, filter, reduce, parallel, retry.

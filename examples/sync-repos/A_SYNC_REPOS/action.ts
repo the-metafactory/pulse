@@ -16,7 +16,7 @@ interface SyncResult {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { org, repos, workDir = `${process.env.HOME}/work/mf`, ...upstream } = input;
+    const { org, repos, workDir = `${process.env.HOME}/work/mf`, ...payload } = input;
     const shell = ctx.capabilities.shell;
     if (!shell) throw new Error("Shell capability required");
 
@@ -65,7 +65,7 @@ export default {
     console.log(`  Synced: ${pulled} pulled, ${cloned} cloned, ${failed} failed`);
 
     return {
-      ...upstream,
+      ...payload,
       org,
       repos,
       syncResults,

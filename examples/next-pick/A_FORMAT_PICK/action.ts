@@ -23,7 +23,7 @@ interface Input {
 
 export default {
   async execute(input: Input, _ctx: ActionContext) {
-    const { topPick, reasoning, suggestedFirstStep, totalCandidates, rankedItems, ...upstream } = input;
+    const { topPick, reasoning, suggestedFirstStep, totalCandidates, rankedItems, ...payload } = input;
 
     const today = new Date().toLocaleDateString("en-CH", {
       weekday: "long",
@@ -94,7 +94,7 @@ export default {
     const digest = lines.join("\n");
 
     return {
-      ...upstream,
+      ...payload,
       topPick,
       reasoning,
       suggestedFirstStep,

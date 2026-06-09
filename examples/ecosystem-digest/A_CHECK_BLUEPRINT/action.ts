@@ -7,7 +7,7 @@ interface Input {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { repos, ...upstream } = input;
+    const { repos, ...payload } = input;
     const shell = ctx.capabilities.shell;
     if (!shell) throw new Error("Shell capability required");
 
@@ -64,7 +64,7 @@ export default {
     }
 
     return {
-      ...upstream,
+      ...payload,
       repos,
       blueprintStatus,
       blueprintCheckedAt: new Date().toISOString(),

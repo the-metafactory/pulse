@@ -15,7 +15,7 @@ interface FeedItem {
 
 export default {
   async execute(input: Input, ctx: ActionContext) {
-    const { feedUrl, limit = 5, ...upstream } = input;
+    const { feedUrl, limit = 5, ...payload } = input;
 
     const fetchFn = ctx.capabilities.fetch!;
     const response = await fetchFn(feedUrl, {
@@ -57,7 +57,7 @@ export default {
     const feedTitle = xml.match(/<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/)?.[1]?.trim()?.replace(/<[^>]*>/g, "") || feedUrl;
 
     return {
-      ...upstream,
+      ...payload,
       feedUrl,
       feedTitle,
       items,

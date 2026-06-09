@@ -26,8 +26,8 @@ beforeAll(() => {
     join(greetDir, "action.ts"),
     `export default {
       async execute(input, ctx) {
-        const { name, ...upstream } = input;
-        return { ...upstream, greeting: "Hello, " + name + "!" };
+        const { name, ...payload } = input;
+        return { ...payload, greeting: "Hello, " + name + "!" };
       }
     };`
   );
@@ -52,8 +52,8 @@ beforeAll(() => {
     join(upperDir, "action.ts"),
     `export default {
       async execute(input, ctx) {
-        const { greeting, ...upstream } = input;
-        return { ...upstream, greeting: greeting.toUpperCase(), uppercased: true };
+        const { greeting, ...payload } = input;
+        return { ...payload, greeting: greeting.toUpperCase(), uppercased: true };
       }
     };`
   );
@@ -78,9 +78,9 @@ beforeAll(() => {
     join(shellDir, "action.ts"),
     `export default {
       async execute(input, ctx) {
-        const { message, ...upstream } = input;
+        const { message, ...payload } = input;
         const result = await ctx.capabilities.shell("echo " + JSON.stringify(message));
-        return { ...upstream, stdout: result.stdout.trim() };
+        return { ...payload, stdout: result.stdout.trim() };
       }
     };`
   );
@@ -123,7 +123,7 @@ describe("runAction", () => {
     expect(result.metadata?.mode).toBe("local");
   });
 
-  test("passthrough pattern preserves upstream data", async () => {
+  test("passthrough pattern preserves payload data", async () => {
     const result = await runAction(
       "A_GREET",
       { name: "Daniel", extra: "preserved" },
