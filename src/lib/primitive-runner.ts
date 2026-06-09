@@ -657,6 +657,15 @@ function validateAgent(spec: Record<string, unknown>, path: string): void {
       throw new Error(`${path}: distribution_mode '${mode}' requires 'target_assistant'`);
     }
   }
+  if ("federate" in spec && spec.federate !== undefined) {
+    const fed = spec.federate as Record<string, unknown>;
+    if (typeof fed !== "object" || fed === null || typeof fed.principal !== "string" || fed.principal.length === 0) {
+      throw new Error(`${path}: 'federate' requires a non-empty 'principal' string`);
+    }
+    if ("stack" in fed && fed.stack !== undefined && (typeof fed.stack !== "string" || fed.stack.length === 0)) {
+      throw new Error(`${path}: 'federate.stack' must be a non-empty string when set`);
+    }
+  }
 }
 
 /**
@@ -710,6 +719,7 @@ async function runAgent(
     sovereignty: spec.sovereignty,
     distribution_mode: spec.distribution_mode,
     target_assistant: spec.target_assistant,
+    federate: spec.federate,
     timeout_ms: spec.timeout_ms,
   };
 

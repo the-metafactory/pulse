@@ -208,7 +208,11 @@ export class MyelinAgentProvider implements AgentProvider {
         `agent dispatch: capability '${spec.capability}' is not a valid subject fragment (no wildcards, whitespace, or empty tokens)`,
       );
     }
-    const base = `local.${this.principal}.${this.stack}.tasks`;
+    // Federated tasks are addressed to the PEER's accept subjects; the peer
+    // answers on OUR federated dispatch subjects (see lifecyclePattern()).
+    const base = spec.federate
+      ? `federated.${spec.federate.principal}.${spec.federate.stack ?? "default"}.tasks`
+      : `local.${this.principal}.${this.stack}.tasks`;
     const mode = spec.distribution_mode ?? "offer";
     if (mode === "direct" || mode === "delegate") {
       if (!spec.target_assistant) {
@@ -219,12 +223,32 @@ export class MyelinAgentProvider implements AgentProvider {
     return `${base}.${spec.capability}`;
   }
 
+  /** Where this provider listens for lifecycle answers to a given task. */
+  lifecyclePattern(spec: AgentTaskSpec): string {
+    const scope = spec.federate ? "federated" : "local";
+    return `${scope}.${this.principal}.${this.stack}.dispatch.task.*`;
+  }
+
   buildEnvelope(spec: AgentTaskSpec, taskId: string): MyelinEnvelope {
     const sovereignty = {
       ...SOVEREIGNTY_BASE,
       ...this.sovereigntyDefaults,
       ...spec.sovereignty,
     };
+    if (spec.federate) {
+      // An envelope crossing the principal boundary cannot claim to be local,
+      // and max_hop 0 would forbid the hop it is about to take. Honor explicit
+      // spec values, but never let the safe-local defaults contradict routing.
+      if (spec.sovereignty?.classification === undefined) sovereignty.classification = "federated";
+      if (sovereignty.classification === "local") {
+        throw new Error(
+          `agent dispatch: federated task to '${spec.federate.principal}' cannot carry classification 'local'`,
+        );
+      }
+      if (spec.sovereignty?.max_hop === undefined && this.sovereigntyDefaults.max_hop === undefined) {
+        sovereignty.max_hop = 1;
+      }
+    }
     return {
       id: crypto.randomUUID(),
       source: this.source,
@@ -250,7 +274,7 @@ export class MyelinAgentProvider implements AgentProvider {
     const startedAt = Date.now();
     const envelope = this.buildEnvelope(spec, taskId);
     const subject = this.taskSubject(spec);
-    const lifecyclePattern = `local.${this.principal}.${this.stack}.dispatch.task.*`;
+    const lifecyclePattern = this.lifecyclePattern(spec);
 
     if (opts.signal?.aborted) {
       throw new Error(`agent dispatch aborted before publish (task ${taskId})`);

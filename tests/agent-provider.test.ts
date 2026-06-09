@@ -248,3 +248,68 @@ describe("MockAgentProvider", () => {
     expect(result.status).toBe("failed");
   });
 });
+
+describe("MyelinAgentProvider federation", () => {
+  const fedSpec: AgentTaskSpec = {
+    capability: "ecosystem.perspective",
+    prompt: "Add your view",
+    federate: { principal: "andreas", stack: "meta-factory" },
+  };
+
+  test("federated task publishes on the peer's federated subject", () => {
+    const provider = makeProvider(new InMemoryAgentTransport());
+    expect(provider.taskSubject(fedSpec)).toBe("federated.andreas.meta-factory.tasks.ecosystem.perspective");
+  });
+
+  test("federate.stack defaults to 'default'", () => {
+    const provider = makeProvider(new InMemoryAgentTransport());
+    expect(provider.taskSubject({ ...fedSpec, federate: { principal: "andreas" } })).toBe(
+      "federated.andreas.default.tasks.ecosystem.perspective",
+    );
+  });
+
+  test("lifecycle answers arrive on the requester's federated dispatch subject", async () => {
+    const transport = new InMemoryAgentTransport();
+    const provider = makeProvider(transport);
+
+    await transport.subscribe("federated.andreas.meta-factory.tasks.>", (_subject, data) => {
+      const envelope = JSON.parse(data);
+      void transport.publish(
+        "federated.switch-soc.default.dispatch.task.completed",
+        JSON.stringify({
+          id: crypto.randomUUID(),
+          source: "andreas.meta-factory.fleet",
+          type: "dispatch.task.completed",
+          timestamp: new Date().toISOString(),
+          correlation_id: envelope.correlation_id,
+          sovereignty: envelope.sovereignty,
+          payload: { task_id: envelope.correlation_id, output: { perspective: "ship it" } },
+        }),
+      );
+    });
+
+    const result = await provider.dispatch(fedSpec);
+    expect(result.status).toBe("completed");
+    expect((result.output as { perspective: string }).perspective).toBe("ship it");
+  });
+
+  test("federated envelope defaults classification to federated and max_hop to 1", () => {
+    const provider = makeProvider(new InMemoryAgentTransport());
+    const envelope = provider.buildEnvelope(fedSpec, "task-1");
+    expect(envelope.sovereignty.classification).toBe("federated");
+    expect(envelope.sovereignty.max_hop).toBe(1);
+  });
+
+  test("explicit classification 'local' on a federated task is rejected", () => {
+    const provider = makeProvider(new InMemoryAgentTransport());
+    expect(() =>
+      provider.buildEnvelope({ ...fedSpec, sovereignty: { classification: "local" } }, "task-1"),
+    ).toThrow(/cannot carry classification 'local'/);
+  });
+
+  test("local task subjects are unchanged", () => {
+    const provider = makeProvider(new InMemoryAgentTransport());
+    expect(provider.taskSubject(baseSpec)).toBe("local.switch-soc.default.tasks.soc.triage.email");
+    expect(provider.lifecyclePattern(baseSpec)).toBe("local.switch-soc.default.dispatch.task.*");
+  });
+});

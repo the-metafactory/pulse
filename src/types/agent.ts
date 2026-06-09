@@ -32,6 +32,19 @@ export interface AgentSovereignty {
 // Task spec & result — what dispatch sends and what comes back
 // ---------------------------------------------------------------------------
 
+/**
+ * Cross-principal routing. `local.` never crosses the principal boundary
+ * (cortex CONTEXT.md): a federated task publishes on
+ * `federated.{peer.principal}.{peer.stack}.tasks.{capability}` and the peer
+ * answers on the requester's own `federated.{principal}.{stack}.dispatch.task.*`.
+ */
+export interface AgentFederation {
+  /** Peer principal id, e.g. "andreas". */
+  principal: string;
+  /** Peer stack segment. Default: "default". */
+  stack?: string;
+}
+
 export interface AgentTaskSpec {
   /** Capability address, e.g. "soc.triage.email". The fleet routes on this. */
   capability: string;
@@ -45,6 +58,8 @@ export interface AgentTaskSpec {
   distribution_mode?: "offer" | "direct" | "delegate";
   /** DID of the receiving assistant. Required for direct/delegate. */
   target_assistant?: string;
+  /** Route to a peer principal's stack instead of the local fleet. */
+  federate?: AgentFederation;
   /** Soft deadline forwarded into the envelope, milliseconds from dispatch. */
   timeout_ms?: number;
 }
@@ -123,6 +138,8 @@ export interface AgentStepSpec {
   distribution_mode?: "offer" | "direct" | "delegate";
   /** DID of receiving assistant. Required for direct/delegate. */
   target_assistant?: string;
+  /** Route to a peer principal's stack instead of the local fleet. */
+  federate?: AgentFederation;
   /** Optional timeout in milliseconds. Omit for indefinite wait. */
   timeout_ms?: number;
   /** Field to write the AgentTaskResult under (default: `agent_${name}`). */
