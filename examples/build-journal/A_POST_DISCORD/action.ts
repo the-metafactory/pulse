@@ -48,8 +48,9 @@ function renderMessages(entry: JournalEntry): string[] {
     `_Drafted by ${entry.provenance.draft_by}; perspective by ${entry.provenance.perspective_by}. Assembled by pulse P_BUILD_JOURNAL._`,
   );
 
-  // Pack sections into <2000-char messages
-  const sections = [head.join("\n"), second.join("\n")];
+  // Pack sections into <2000-char messages; sections over the limit are
+  // hard-split on line boundaries (a single long narrative must still fit).
+  const sections = [head.join("\n"), second.join("\n")].flatMap(splitToLimit);
   const messages: string[] = [];
   let current = "";
   for (const s of sections) {
@@ -62,6 +63,29 @@ function renderMessages(entry: JournalEntry): string[] {
   }
   if (current) messages.push(current);
   return messages;
+}
+
+/** Split a block to chunks ≤ DISCORD_LIMIT, preferring line breaks, then hard slices. */
+function splitToLimit(block: string): string[] {
+  if (block.length <= DISCORD_LIMIT) return [block];
+  const chunks: string[] = [];
+  let current = "";
+  for (const line of block.split("\n")) {
+    // A single line longer than the limit gets hard-sliced.
+    const pieces = line.length > DISCORD_LIMIT
+      ? Array.from({ length: Math.ceil(line.length / DISCORD_LIMIT) }, (_, i) => line.slice(i * DISCORD_LIMIT, (i + 1) * DISCORD_LIMIT))
+      : [line];
+    for (const piece of pieces) {
+      if (current && current.length + 1 + piece.length > DISCORD_LIMIT) {
+        chunks.push(current);
+        current = piece;
+      } else {
+        current = current ? `${current}\n${piece}` : piece;
+      }
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 export default {
