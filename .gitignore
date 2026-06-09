@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .specflow/
+
+# PAI Algorithm working scratch (agent-internal, not project source)
+MEMORY/
