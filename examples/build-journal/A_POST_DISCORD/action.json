@@ -1,11 +1,12 @@
 {
   "name": "A_POST_DISCORD",
   "version": "1.0.0",
-  "description": "Post the journal entry to the public metafactory Discord. Dry-run (prints message) unless discord_post is true; channel via discord_channel (default: general)",
+  "description": "Post a compact teaser to the public metafactory Discord, with the full entry in a thread when the CLI supports --create-thread (else the build-log link is the long form). Dry-run unless discord_post is true; channel via discord_channel (default: general)",
   "input": {
     "entry": { "type": "object", "required": true },
     "discord_post": { "type": "boolean" },
-    "discord_channel": { "type": "string" }
+    "discord_channel": { "type": "string" },
+    "site_url": { "type": "string" }
   },
   "output": {
     "discord": { "type": "object" }

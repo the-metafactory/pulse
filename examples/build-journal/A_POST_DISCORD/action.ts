@@ -1,15 +1,21 @@
 /**
  * A_POST_DISCORD — publish the journal entry to the public Discord server.
  *
- * Dry-run by default (prints the rendered message) — posting to a public
- * channel is opt-in via discord_post: true (--post on the demo runner).
- * Uses the cortex discord CLI (~/bin/discord), same as P_ECOSYSTEM_DIGEST.
+ * Channel-friendly shape: the channel gets ONE compact teaser (headline,
+ * narrative excerpt, link to the full entry on the build log). The full
+ * journal goes into a thread under the teaser when the discord CLI supports
+ * --create-thread (cortex PR #840); otherwise the link is the long form.
+ *
+ * Dry-run by default — posting to a public channel is opt-in via
+ * discord_post: true (--post on the demo runner). Uses the cortex discord
+ * CLI (~/bin/discord), same as P_ECOSYSTEM_DIGEST.
  */
 
-import type { ActionContext } from "../../../src/types/action";
+import type { ActionContext, ShellResult } from "../../../src/types/action";
 
 interface JournalEntry {
   date: string;
+  slug: string;
   headline: string;
   narrative: string;
   highlights: string[];
@@ -21,14 +27,32 @@ interface JournalEntry {
 
 const DISCORD_LIMIT = 1900; // margin under the 2000-char message limit
 
-function renderMessages(entry: JournalEntry): string[] {
-  const head: string[] = [
+function entryUrl(entry: JournalEntry, siteUrl: string): string {
+  return `${siteUrl.replace(/\/$/, "")}/build-log/${entry.slug}.html`;
+}
+
+/** One compact channel message: headline, excerpt, top highlights, link. */
+function renderTeaser(entry: JournalEntry, siteUrl: string): string {
+  const excerpt = entry.narrative.length > 400 ? `${entry.narrative.slice(0, 400).trimEnd()}…` : entry.narrative;
+  const lines = [
     `**🏗️ metafactory build journal — ${entry.date}**`,
     "",
     `**${entry.headline}**`,
     "",
-    entry.narrative,
+    excerpt,
   ];
+  const top = entry.highlights.slice(0, 3);
+  if (top.length > 0) {
+    lines.push("");
+    for (const h of top) lines.push(`> ${h}`);
+  }
+  lines.push("", `Full entry: ${entryUrl(entry, siteUrl)}`);
+  return splitToLimit(lines.join("\n"))[0]; // teaser is by construction short; belt and braces
+}
+
+/** The full journal, split into thread-sized messages. */
+function renderFull(entry: JournalEntry): string[] {
+  const head: string[] = [entry.narrative];
   if (entry.highlights.length > 0) {
     head.push("", "**Shipped**");
     for (const h of entry.highlights) head.push(`> ${h}`);
@@ -48,8 +72,6 @@ function renderMessages(entry: JournalEntry): string[] {
     `_Drafted by ${entry.provenance.draft_by}; perspective by ${entry.provenance.perspective_by}. Assembled by pulse P_BUILD_JOURNAL._`,
   );
 
-  // Pack sections into <2000-char messages; sections over the limit are
-  // hard-split on line boundaries (a single long narrative must still fit).
   const sections = [head.join("\n"), second.join("\n")].flatMap(splitToLimit);
   const messages: string[] = [];
   let current = "";
@@ -88,34 +110,75 @@ function splitToLimit(block: string): string[] {
   return chunks;
 }
 
+type Shell = (cmd: string) => Promise<ShellResult>;
+
+async function postViaTmpFile(shell: Shell, message: string, key: string, flags: string): Promise<ShellResult> {
+  const tmpFile = `/tmp/build-journal-discord-${key}.txt`;
+  await shell(`cat > '${tmpFile}' <<'PULSE_EOF'\n${message}\nPULSE_EOF`);
+  const result = await shell(`bun ~/bin/discord post ${flags} "$(cat '${tmpFile}')" && rm -f '${tmpFile}'`);
+  if (result.code !== 0) await shell(`rm -f '${tmpFile}'`);
+  return result;
+}
+
 export default {
   async execute(input: Record<string, unknown>, ctx: ActionContext) {
-    const { entry, discord_post, discord_channel, ...payload } = input;
+    const { entry, discord_post, discord_channel, site_url, ...payload } = input;
     const journal = entry as JournalEntry;
     const channel = (discord_channel as string | undefined) ?? "general";
-    const messages = renderMessages(journal);
+    const siteUrl = (site_url as string | undefined) ?? "https://stack.meta-factory.ai";
+
+    const teaser = renderTeaser(journal, siteUrl);
+    const full = renderFull(journal);
 
     if (!discord_post) {
-      console.log(`\n📋 [A_POST_DISCORD] DRY RUN — would post ${messages.length} message(s) to #${channel}:`);
-      for (const m of messages) console.log(`\n${"┄".repeat(50)}\n${m}`);
+      console.log(`\n📋 [A_POST_DISCORD] DRY RUN — teaser to #${channel}, ${full.length} message(s) to thread:`);
+      console.log(`\n┄┄ teaser ${"┄".repeat(41)}\n${teaser}`);
+      for (const m of full) console.log(`\n┄┄ thread ${"┄".repeat(41)}\n${m}`);
       console.log("┄".repeat(50));
-      return { ...payload, entry, discord: { posted: false, dry_run: true, channel, message_count: messages.length } };
+      return { ...payload, entry, discord: { posted: false, dry_run: true, channel, thread: null, message_count: 1 + full.length } };
     }
 
     const shell = ctx.capabilities.shell;
     if (!shell) throw new Error("A_POST_DISCORD requires the 'shell' capability");
 
-    for (const [i, message] of messages.entries()) {
-      const tmpFile = `/tmp/build-journal-discord-${journal.date}-${i}.txt`;
-      await shell(`cat > '${tmpFile}' <<'PULSE_EOF'\n${message}\nPULSE_EOF`);
-      const result = await shell(`bun ~/bin/discord post --channel ${channel} "$(cat '${tmpFile}')" && rm -f '${tmpFile}'`);
+    // Probe: does the installed discord CLI support --create-thread (cortex PR #840)?
+    const probe = await shell(`bun ~/bin/discord post --help`);
+    const canThread = probe.code === 0 && probe.stdout.includes("--create-thread");
+
+    if (!canThread) {
+      // Older CLI: the teaser alone carries the link — the build log page is the long form.
+      const result = await postViaTmpFile(shell, teaser, `${journal.date}-teaser`, `--channel ${channel}`);
       if (result.code !== 0) {
-        await shell(`rm -f '${tmpFile}'`);
-        throw new Error(`Discord post failed (message ${i + 1}/${messages.length}): ${result.stderr.slice(0, 300)}`);
+        throw new Error(`Discord teaser post failed: ${(result.stderr || result.stdout).slice(0, 300)}`);
+      }
+      console.log(`📣 [A_POST_DISCORD] posted teaser to #${channel} (CLI lacks --create-thread; full entry is the build-log link)`);
+      return { ...payload, entry, discord: { posted: true, dry_run: false, channel, thread: null, message_count: 1 } };
+    }
+
+    // Teaser + thread: post teaser, create thread from it, post the full entry inside.
+    const threadName = `build journal ${journal.date}`;
+    const teaserResult = await postViaTmpFile(
+      shell,
+      teaser,
+      `${journal.date}-teaser`,
+      `--channel ${channel} --create-thread "${threadName}"`,
+    );
+    if (teaserResult.code !== 0) {
+      throw new Error(`Discord teaser post failed: ${(teaserResult.stderr || teaserResult.stdout).slice(0, 300)}`);
+    }
+    const threadId = teaserResult.stdout.match(/^thread:(\d+)$/m)?.[1];
+    if (!threadId) {
+      throw new Error(`Discord CLI did not return a thread id (stdout: ${teaserResult.stdout.slice(0, 200)})`);
+    }
+
+    for (const [i, message] of full.entries()) {
+      const result = await postViaTmpFile(shell, message, `${journal.date}-${i}`, `--thread ${threadId}`);
+      if (result.code !== 0) {
+        throw new Error(`Discord thread post failed (message ${i + 1}/${full.length}): ${(result.stderr || result.stdout).slice(0, 300)}`);
       }
     }
 
-    console.log(`📣 [A_POST_DISCORD] posted ${messages.length} message(s) to #${channel}`);
-    return { ...payload, entry, discord: { posted: true, dry_run: false, channel, message_count: messages.length } };
+    console.log(`📣 [A_POST_DISCORD] teaser in #${channel}, full entry in thread '${threadName}' (${full.length} message(s))`);
+    return { ...payload, entry, discord: { posted: true, dry_run: false, channel, thread: threadId, message_count: 1 + full.length } };
   },
 };

@@ -45,7 +45,11 @@ his real fleet claims `ecosystem.perspective` over the leaf node.
 
 - **Discord** — via the cortex discord CLI (`~/bin/discord`), channel from
   `DISCORD_CHANNEL` (default `general`). Posting is opt-in (`--post`); the
-  default dry-run prints exactly what would go out.
+  default dry-run prints exactly what would go out. The channel gets one
+  compact teaser (headline, excerpt, build-log link); the full entry goes
+  into a thread under it when the CLI supports `--create-thread`
+  (cortex PR #840 — `arc upgrade cortex` after merge). Older CLIs fall back
+  to teaser+link: the build-log page is the long form.
 - **Build log** — writes `build-log/{date}-build-journal.html` plus a
   regenerated index into `~/work/mf/myelin-cortex-site` (same stylesheet and
   markup as the site's blog). `entries.json` is the manifest. Deploy stays a
