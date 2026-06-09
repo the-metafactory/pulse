@@ -1,0 +1,15 @@
+{
+  "name": "A_GATHER_FACTS",
+  "version": "1.0.0",
+  "description": "Collect commit activity across metafactory ecosystem repos for the journal period (default: last 7 days)",
+  "input": {
+    "repos": { "type": "array" },
+    "days": { "type": "number" },
+    "work_dir": { "type": "string" }
+  },
+  "output": {
+    "facts": { "type": "object" }
+  },
+  "requires": ["shell"],
+  "tags": ["ecosystem", "git", "facts"]
+}

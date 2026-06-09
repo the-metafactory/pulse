@@ -1,0 +1,14 @@
+{
+  "name": "A_WRITE_BUILDLOG",
+  "version": "1.0.0",
+  "description": "Write the journal entry as an HTML page into the myelin-cortex-site build log (build-log/) and regenerate the build-log index from the entries.json manifest",
+  "input": {
+    "entry": { "type": "object", "required": true },
+    "site_dir": { "type": "string" }
+  },
+  "output": {
+    "buildlog": { "type": "object" }
+  },
+  "requires": ["readFile", "writeFile", "shell"],
+  "tags": ["ecosystem", "journal", "website", "publish"]
+}

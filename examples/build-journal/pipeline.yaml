@@ -1,0 +1,81 @@
+# P_BUILD_JOURNAL — federated build journal: "metafactory builds metafactory, in public".
+#
+# Two principals' agents co-author one public artifact:
+#   D  A_GATHER_FACTS     — commits/activity across ecosystem repos (deterministic)
+#   A  draft              — jc's agent turns facts into a narrative   (local.jc.default)
+#   A  perspective        — andreas' agent adds his view + sign-off   (federated.andreas.meta-factory)
+#   H  editor-approval    — a human approves before anything goes public
+#   D  A_FORMAT_JOURNAL   — merge draft + perspective into the journal entry
+#   D  A_POST_DISCORD     — post to the public Discord (dry-run unless enabled)
+#   D  A_WRITE_BUILDLOG   — write the entry into the stack.meta-factory.ai build log
+#
+# The federation moment is the `perspective` step: the envelope crosses the
+# principal boundary on federated.andreas.meta-factory.tasks.* and the answer
+# comes back on federated.jc.default.dispatch.task.* — visible on the bus.
+
+name: P_BUILD_JOURNAL
+description: Cross-principal build journal — jc's agent drafts, andreas' agent reviews and extends, humans gate, then publish to Discord and the public build log.
+
+actions:
+  # D — facts only: commit activity across the ecosystem (public data)
+  - A_GATHER_FACTS
+
+  # A — jc's agent drafts the narrative from the facts
+  - agent:
+      name: draft
+      capability: ecosystem.narrative
+      prompt: |
+        You are the build narrator for the metafactory ecosystem — an open,
+        federated agentic-OS project built by two people and their agent fleets.
+        Turn this week's raw repo activity into a short, honest build-journal
+        draft for outsiders. No hype; concrete shipped things; plain language.
+        Respond as JSON: { "headline", "narrative", "highlights": [3-6 bullets] }
+
+        Repo activity:
+        {facts}
+      sovereignty:
+        classification: public
+        frontier_ok: true
+        model_class: any
+      timeout_ms: 120000
+      collect: draft
+
+  # A — andreas' agent adds his perspective. THE federation moment:
+  # this envelope crosses the principal boundary.
+  - agent:
+      name: perspective
+      capability: ecosystem.perspective
+      federate:
+        principal: andreas
+        stack: meta-factory
+      prompt: |
+        You are Andreas' agent on the meta-factory stack. Jens-Christian's
+        agent drafted this week's metafactory build journal. Review it, add
+        the perspective from your side of the ecosystem (myelin, cortex,
+        federation work), and flag anything overstated.
+        Respond as JSON: { "perspective", "additions": [bullets], "sign_off": true|false }
+
+        Draft:
+        {draft.output}
+      sovereignty:
+        classification: federated
+        frontier_ok: true
+        model_class: any
+        max_hop: 1
+      timeout_ms: 120000
+      collect: perspective
+
+  # H — a human approves before anything goes public
+  - gate:
+      name: editor-approval
+      prompt: "Journal entry drafted by both agents. Publish to Discord + build log?"
+      collect: approval
+
+  # D — merge both agents' contributions into the final entry (with provenance)
+  - A_FORMAT_JOURNAL
+
+  # D — post to the public Discord server (dry-run unless discord_post is set)
+  - A_POST_DISCORD
+
+  # D — write the entry into the myelin-cortex-site build log
+  - A_WRITE_BUILDLOG
