@@ -37,7 +37,7 @@ actions:
         classification: public
         frontier_ok: true
         model_class: any
-      timeout_ms: 120000
+      timeout_ms: 300000
       collect: draft
 
   # A — andreas' agent adds his perspective. THE federation moment:
@@ -62,7 +62,7 @@ actions:
         frontier_ok: true
         model_class: any
         max_hop: 1
-      timeout_ms: 120000
+      timeout_ms: 300000
       collect: perspective
 
   # H — a human approves before anything goes public
