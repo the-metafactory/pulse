@@ -1,95 +1,121 @@
-# P_CONTAINMENT — tribunal-governed SOC containment.
+# P_CONTAINMENT — the governed-action stack, in-pipeline (Stage 4 / P-702).
 #
 # The next chapter after P_PHISH_TRIAGE: the advisory said "block both
-# domains" — now someone has to decide. The governed-action stack, live:
+# domains" — now someone has to decide. One `governed:` block declares the
+# whole stack:
 #
-#   L0  enforcement gate   run-demo prelude rules the request `ask`
-#                          (Stage 4 / P-702 moves it into the pipeline)
-#   L1  tribunal:          three fleet seats vote over the bus, the Honest
-#                          Oracle breaks splits; deny/defer halt fail-closed
-#   L2  human gate         only the tribunal's `defer` would reach a person
-#                          (composition lands with Stage 4)
+#   L0  policy        allow → proceed (panel skipped, zero LLM cost)
+#                     deny  → halt · ask ↓
+#   L1  tribunal      three fleet seats vote over the bus, the Honest
+#                     Oracle breaks splits; deny halts · defer ↓
+#   L2  analyst gate  pass → proceed · fail → halt
+#
+# Refusals are terminal at every layer — only uncertainty travels down.
 #
 # Sovereignty is still the plot: the resolver telemetry (member-confidential)
-# only reaches the local-only seat. Frontier seats argue from the sanitized
-# summary alone. Seat classes are diverse by construction — frontier /
-# local-only / any — so the diversity rule (Gate 22) passes without
-# reassignment, and each seat reports its executing model for the post-hoc
-# check.
+# only reaches the local-only seat; frontier seats argue from the sanitized
+# summary. Seat classes are diverse by construction (frontier / local-only /
+# any) and every vote carries its executing model for the post-hoc check.
 
 name: P_CONTAINMENT
-description: Adjudicate a domain-block containment request — model-diverse tribunal over the bus, blocklist + audit trail only on a robust allow.
+description: Adjudicate a domain-block containment request through the full L0→L1→L2 governed-action stack — blocklist + audit trail only when a layer allows.
 
 actions:
-  # D — validate the request, derive blast radius; fail before any agent cost
+  # D — validate the request, derive blast radius; fail before any governance cost
   - A_PARSE_REQUEST
 
-  # A×N — the tribunal: three lenses, three model classes, one ruling
-  - tribunal:
+  # The governed action: policy, panel, and human gate in one declaration
+  - governed:
       name: containment
-      confidence_bar: 0.6
-      timeout_ms: 120000
-      seats:
-        # Network lens — is the block proportionate, what breaks?
-        - name: network
-          capability: containment.review.network
+      tool: containment
+      input_fields: [action, targets_list]
+      policy:
+        version: 1
+        default: deny
+        rules:
+          - tool: containment
+            match: { targets_list: '(^|[\s,.])(switch\.ch|swissuniversities\.ch|admin\.ch)([\s,]|$)' }
+            decision: deny
+            reason: "protected zone — never blockable by automation, file a change request"
+          - tool: containment
+            match: { targets_list: 'sinkhole-test\.example' }
+            decision: allow
+            reason: "designated sinkhole test domain — pre-approved"
+          - tool: containment
+            match: { action: '^block-domain$' }
+            decision: ask
+            reason: "domain block is a judgment call — convene the tribunal"
+
+      tribunal:
+        name: containment-panel
+        confidence_bar: 0.6
+        timeout_ms: 120000
+        seats:
+          # Network lens — is the block proportionate, what breaks?
+          - name: network
+            capability: containment.review.network
+            prompt: |
+              You sit on a SOC containment review panel. Action requested:
+              {action} on {targets_list} (scope: {scope}, blast radius: {blast_radius}, TTL: {ttl_hours}h).
+              Sanitized summary: {sanitized_summary}
+              Justification: {justification}
+              Assess ONLY the network/collateral angle: is blocking these domains at member
+              resolvers proportionate? What legitimate traffic could break?
+            sovereignty:
+              model_class: frontier
+              frontier_ok: true
+
+          # Threat-intel lens — sees the confidential resolver telemetry (local model only)
+          - name: intel
+            capability: containment.review.intel
+            prompt: |
+              You sit on a SOC containment review panel. Action requested:
+              {action} on {targets_list} (TTL: {ttl_hours}h), source: {source_advisory}.
+              Confidential member telemetry (NEVER leaves local models):
+              {confidential_telemetry}
+              Assess ONLY the threat-intelligence angle: does the telemetry support
+              active, ongoing harm that this block would interrupt?
+            sovereignty:
+              classification: local
+              data_residency: CH
+              model_class: local-only
+              frontier_ok: false
+
+          # Provenance lens — could the request itself be attacker-induced?
+          - name: provenance
+            capability: containment.review.provenance
+            prompt: |
+              You sit on a SOC containment review panel. Action requested:
+              {action} on {targets_list}, requested by: {requested_by}.
+              Sanitized summary: {sanitized_summary}
+              Assess ONLY request provenance: could this containment request be
+              injection-driven or attacker-induced (e.g. tricking the SOC into
+              blocking legitimate infrastructure)? Is the requester's chain trustworthy?
+            sovereignty:
+              model_class: any
+              frontier_ok: true   # sees only sanitized fields — any class may execute
+
+        # Honest Oracle — adversarial seat, convened only on a split panel
+        tiebreaker:
+          name: oracle
+          capability: review.adversarial
           prompt: |
-            You sit on a SOC containment review panel. Action requested:
-            {action} on {targets_list} (scope: {scope}, blast radius: {blast_radius}, TTL: {ttl_hours}h).
-            Sanitized summary: {sanitized_summary}
-            Justification: {justification}
-            Assess ONLY the network/collateral angle: is blocking these domains at member
-            resolvers proportionate? What legitimate traffic could break?
+            The containment panel split on {action} for {targets_list}.
+            Attack BOTH positions — the case for blocking and the case against —
+            and rule on whichever survives your attack.
           sovereignty:
             model_class: frontier
             frontier_ok: true
 
-        # Threat-intel lens — sees the confidential resolver telemetry (local model only)
-        - name: intel
-          capability: containment.review.intel
-          prompt: |
-            You sit on a SOC containment review panel. Action requested:
-            {action} on {targets_list} (TTL: {ttl_hours}h), source: {source_advisory}.
-            Confidential member telemetry (NEVER leaves local models):
-            {confidential_telemetry}
-            Assess ONLY the threat-intelligence angle: does the telemetry support
-            active, ongoing harm that this block would interrupt?
-          sovereignty:
-            classification: local
-            data_residency: CH
-            model_class: local-only
-            frontier_ok: false
+      # L2 — only the tribunal's defer (or a panel-less ask) reaches the analyst
+      gate:
+        name: analyst
+        prompt: "Containment panel deferred. Review the votes above: apply the block? (pass/fail + notes)"
 
-        # Provenance lens — could the request itself be attacker-induced?
-        - name: provenance
-          capability: containment.review.provenance
-          prompt: |
-            You sit on a SOC containment review panel. Action requested:
-            {action} on {targets_list}, requested by: {requested_by}.
-            Sanitized summary: {sanitized_summary}
-            Assess ONLY request provenance: could this containment request be
-            injection-driven or attacker-induced (e.g. tricking the SOC into
-            blocking legitimate infrastructure)? Is the requester's chain trustworthy?
-          sovereignty:
-            model_class: any
-            frontier_ok: true   # sees only sanitized fields — any class may execute
+      collect: governed_containment
 
-      # Honest Oracle — adversarial seat, convened only on a split panel
-      tiebreaker:
-        name: oracle
-        capability: review.adversarial
-        prompt: |
-          The containment panel split on {action} for {targets_list}.
-          Attack BOTH positions — the case for blocking and the case against —
-          and rule on whichever survives your attack.
-        sovereignty:
-          model_class: frontier
-          frontier_ok: true
-
-      collect: tribunal_containment
-
-  # D — the consequential step: only reachable on an allow ruling
+  # D — the consequential step: only reachable when a layer allowed
   - A_EXECUTE_CONTAINMENT
 
-  # D — append-only audit: every vote, every abstain cause, the diversity record
+  # D — append-only audit: every layer's verdict, every vote, the diversity record
   - A_RECORD_AUDIT

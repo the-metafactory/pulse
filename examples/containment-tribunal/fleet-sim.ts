@@ -15,11 +15,13 @@
  *   degraded        — intel + provenance agents never come online; their seats
  *                     time out into abstains and the incapacitated panel
  *                     (1 allow / 0 deny / 2 abstain) denies, fail-closed
+ *   defer           — unanimous allow at low confidence (mean 0.45 < bar 0.6);
+ *                     the tribunal defers and the analyst gate decides
  */
 
 import type { AgentTransport, MyelinEnvelope } from "../../src/lib/agent-provider";
 
-export type FleetScenario = "allow" | "split" | "degraded";
+export type FleetScenario = "allow" | "split" | "degraded" | "defer";
 
 export interface FleetSimOptions {
   principal: string;
@@ -45,6 +47,13 @@ const CANNED: Record<FleetScenario, Record<string, string>> = {
     "containment.review.intel": vote("deny", 0.7, "Telemetry sample is thin for uni-b and hs-c; blocking now may tip the operator to rotate infrastructure before member IR teams finish account resets."),
     "containment.review.provenance": vote("abstain", 0.4, "Requester chain is plausible but the advisory reference cannot be independently verified from here."),
     "review.adversarial": vote("deny", 0.85, "The case FOR blocking survives on harm, but the case AGAINST stands stronger: rotation risk before resets complete is irreversible, the block is not. Delay 2h, reset accounts first, then block."),
+  },
+  defer: {
+    "containment.review.network": vote("allow", 0.5, "Probably proportionate, but I cannot rule out shared-CDN collateral for cdn.update-mirror.ru."),
+    "containment.review.intel": vote("allow", 0.45, "Telemetry suggests harm but the sample window is short; moderate confidence only."),
+    "containment.review.provenance": vote("allow", 0.4, "Chain looks plausible; advisory reference only partially verifiable."),
+    // Unanimous allow but mean confidence 0.45 < bar 0.6 → the tribunal
+    // defers and the analyst gate (L2) decides.
   },
   degraded: {
     "containment.review.network": vote("allow", 0.85, "Proportionate, reversible, no collateral identified."),

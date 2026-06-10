@@ -207,3 +207,11 @@ features:
     issue: 30
     depends: [ P-700, P-600 ]
     description: "tribunal: step primitive — N model-diverse agent seats dispatched concurrently, pure fail-closed aggregator (worst-case abstain interpretation) ruling allow/deny/defer, Gate-22 diversity rule with restrictive-only reassignment, tiebreaker on split, abstaining panel denies. Consumes L0's ask; only defer reaches the human gate (L2)."
+
+  - id: P-702
+    name: Governed-action pipeline (L0→L1→L2)
+    status: in-progress
+    iteration: 7
+    issue: 34
+    depends: [ P-700, P-701 ]
+    description: "governed: step primitive composing the enforcement gate, the verdict tribunal, and the human gate with fail-closed routing — L0 allow skips the panel (zero LLM cost), deny is terminal at every layer, ask convenes the tribunal (or degrades to the gate), defer escalates to the human. Containment demo runs all three layers in-pipeline with every layer's verdict published to the bus (governance.verdict.*)."

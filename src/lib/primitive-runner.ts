@@ -32,6 +32,8 @@ import {
   parseSeatVote,
   planDiversity,
 } from "./tribunal";
+import { evaluate } from "./enforcement-gate";
+import type { GovernedEvent, GovernedResult, GovernedStepSpec } from "../types/governed";
 
 export class StepFailure extends Error {
   constructor(
@@ -63,6 +65,8 @@ export interface StepRecord {
   gate?: GateResult;
   /** Populated for tribunal steps — full TribunalVerdict (votes, diversity, tiebreak). */
   tribunal?: TribunalVerdict;
+  /** Populated for governed steps — full GovernedResult (l0 + tribunal + gate verdicts). */
+  governed?: GovernedResult;
 }
 
 /** Options threaded through the step runner, extending ActionRunnerOptions */
@@ -78,6 +82,8 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
   onAgentEvent?: (event: AgentEvent) => void;
   /** Optional sink for tribunal lifecycle events. */
   onTribunalEvent?: (event: TribunalEvent) => void;
+  /** Optional sink for governed-action lifecycle events. */
+  onGovernedEvent?: (event: GovernedEvent) => void;
 }
 
 type ValidateStep = (step: unknown, path?: string) => PipelineStep;
@@ -100,7 +106,8 @@ type PrimitiveSpec =
   | RetryStepSpec
   | GateStepSpec
   | AgentStepSpec
-  | TribunalStepSpec;
+  | TribunalStepSpec
+  | GovernedStepSpec;
 
 interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
   validate?: (spec: Record<string, unknown>, path: string, validateStep: ValidateStep) => void;
@@ -145,6 +152,10 @@ const PRIMITIVES = {
   tribunal: {
     validate: validateTribunal,
     run: runTribunal,
+  },
+  governed: {
+    validate: validateGoverned,
+    run: runGoverned,
   },
 } satisfies Record<string, PrimitiveHandler<any>>;
 
@@ -1089,4 +1100,190 @@ async function runTribunal(
 
   const collectField = spec.collect ?? `tribunal_${spec.name}`;
   return { ...payload, [collectField]: verdict };
+}
+
+// ---------------------------------------------------------------------------
+// Governed primitive — the layered L0→L1→L2 governed-action stack
+// ---------------------------------------------------------------------------
+
+function validateGoverned(spec: Record<string, unknown>, path: string, validateStep: ValidateStep): void {
+  if (typeof spec.name !== "string" || spec.name.length === 0) {
+    throw new Error(`${path}: 'name' must be a non-empty string`);
+  }
+  if (typeof spec.tool !== "string" || spec.tool.length === 0) {
+    throw new Error(`${path}: 'tool' must be a non-empty string`);
+  }
+  if (!Array.isArray(spec.input_fields) || spec.input_fields.length === 0 || !spec.input_fields.every((f) => typeof f === "string" && f.length > 0)) {
+    throw new Error(`${path}: 'input_fields' must be a non-empty array of field names`);
+  }
+  if (spec.policy === null || typeof spec.policy !== "object" || Array.isArray(spec.policy)) {
+    throw new Error(`${path}: 'policy' must be an inline policy object (a governed action without a policy cannot exist)`);
+  }
+  if ("tribunal" in spec && spec.tribunal !== undefined) {
+    if (spec.tribunal === null || typeof spec.tribunal !== "object" || Array.isArray(spec.tribunal)) {
+      throw new Error(`${path}.tribunal: must be an object`);
+    }
+    validateTribunal(spec.tribunal as Record<string, unknown>, `${path}.tribunal`);
+  }
+  if ("gate" in spec && spec.gate !== undefined) {
+    const gate = spec.gate as Record<string, unknown>;
+    if (gate === null || typeof gate !== "object" || Array.isArray(gate)) {
+      throw new Error(`${path}.gate: must be an object`);
+    }
+    if (typeof gate.name !== "string" || gate.name.length === 0) {
+      throw new Error(`${path}.gate: 'name' must be a non-empty string`);
+    }
+    if ("prompt" in gate && gate.prompt !== undefined && (typeof gate.prompt !== "string" || gate.prompt.length === 0)) {
+      throw new Error(`${path}.gate: 'prompt' must be a non-empty string when set`);
+    }
+    if ("timeout_ms" in gate && gate.timeout_ms !== undefined && (typeof gate.timeout_ms !== "number" || gate.timeout_ms <= 0)) {
+      throw new Error(`${path}.gate: 'timeout_ms' must be a positive number when set`);
+    }
+  }
+  void validateStep;
+}
+
+/**
+ * Run the layered governed-action stack. Routing is monotone descent in
+ * certainty: refusals are terminal at every layer; only uncertainty travels
+ * down. Every joint fails closed:
+ *
+ *   L0 allow → continue (panel skipped) · deny → halt
+ *   L0 ask   → tribunal (or gate when no tribunal; neither → halt)
+ *   L1 allow → continue · deny → halt (no gate appeal) · defer → gate
+ *   L2 pass  → continue · fail/timeout → halt
+ */
+async function runGoverned(
+  spec: GovernedStepSpec,
+  payload: Record<string, unknown>,
+  options: StepRunnerOptions,
+  stepRecords: StepRecord[],
+  runtime: PrimitiveRuntime,
+): Promise<Record<string, unknown>> {
+  const stepStart = Date.now();
+  const evaluated_at = new Date().toISOString();
+
+  const finish = (
+    result: GovernedResult,
+  ): Record<string, unknown> => {
+    options.onGovernedEvent?.({ type: "governed.resolved", name: spec.name, result });
+    stepRecords.push({
+      action: `governed:${spec.name}`,
+      success: true,
+      durationMs: Date.now() - stepStart,
+      governed: result,
+    });
+    const collectField = spec.collect ?? `governed_${spec.name}`;
+    return { ...payload, [collectField]: result };
+  };
+
+  const refuse = (result: GovernedResult, errMsg: string): never => {
+    options.onGovernedEvent?.({ type: "governed.resolved", name: spec.name, result });
+    stepRecords.push({
+      action: `governed:${spec.name}`,
+      success: false,
+      durationMs: Date.now() - stepStart,
+      error: errMsg,
+      governed: result,
+    });
+    throw new StepFailure(`governed:${spec.name}`, errMsg);
+  };
+
+  // ---- L0: deterministic policy, zero LLM cost --------------------------
+  const toolInput: Record<string, unknown> = {};
+  for (const field of spec.input_fields) {
+    if (field in payload) toolInput[field] = payload[field];
+    // Absent fields stay absent: a rule matching on a missing field doesn't
+    // match, and the policy default (fail-closed) decides.
+  }
+  const l0 = evaluate(spec.tool, toolInput, spec.policy);
+
+  const baseResult = (outcome: "allow" | "deny", resolved_by: GovernedResult["resolved_by"]): GovernedResult => ({
+    name: spec.name,
+    outcome,
+    resolved_by,
+    l0,
+    evaluated_at,
+    resolved_at: new Date().toISOString(),
+  });
+  options.onGovernedEvent?.({ type: "governed.l0", name: spec.name, tool: spec.tool, decision: l0, evaluated_at });
+
+  if (l0.decision === "deny") {
+    return refuse(baseResult("deny", "policy"), `L0 deny — ${l0.reason}`);
+  }
+  if (l0.decision === "allow") {
+    return finish(baseResult("allow", "policy"));
+  }
+
+  // ---- L0 said ask: escalate ---------------------------------------------
+  let tribunalVerdict: TribunalVerdict | undefined;
+  let escalationReason = `policy ask — ${l0.reason}`;
+
+  if (spec.tribunal) {
+    options.onGovernedEvent?.({ type: "governed.escalated", name: spec.name, to: "tribunal", reason: escalationReason });
+    const innerCollect = `__governed_tribunal_${spec.name}`;
+    const tribunalSpec: TribunalStepSpec = {
+      ...(spec.tribunal as TribunalStepSpec),
+      collect: innerCollect,
+      on_defer: "continue", // governed owns the defer routing
+    };
+    let tribunalPayload: Record<string, unknown>;
+    try {
+      tribunalPayload = await runTribunal(tribunalSpec, payload, options, stepRecords);
+    } catch (err) {
+      // Tribunal deny (or abort) — terminal. Recover the verdict from the
+      // tribunal's own step record for the governed audit surface.
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const lastTribunalRecord = [...stepRecords].reverse().find((r) => r.tribunal !== undefined);
+      const result = baseResult("deny", "tribunal");
+      result.tribunal = lastTribunalRecord?.tribunal;
+      return refuse(result, errMsg);
+    }
+    tribunalVerdict = tribunalPayload[innerCollect] as TribunalVerdict;
+
+    if (tribunalVerdict.verdict === "allow") {
+      const result = baseResult("allow", "tribunal");
+      result.tribunal = tribunalVerdict;
+      return finish(result);
+    }
+    // defer → fall through to the gate
+    escalationReason = `tribunal defer — ${tribunalVerdict.reason}`;
+  }
+
+  // ---- L2: the human gate -------------------------------------------------
+  if (!spec.gate) {
+    const result = baseResult("deny", spec.tribunal ? "tribunal" : "policy");
+    result.tribunal = tribunalVerdict;
+    return refuse(
+      result,
+      `${escalationReason} — no gate configured, failing closed (an unresolved judgment call must not proceed)`,
+    );
+  }
+
+  options.onGovernedEvent?.({ type: "governed.escalated", name: spec.name, to: "gate", reason: escalationReason });
+  const innerGateCollect = `__governed_gate_${spec.name}`;
+  const gateSpec: GateStepSpec = {
+    name: spec.gate.name,
+    prompt: spec.gate.prompt ?? `[governed:${spec.name}] ${escalationReason}. pass to allow, fail to refuse.`,
+    timeout_ms: spec.gate.timeout_ms,
+    collect: innerGateCollect,
+  };
+  let gatePayload: Record<string, unknown>;
+  try {
+    gatePayload = await runGate(gateSpec, payload, options, stepRecords);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const lastGateRecord = [...stepRecords].reverse().find((r) => r.gate !== undefined);
+    const result = baseResult("deny", "gate");
+    result.tribunal = tribunalVerdict;
+    result.gate = lastGateRecord?.gate;
+    return refuse(result, errMsg);
+  }
+
+  const gateResult = gatePayload[innerGateCollect] as GateResult;
+  const result = baseResult("allow", "gate");
+  result.tribunal = tribunalVerdict;
+  result.gate = gateResult;
+  void runtime;
+  return finish(result);
 }

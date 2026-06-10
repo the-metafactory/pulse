@@ -84,7 +84,7 @@ actions:
 ```
 
 ### Composition primitives
-Pipelines support 8 composition primitives that operate on collections or control execution while keeping actions pure:
+Pipelines support 9 composition primitives that operate on collections or control execution while keeping actions pure:
 - **map** — apply a sub-pipeline to each item (`over`, `as`, `collect`, `concurrency`, `onError: stop|skip|collect`)
 - **filter** — keep items where sub-pipeline predicate is true (`keep_field`)
 - **reduce** — sequential fold with accumulator (`init`, `item_as`, `acc_as`)
@@ -93,8 +93,9 @@ Pipelines support 8 composition primitives that operate on collections or contro
 - **gate** — pause for operator verdict (`name`, `prompt`, `timeout_ms?`, `collect?`); pluggable `GateProvider` (default: stdin); emits `gate.opened` / `gate.closed` / `gate.timeout` events via `onGateEvent`
 - **agent** — dispatch an LLM/agent task to the fleet (`name`, `capability`, `prompt` template, `sovereignty?`, `timeout_ms?`, `collect?`); pluggable `AgentProvider` (no default — fail fast); `MyelinAgentProvider` publishes myelin v3 task envelopes over NATS and awaits the dispatch lifecycle; emits `agent.dispatched` / `agent.completed` / `agent.failed` / `agent.timeout` via `onAgentEvent`
 - **tribunal** — model-diverse agent panel adjudicates a judgment call (`name`, `seats[]`, `tiebreaker?`, `confidence_bar?`, `on_defer: fail|continue`); fail-closed aggregation to `allow/deny/defer` with worst-case abstain interpretation, Gate-22 diversity rule (restrictive-only reassignment), tiebreaker on split; emits `tribunal.convened` / `tribunal.seat_voted` / `tribunal.tiebreak` / `tribunal.verdict` via `onTribunalEvent`; L1 of the governed-action stack (`docs/verdict-tribunal.md`)
+- **governed** — the full L0→L1→L2 governed-action stack in one step (`name`, `tool`, `input_fields[]`, inline `policy`, `tribunal?`, `gate?`); L0 `evaluate()` allow skips the panel (zero LLM cost), deny halts, ask convenes the tribunal (or degrades to the gate when no tribunal is set); tribunal deny halts (refusals are terminal — no gate appeal), defer opens the gate; emits `governed.l0` / `governed.escalated` / `governed.resolved` via `onGovernedEvent`; composes evaluate()/tribunal/gate, never reimplements them (P-702)
 
-Types in `src/types/pipeline.ts` + `src/types/agent.ts` + `src/types/tribunal.ts`, dispatcher in `src/lib/step-runner.ts`, gate provider in `src/lib/gate-provider.ts`, agent providers in `src/lib/agent-provider.ts`, tribunal pure core in `src/lib/tribunal.ts`. Design rationale in `docs/iteration-primitives.md`, `docs/agent-actions.md`, and `docs/verdict-tribunal.md`.
+Types in `src/types/pipeline.ts` + `src/types/agent.ts` + `src/types/tribunal.ts` + `src/types/governed.ts`, dispatcher in `src/lib/step-runner.ts`, gate provider in `src/lib/gate-provider.ts`, agent providers in `src/lib/agent-provider.ts`, tribunal pure core in `src/lib/tribunal.ts`. Design rationale in `docs/iteration-primitives.md`, `docs/agent-actions.md`, and `docs/verdict-tribunal.md`.
 
 ### Agent actions (D/A/H complete)
 Miner's step taxonomy maps 1:1 to pipeline steps: **D**eterministic = action, **A**gentic = `agent:`, **H**uman = `gate:`. Agent tasks are capability-addressed (`soc.triage.email`), sovereignty-constrained (`model_class: local-only` keeps confidential data off frontier models), and travel as myelin envelopes on `local.{principal}.{stack}.tasks.{capability}`. Pulse never talks to agents directly — it asks the bus. The `agent` capability (`requires: ["agent"]`) gives actions programmatic dispatch via `ctx.capabilities.agent(taskSpec)`. Demo: `examples/soc-triage/`.
