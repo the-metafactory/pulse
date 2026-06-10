@@ -12,16 +12,38 @@ interface EnrichmentOutput {
   advisory?: string;
 }
 
-/** Parse agent output: object as-is; string parsed as JSON (markdown fences stripped); non-JSON text becomes the advisory body. */
+/**
+ * Parse agent output: object as-is; JSON string parsed (edge fences stripped);
+ * a ```json block embedded in surrounding prose is extracted (real models
+ * often preface the JSON with commentary); pure prose becomes the advisory body.
+ */
 function parseEnrichment(output: unknown): EnrichmentOutput {
-  if (typeof output !== "string") return (output ?? {}) as EnrichmentOutput;
+  if (typeof output !== "string") return normalize((output ?? {}) as Record<string, unknown>);
   const cleaned = output.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
   try {
-    return JSON.parse(cleaned) as EnrichmentOutput;
+    return normalize(JSON.parse(cleaned) as Record<string, unknown>);
   } catch (_err) {
+    const embedded = output.match(/```(?:json)?\s*\n([\s\S]*?)```/i);
+    if (embedded) {
+      try {
+        return normalize(JSON.parse(embedded[1]) as Record<string, unknown>);
+      } catch (_err2) {
+        // fenced block wasn't valid JSON either — fall through to prose
+      }
+    }
     // model returned prose instead of JSON — publish it verbatim rather than failing the pipeline
     return { advisory: cleaned };
   }
+}
+
+/** Models sometimes return structured objects for these fields — render them readable, never "[object Object]" or raw JSON walls. */
+function normalize(out: Record<string, unknown>): EnrichmentOutput {
+  const asText = (v: unknown): string | undefined => {
+    if (v === undefined || v === null) return undefined;
+    if (typeof v === "string") return v;
+    return JSON.stringify(v, null, 2);
+  };
+  return { advisory: asText(out.advisory), enrichment: asText(out.enrichment) };
 }
 
 export default {
