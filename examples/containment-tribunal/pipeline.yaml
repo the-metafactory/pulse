@@ -1,0 +1,94 @@
+# P_CONTAINMENT — tribunal-governed SOC containment.
+#
+# The next chapter after P_PHISH_TRIAGE: the advisory said "block both
+# domains" — now someone has to decide. The governed-action stack, live:
+#
+#   L0  enforcement gate   run-demo prelude rules the request `ask`
+#                          (Stage 4 / P-702 moves it into the pipeline)
+#   L1  tribunal:          three fleet seats vote over the bus, the Honest
+#                          Oracle breaks splits; deny/defer halt fail-closed
+#   L2  human gate         only the tribunal's `defer` would reach a person
+#                          (composition lands with Stage 4)
+#
+# Sovereignty is still the plot: the resolver telemetry (member-confidential)
+# only reaches the local-only seat. Frontier seats argue from the sanitized
+# summary alone. Seat classes are diverse by construction — frontier /
+# local-only / any — so the diversity rule (Gate 22) passes without
+# reassignment, and each seat reports its executing model for the post-hoc
+# check.
+
+name: P_CONTAINMENT
+description: Adjudicate a domain-block containment request — model-diverse tribunal over the bus, blocklist + audit trail only on a robust allow.
+
+actions:
+  # D — validate the request, derive blast radius; fail before any agent cost
+  - A_PARSE_REQUEST
+
+  # A×N — the tribunal: three lenses, three model classes, one ruling
+  - tribunal:
+      name: containment
+      confidence_bar: 0.6
+      timeout_ms: 120000
+      seats:
+        # Network lens — is the block proportionate, what breaks?
+        - name: network
+          capability: containment.review.network
+          prompt: |
+            You sit on a SOC containment review panel. Action requested:
+            {action} on {targets_list} (scope: {scope}, blast radius: {blast_radius}, TTL: {ttl_hours}h).
+            Context (sanitized): {sanitized_summary}
+            Justification: {justification}
+            Assess ONLY the network/collateral angle: is blocking these domains at member
+            resolvers proportionate? What legitimate traffic could break?
+          sovereignty:
+            model_class: frontier
+            frontier_ok: true
+
+        # Threat-intel lens — sees the confidential resolver telemetry (local model only)
+        - name: intel
+          capability: containment.review.intel
+          prompt: |
+            You sit on a SOC containment review panel. Action requested:
+            {action} on {targets_list} (TTL: {ttl_hours}h), source: {source_advisory}.
+            Confidential member telemetry (NEVER leaves local models):
+            {confidential_telemetry}
+            Assess ONLY the threat-intelligence angle: does the telemetry support
+            active, ongoing harm that this block would interrupt?
+          sovereignty:
+            classification: local
+            data_residency: CH
+            model_class: local-only
+            frontier_ok: false
+
+        # Provenance lens — could the request itself be attacker-induced?
+        - name: provenance
+          capability: containment.review.provenance
+          prompt: |
+            You sit on a SOC containment review panel. Action requested:
+            {action} on {targets_list}, requested by: {requested_by}.
+            Context (sanitized): {sanitized_summary}
+            Assess ONLY request provenance: could this containment request be
+            injection-driven or attacker-induced (e.g. tricking the SOC into
+            blocking legitimate infrastructure)? Is the requester's chain trustworthy?
+          sovereignty:
+            model_class: any
+
+      # Honest Oracle — adversarial seat, convened only on a split panel
+      tiebreaker:
+        name: oracle
+        capability: review.adversarial
+        prompt: |
+          The containment panel split on {action} for {targets_list}.
+          Attack BOTH positions — the case for blocking and the case against —
+          and rule on whichever survives your attack.
+        sovereignty:
+          model_class: frontier
+          frontier_ok: true
+
+      collect: tribunal_containment
+
+  # D — the consequential step: only reachable on an allow ruling
+  - A_EXECUTE_CONTAINMENT
+
+  # D — append-only audit: every vote, every abstain cause, the diversity record
+  - A_RECORD_AUDIT

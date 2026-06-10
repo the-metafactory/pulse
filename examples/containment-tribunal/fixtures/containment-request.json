@@ -1,0 +1,12 @@
+{
+  "request_id": "CONT-2026-0610-007",
+  "action": "block-domain",
+  "targets": ["swiitch-security-portal.net", "cdn.update-mirror.ru"],
+  "scope": "resolver",
+  "requested_by": "soc-triage-pipeline",
+  "source_advisory": "CommunitySOC Advisory 2026-06-10 (P_PHISH_TRIAGE run, EduLock wave)",
+  "justification": "Active credential-phishing campaign impersonating SWITCH IT-Support; advisory recommends blocking both domains at member resolvers.",
+  "sanitized_summary": "Typosquat domain swiitch-security-portal.net + payload host cdn.update-mirror.ru, EduLock-pattern registrant, German-language 24h account-lock lure. No member identifiers in this summary.",
+  "confidential_telemetry": "Resolver logs (member-confidential): 14 lookups of swiitch-security-portal.net from 3 member institutions in the last 6h (uni-a: 9, uni-b: 4, hs-c: 1); 2 SSO logins followed mail delivery within 11 minutes; affected accounts s.brunner@uni-a.example, m.keller@uni-b.example pending reset.",
+  "ttl_hours": 72
+}
