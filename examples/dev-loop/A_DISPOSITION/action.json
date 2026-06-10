@@ -1,0 +1,12 @@
+{
+  "name": "A_DISPOSITION",
+  "version": "1.0.0",
+  "description": "Classify code-review findings into fix-small (in-cycle) vs defer-big (file a follow-up) and emit a deterministic disposition plan. Pure data classifier — does NOT branch the pipeline (the engine has no conditional; see pipeline.yaml gap G2).",
+  "input": {
+    "review": { "type": "object", "required": true }
+  },
+  "output": {
+    "disposition": { "type": "object" }
+  },
+  "tags": ["dev-loop", "review", "disposition"]
+}

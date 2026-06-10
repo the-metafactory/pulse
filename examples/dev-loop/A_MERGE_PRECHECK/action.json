@@ -1,0 +1,13 @@
+{
+  "name": "A_MERGE_PRECHECK",
+  "version": "1.0.0",
+  "description": "Deterministic pre-merge gate: CI green, PR MERGEABLE, head-SHA fresh (not stale vs base). Produces a precheck verdict the approver (merge.approve) depends on — the mechanical half of the design §3.5 two-of-two merge gate.",
+  "input": {
+    "implement": { "type": "object", "required": true },
+    "merge_state": { "type": "object" }
+  },
+  "output": {
+    "precheck": { "type": "object" }
+  },
+  "tags": ["dev-loop", "merge", "precheck"]
+}

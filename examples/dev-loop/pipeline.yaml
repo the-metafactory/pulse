@@ -1,0 +1,173 @@
+# P_DEV_LOOP — the per-slice dev pipeline as a pulse process definition.
+#
+# This is the executable form of the procedural tier described in
+# cortex docs/design-agentic-dev-pipeline.md §3.3 (the "dev-loop.process.yaml
+# sketch"). It maps the dev-pipeline SOP stages onto pulse's D/A/H step
+# taxonomy that pulse#15 (P-600/P-601) made first-class:
+#
+#   D (deterministic) = plain action strings  (A_DISPOSITION, A_MERGE_PRECHECK)
+#   A (agentic)       = `agent:` steps        (dev.implement, code-review.*, …)
+#   H (human)         = `gate:` step          (release-decision)
+#
+# Each `agent:` step is a capability-addressed, sovereignty-constrained task
+# the local fleet claims off the bus (Offer-mode queue group, the exact contract
+# cortex's dispatch listener + lifecycle publisher speak). Pulse never talks to
+# an agent directly — it publishes `local.{principal}.{stack}.tasks.{capability}`
+# and resolves on `dispatch.task.completed|failed` by correlation_id.
+#
+# ── WHAT THIS DEFINITION FAITHFULLY EXPRESSES (design §3.3) ──────────────────
+#   1. dev.implement  → implement the slice (worktree + CC + gates + PR)         A
+#   2. code-review.*  → adversarial review claimed by Echo/Holly/…              A
+#   3. A_DISPOSITION  → classify findings fix-small / defer-big                  D
+#   4. A_MERGE_PRECHECK→ CI green, MERGEABLE, head-SHA staleness                 D
+#   5. merge.approve  → approver-bot five-check + squash                        A
+#   6. release-decision→ principal H-gate (always-human; §3.5)                  H
+#   7. release.cut    → version / release / deploy / announce                   A
+#
+# ── WHAT THE FORMAT CANNOT EXPRESS YET (flagged as pulse engine gaps) ─────────
+#   The design's §3.3 line `agent: dev.implement  # fix cycle (cap: 5, then
+#   waiting_human)` and the §3.5 gate-config table need engine constructs pulse
+#   does not have. They are documented as flagged gaps (P-NNN candidates) in
+#   README.md §"Engine gaps" and summarised at the foot of this file. The
+#   definition below encodes the HAPPY-PATH single pass — the spine the loop
+#   walks when review approves first cycle — because that is the largest faithful
+#   subset the current format validates and runs. The fix-cycle, the disposition
+#   branch, and the §3.5 caps are the driver's (pilot's) responsibility today and
+#   become pulse constructs when the gaps close.
+
+name: P_DEV_LOOP
+description: >-
+  Per-slice dev pipeline (design §3.3): dev.implement → code-review →
+  disposition → merge-precheck → merge.approve → release gate → release.cut.
+  Happy-path single pass; the bounded fix-cycle + §3.5 caps are flagged engine
+  gaps (see README) the loop-driver owns until pulse grows the constructs.
+
+actions:
+  # 1. A — implement the slice. The dev agent claims this Offer, runs
+  #    worktree → ClaudeCodeHarness → gates → PR, emits lifecycle + worklog.
+  #    The brief is intent + refs (DD-P3), never a context bundle.
+  #    sovereignty: code + repo context stay on the principal's own stack.
+  - agent:
+      name: implement
+      capability: dev.implement
+      prompt: |
+        Implement slice {slice.id} per its brief.
+        Issue:   {slice.issue_ref}
+        Design:  {slice.design_ref}
+        Branch:  {slice.branch}
+        Gates:   {slice.gates}
+        Worktree from origin/main, run the gate list, open a PR that closes the
+        issue. Report the PR number on completion.
+      sovereignty:
+        classification: local
+        model_class: any
+        frontier_ok: true
+      distribution_mode: offer
+      timeout_ms: 1800000
+      collect: implement
+
+  # 2. A — adversarial review. Echo (or whichever agent claims the flavour)
+  #    runs multi-lens review, posts findings to GitHub (data plane), and
+  #    returns a verdict block. `code-review.typescript` is the live capability
+  #    (cortex#237). Flavour is the slice's language; here pinned for the demo.
+  - agent:
+      name: review
+      capability: code-review.typescript
+      prompt: |
+        Review PR {implement.output.pr} for slice {slice.id}.
+        Run the full multi-lens review. Post findings to GitHub as a PR review.
+        Return a verdict: approved | changes-requested, with the findings list
+        classified by severity.
+      sovereignty:
+        classification: local
+        model_class: any
+        frontier_ok: true
+      distribution_mode: offer
+      timeout_ms: 900000
+      collect: review
+
+  # 3. D — disposition. Deterministic classification of the review findings:
+  #    fix-small (cheap, in-cycle) vs defer-big (file a follow-up issue). This is
+  #    a PURE-DATA classifier — it reads review.output and emits a plan; it does
+  #    NOT itself branch the pipeline (the engine has no conditional — gap G2).
+  - A_DISPOSITION
+
+  # ── ENGINE GAP G1 (bounded fix-cycle) ───────────────────────────────────────
+  #   design §3.3:  agent: dev.implement   # fix cycle (cap: 5, then waiting_human)
+  #   design §3.5:  review-cycle cap = 5 per PR → waiting_human
+  #   pulse today has NO construct for "loop steps 1–3 while
+  #   review.verdict == changes-requested, capped at 5, then escalate to a human
+  #   gate". `retry:` loops on STEP FAILURE (a thrown StepFailure), not on a
+  #   DATA VERDICT, and on exhaustion it re-throws — it cannot route to a
+  #   `waiting_human` gate. So the fix-cycle is NOT in the YAML. It lives in the
+  #   loop-driver (pilot) today: the §3.4 reactor re-dispatches dev.implement
+  #   with the findings refs and counts cycles against the cap.
+  #   → P-NNN candidate: a `loop:`/`until:` bounded-iteration construct keyed on
+  #     a payload predicate, with an on-exhaust escalation target. See README.
+
+  # 4. D — merge precheck. CI green, MERGEABLE, head-SHA freshness/staleness.
+  #    Deterministic gate the approver depends on (design §3.5 two-of-two).
+  - A_MERGE_PRECHECK
+
+  # 5. A — independent merge gate (approver-bot, Ivy). Five checks: CI green,
+  #    MERGEABLE, reviewer-identity, base-branch, head-SHA freshness → squash.
+  #    `merge.approve` is spec'd (spec 0001/0002), not yet a live consumer.
+  - agent:
+      name: approve
+      capability: merge.approve
+      prompt: |
+        Independent merge gate for PR {implement.output.pr}, slice {slice.id}.
+        Run the five checks (CI green, MERGEABLE, reviewer-identity matches the
+        review verdict, base-branch is main, head-SHA is fresh). If all pass,
+        squash-merge. Return the merge result + merge SHA.
+      sovereignty:
+        classification: local
+        model_class: any
+        frontier_ok: true
+      distribution_mode: offer
+      timeout_ms: 300000
+      collect: approve
+
+  # 6. H — the release gate. Always-human in §3.5 (prod). The iteration is
+  #    exhausted; the principal decides whether to cut the release. A `fail`
+  #    verdict raises StepFailure and stops the pipeline before release.cut —
+  #    which is exactly the desired "hold the release" semantics here.
+  - gate:
+      name: release-decision
+      prompt: >-
+        Slice {slice.id} merged (PR {implement.output.pr}). Iteration complete.
+        Cut the release now? verdict=pass to release, verdict=fail to hold.
+      collect: release_decision
+
+  # 7. A — release. Version bump, gh release, deploy per SOP, announce per the
+  #    control-plane rule. `release.cut` encodes the versioning/deployment/
+  #    release-checklist SOPs (design F-4; no consumer yet).
+  - agent:
+      name: release
+      capability: release.cut
+      prompt: |
+        Cut the release for slice {slice.id}.
+        Run the versioning SOP (bump per arc-manifest), gh release, deploy per
+        the deployment SOP, and announce per the control-plane rule. Return the
+        released version + deploy result.
+      sovereignty:
+        classification: local
+        model_class: any
+        frontier_ok: true
+      distribution_mode: offer
+      timeout_ms: 900000
+      collect: release
+
+# ── FLAGGED ENGINE GAPS (full detail in README.md §"Engine gaps") ─────────────
+#   G1  bounded fix-cycle      — design §3.3 fix loop + §3.5 cycle-cap=5→human.
+#                                No data-verdict loop / on-exhaust escalation.
+#   G2  conditional branching  — disposition fix-small/defer-big and gate
+#                                pass/fail cannot fork the pipeline. `gate: fail`
+#                                aborts; there is no `on_fail:` branch.
+#   G3  §3.5 gate/cap config   — veto windows (claim 60s, pre-merge 30s),
+#                                fleet-concurrency cap, per-run cost budget,
+#                                dead-man's-switch have NO schema home. `gate:`
+#                                carries only name/prompt/timeout_ms.
+#   G4  step-output → routing  — no declarative way to read a prior step's output
+#                                (e.g. review verdict) and route on it; needed by
+#                                G1+G2. Today only the driver, holding state, can.
