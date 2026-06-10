@@ -18,6 +18,16 @@ interface AdvisoryDoc {
   markdown?: string;
 }
 
+/** POSIX single-quote escape: close, insert an escaped quote, reopen. Safe for any value inside '…'. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/** One or more comma-separated email addresses, nothing exotic. Rejects shell metacharacters by construction. */
+const RECIPIENTS_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(\s*,\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})*$/;
+/** Account names are simple identifiers — never interpolate anything else into the command. */
+const ACCOUNT_RE = /^[A-Za-z0-9._-]+$/;
+
 export default {
   async execute(input: Record<string, unknown>, ctx: ActionContext) {
     const { advisory_doc, mail_to, mail_account, ...payload } = input;
@@ -28,19 +38,35 @@ export default {
       console.log("📭 [A_SEND_MAIL] no recipients (mail_to / ADVISORY_MAIL_TO unset) — skipping");
       return { ...payload, advisory_doc, mail: { sent: false, skipped: true } };
     }
+    // Validate the recipient list before it ever reaches a shell — defense in
+    // depth even when the enforcement gate is active. A value carrying shell
+    // metacharacters is refused here, not escaped-and-hoped.
+    if (!RECIPIENTS_RE.test(to.trim())) {
+      throw new Error(`A_SEND_MAIL: refusing to send — '${to}' is not a valid comma-separated email recipient list`);
+    }
+
+    const account = (mail_account as string | undefined) ?? process.env.ADVISORY_MAIL_ACCOUNT;
+    if (account !== undefined && !ACCOUNT_RE.test(account)) {
+      throw new Error(`A_SEND_MAIL: refusing to send — mail account '${account}' contains illegal characters`);
+    }
 
     const { shell, writeFile } = ctx.capabilities;
     if (!shell || !writeFile) throw new Error("A_SEND_MAIL requires 'shell' and 'writeFile' capabilities");
 
     const subject = doc.subject ?? "CommunitySOC Advisory";
-    const bodyFile = `/tmp/soc-advisory-${doc.date ?? "draft"}-${Date.now()}.md`;
+    // doc.date is model-influenced — keep it out of the path entirely; a UUID is enough.
+    const bodyFile = `/tmp/soc-advisory-${crypto.randomUUID()}.md`;
     await writeFile(bodyFile, doc.markdown ?? "(no advisory document)");
 
-    const account = (mail_account as string | undefined) ?? process.env.ADVISORY_MAIL_ACCOUNT;
-    const accountFlag = account ? ` -a '${account}'` : "";
-    const result = await shell(`~/bin/email send -t '${to}' -s '${subject.replace(/'/g, "'\\''")}' -f '${bodyFile}'${accountFlag} && rm -f '${bodyFile}'`);
+    // Every interpolated value is shell-quoted; `to` and `account` are also
+    // pattern-validated above, so the quoting is the second line of defense.
+    const accountFlag = account ? ` -a ${shellQuote(account)}` : "";
+    const cmd =
+      `~/bin/email send -t ${shellQuote(to.trim())} -s ${shellQuote(subject)} -f ${shellQuote(bodyFile)}${accountFlag}` +
+      ` && rm -f ${shellQuote(bodyFile)}`;
+    const result = await shell(cmd);
     if (result.code !== 0) {
-      await shell(`rm -f '${bodyFile}'`);
+      await shell(`rm -f ${shellQuote(bodyFile)}`);
       throw new Error(`A_SEND_MAIL: email send failed: ${(result.stderr || result.stdout).slice(-400)}`);
     }
 
