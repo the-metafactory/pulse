@@ -10,6 +10,8 @@
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { createLocalCapabilities } from "./capabilities";
+import { guardCapabilities, type GateAuditHook } from "./policy-loader";
+import type { Policy } from "../types/policy";
 import type {
   ActionManifest,
   ActionImplementation,
@@ -31,6 +33,15 @@ export interface ActionRunnerOptions {
    * steps. No default — a missing provider fails fast at execution time.
    */
   agentProvider?: AgentProvider;
+  /**
+   * Optional enforcement policy (Stage 1). When set, blast-radius capabilities
+   * (shell/fetch/writeFile/readFile) are guarded: each call passes the
+   * fail-closed gate before running. Absent → capabilities run unguarded
+   * (backward-compatible; opt in per host).
+   */
+  policy?: Policy;
+  /** Called on every non-allow gate decision — wire to audit logging. */
+  onGateDecision?: GateAuditHook;
 }
 
 /**
@@ -120,8 +131,15 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
       capabilities.agent = (task) => provider.dispatch(task);
     }
 
+    // Stage 1 — enforcement gate. When a policy is configured, guard the
+    // blast-radius capabilities so each call passes the fail-closed gate
+    // before it runs. The manifest declares; the gate bites.
+    const guardedCapabilities = options.policy
+      ? guardCapabilities(capabilities, { policy: options.policy, onDecision: options.onGateDecision })
+      : capabilities;
+
     const ctx: ActionContext = {
-      capabilities,
+      capabilities: guardedCapabilities,
       env: { mode: "local" },
       trace: options.traceId
         ? { traceId: options.traceId, spanId: crypto.randomUUID().slice(0, 8) }
