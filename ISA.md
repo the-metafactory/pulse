@@ -1,156 +1,149 @@
 ---
-task: "Verdict tribunal — model-diverse agent panel adjudicates enforcement-gate ask decisions"
+task: "Governed-action stack — L0 gate, L1 tribunal, L2 human gate composed in-pipeline"
 effort: E3
 effort_source: auto
 phase: complete
-progress: 45/45
+progress: 37/37
 verified: true
 mode: interactive
 started: 2026-06-10
 updated: 2026-06-10
 project: pulse
-slug: 2026-06-10-pulse-verdict-tribunal
+slug: 2026-06-10-pulse-governed-pipeline
 ---
 
-> Previous task ISA (P-600/P-601 agent actions, 36/36 complete, shipped PR #15) superseded — full record in git history of this file.
+> Previous task ISA (P-701 verdict tribunal, 45/45 complete, shipped PR #31, v0.10.0) superseded — full record in git history of this file.
 
 ## Problem
 
-The L0 enforcement gate (P-700, shipped v0.9.0) returns `allow | ask | deny`. `allow` proceeds, `deny` refuses — but `ask` has nowhere to go except a human. "Human-in-the-loop" currently means "human-in-every-loop": every judgment call the deterministic gate can't settle lands on an operator, which doesn't scale and wastes attention on calls an agent panel could adjudicate. RavenClaude's command-review tribunal shows the missing middle layer: N model-diverse agent seats vote, a deterministic aggregator rules, and only genuine uncertainty escalates to the human. Pulse has every ingredient — `agent:` dispatch, `parallel` semantics, sovereignty vocabulary with `model_class`, the gate primitive — but no tribunal pattern composing them.
+The three governance layers exist but don't compose. L0 (enforcement gate, P-700) runs as a capability guard or a demo prelude; L1 (tribunal, P-701) is a pipeline step; L2 (`gate:`) is a separate step. Nothing routes between them: an L0 `allow` cannot skip the panel inside a pipeline, an L0 `ask` cannot convene it, and a tribunal `defer` has nowhere to go but StepFailure — the L2 escalation that justifies "human attention spent last" is unreachable. The containment demo fakes the stack with a run-script prelude and an honest README apology.
 
 ## Vision
 
-A pipeline author writes `tribunal:` next to `agent:` and `gate:`, names the seats and their lenses, and the L1 layer exists: the panel convenes concurrently on the bus, a monoculture panel is automatically diversified, a split panel calls its tiebreaker, an abstaining panel denies, and the verdict — every vote, every reason, the diversity record — lands append-only on the bus and in the payload. The governed-action stack stops being a diagram: L0's `ask` flows into L1, and only L1's `defer` reaches a person.
+One YAML block declares the whole stack: `governed:` names the tool, the policy, the panel, and the human gate. A pre-approved request flows through at zero LLM cost; a forbidden one dies deterministically; a judgment call convenes the tribunal; only genuine panel uncertainty opens the analyst gate. The containment demo runs all three layers in-pipeline, every layer's verdict rides the bus, and the run output reads like the governance plan's diagram come alive.
 
 ## Out of Scope
 
-- Stage 4 composition (P-702): the full L0→L1→L2 layered pipeline and SOC containment demo — this task ships the L1 pattern, not the stack.
-- Conditional branching in YAML (issue #22) — defer-routing to a gate step inside YAML waits for it; tribunal signals defer via fail-closed StepFailure or opt-in continue.
-- Cortex-side seat agents or harnesses — seats are capability addresses; the fleet supplies them.
-- Backbone-level diversity within one model_class (e.g. two distinct local models) — the envelope vocabulary cannot express it; recorded as known limit.
-- Verdict persistence/dashboard (Stage 5 owns observability).
-- Envelope signing.
+- Generic conditional branching (`switch:`/`when:`, issue #22) and payload predicates (#24) — governed routes internally, like tribunal's tiebreaker.
+- Gate policy schema (veto windows, fleet caps — issue #23).
+- Policy file loading inside the step (inline YAML policy only in v1; `policy-loader` stays the capability-guard path).
+- Stage 5 dashboard (verdicts on the bus is this stage's job; reading them back is Stage 5's).
+- Reply to Magnus / compass standard (Stages 6-8).
 
 ## Constraints
 
-- Capability injection only — tribunal never imports NATS/myelin; seats dispatch through the injected `AgentProvider`.
-- Deterministic core is pure: aggregation, vote parsing, diversity checks have no I/O, mirroring `enforcement-gate.ts` (pure `evaluate`).
-- Fail-closed invariants (Magnus' spec discipline): every ambiguous case — unparseable vote, seat failure, empty panel, malformed config — resolves toward deny/defer, never silent allow.
-- Sovereignty outranks diversity: diversity reassignment may only move a seat in the restrictive direction (→ local-only); never loosens local-only to frontier.
-- Gate/agent precedent governs primitive design: runner owns timers, providers receive AbortSignal only, `collect` defaults derive from name, lifecycle events via options sink.
-- Bun + TypeScript strict; no empty catch blocks; existing 191 tests keep passing; zero new runtime dependencies.
+- Layers stay distinct mechanisms: L0 = pure `evaluate()` (no LLM), L1 = the existing tribunal runner, L2 = the existing gate runner. The primitive composes, never reimplements.
+- Fail-closed at every joint: malformed policy → deny; tribunal deny → halt; defer without a configured gate → halt; gate fail → halt.
+- L0 `allow` skips the panel entirely — zero agent dispatch (the cost thesis is testable).
+- Pure core stays pure: no I/O added to enforcement-gate.ts or tribunal.ts.
+- Gate/agent/tribunal precedent: runner owns timers, events via options sinks, `collect` default from name, StepRecords for every layer.
+- Bun strict TS, zero new runtime deps, existing 287 tests keep passing.
 
 ## Goal
 
-Pulse gains a `tribunal:` step primitive backed by a pure deterministic core (`src/lib/tribunal.ts`): N agent seats dispatched concurrently, model-diversity enforced with restrictive-only auto-reassignment, votes aggregated fail-closed to `allow | deny | defer`, split panels resolved by a tiebreaker seat, abstaining panels denied — proven by the three acceptance scenarios from the governance plan plus a runnable example consuming an L0 `ask`.
+Pulse gains a `governed:` step primitive composing evaluate() → tribunal → gate with fail-closed routing (allow skips, ask convenes, deny halts, defer escalates to the gate, gate-fail halts), proven by unit tests for every routing path and by the containment demo running all three layers in-pipeline with each layer's verdict published to the bus.
 
 ## Criteria
 
 ### Types & contracts
-- [x] ISC-1: `src/types/tribunal.ts` exports `TribunalStepSpec` with `name`, `seats[]`, optional `tiebreaker`, `confidence_bar`, `on_defer`, `timeout_ms`, `collect`
-- [x] ISC-2: `SeatSpec` carries `name`, `capability`, `prompt`, optional `sovereignty` reusing `AgentSovereignty` vocabulary
-- [x] ISC-3: `SeatVote` type exported: `{seat, verdict: "allow"|"deny"|"abstain", confidence, reason}`
-- [x] ISC-4: `TribunalVerdict` type exported: `{verdict: "allow"|"deny"|"defer", reason, votes[], diversity, tiebreak?}`
-- [x] ISC-5: `TribunalEvent` lifecycle type exported: `tribunal.convened` / `tribunal.seat_voted` / `tribunal.tiebreak` / `tribunal.verdict`
-- [x] ISC-6: `PipelineStep` union includes `{ tribunal: TribunalStepSpec }`; types re-exported via `src/types/pipeline.ts`
-- [x] ISC-7: `src/index.ts` exports tribunal types + pure functions
+- [x] ISC-1: `src/types/governed.ts` exports `GovernedStepSpec`: `name`, `tool`, `input_fields[]`, `policy` (inline), optional `tribunal` (seats config), optional `gate`, `collect`
+- [x] ISC-2: `GovernedResult` exported: `outcome: "allow"|"deny"`, `resolved_by: "policy"|"tribunal"|"gate"`, `l0: GateDecision`, optional `tribunal: TribunalVerdict`, optional `gate: GateResult`
+- [x] ISC-3: `GovernedEvent` exported: `governed.l0` / `governed.escalated` / `governed.resolved` lifecycle
+- [x] ISC-4: `PipelineStep` union includes `{ governed: GovernedStepSpec }`; re-exports via types/pipeline.ts + index.ts
 
-### Pure core — vote parsing (fail-closed)
-- [x] ISC-8: `parseSeatVote()` accepts structured object output and JSON-string output (including fenced ```json blocks)
-- [x] ISC-9: `parseSeatVote()` coerces unparseable/malformed/missing-verdict output to `abstain` — never throws
-- [x] ISC-10: `parseSeatVote()` clamps non-numeric or out-of-range confidence to 0
+### Routing — the layered semantics
+- [x] ISC-5: L0 `allow` → continue immediately; zero `agentProvider.dispatch` calls (probe: provider call count 0)
+- [x] ISC-6: L0 `deny` → StepFailure naming the rule reason; tribunal never convened
+- [x] ISC-7: L0 `ask` with tribunal configured → tribunal convenes with the spec's seats
+- [x] ISC-8: Anti: L0 `ask` with NEITHER tribunal NOR gate configured → StepFailure (fail closed, no silent allow)
+- [x] ISC-8.1: L0 `ask` with no tribunal but a configured gate → gate opens directly (L0→L2 degradation toward the human)
+- [x] ISC-9: tribunal `allow` → continue; `resolved_by: "tribunal"`
+- [x] ISC-10: tribunal `deny` → StepFailure carrying the tribunal reason
+- [x] ISC-11: tribunal `defer` with gate configured → gate opens with a prompt carrying the defer reason
+- [x] ISC-12: gate `pass` → continue; `resolved_by: "gate"`; outcome allow
+- [x] ISC-13: gate `fail` → StepFailure carrying analyst notes
+- [x] ISC-14: Anti: tribunal `defer` with NO gate configured → StepFailure (fail closed)
+- [x] ISC-15: Anti: malformed/absent policy → StepFailure via L0 deny (evaluate's fail-closed paths exercised through the step)
+- [x] ISC-16: `toolInput` built from `input_fields` payload values; missing field handled by evaluate's match semantics (no crash)
 
-### Pure core — aggregation (fail-closed)
-- [x] ISC-11: robust majority allow (`allows > denies + abstains`) with mean majority confidence ≥ bar → `allow`
-- [x] ISC-12: majority deny (`denies > allows`) → `deny` regardless of confidence
-- [x] ISC-13: robust majority allow with confidence below bar → `defer`
-- [x] ISC-13.1: non-robust majority allow (`allows > denies` but `allows ≤ denies + abstains`) → `defer` (hidden votes could flip it)
-- [x] ISC-14: abstains ≥ valid votes (`abstains ≥ allows + denies`) → `deny` (incapacitated panel denies)
-- [x] ISC-15: all-abstain panel → `deny`
-- [x] ISC-16: empty votes array → `deny` (degenerate fail-closed)
-- [x] ISC-17: allow/deny tie → `tie` signal so the runner convenes the tiebreaker
-- [x] ISC-18: Anti: `tribunal.ts` is pure — no imports of NATS, fs, fetch, or providers (grep probe)
+### Mechanics
+- [x] ISC-17: full `GovernedResult` merged into payload under `collect` (default `governed_${name}`)
+- [x] ISC-18: StepRecords pushed for the governed step AND the inner tribunal/gate (trace shows layers)
+- [x] ISC-19: `GovernedEvent`s emitted via `onGovernedEvent`; inner tribunal/gate events still fire via their own sinks
+- [x] ISC-20: validation rejects missing `name`/`tool`/`input_fields`/`policy`, malformed `tribunal`/`gate` sub-specs, with path-qualified errors
+- [x] ISC-21: parent abort signal propagates through tribunal and gate sub-runs
+- [x] ISC-22: `retry:` composes around `governed:` (StepFailure propagates; test proves)
 
-### Pure core — model diversity (Gate 22)
-- [x] ISC-19: `checkDiversity()` flags a panel of ≥2 seats sharing one declared `model_class` as monoculture
-- [x] ISC-20: `reassignForDiversity()` flips exactly one seat restrictive-direction only (`frontier`/`any` → `local-only`)
-- [x] ISC-21: Anti: reassignment never loosens `local-only` → `frontier`/`any` (sovereignty outranks diversity)
-- [x] ISC-22: all-local-only monoculture proceeds unreassigned but aggregator downgrades `allow` → `defer` with diversity reason
-- [x] ISC-23: post-hoc check: ≥2 seats reporting the identical `model` string downgrades `allow` → `defer`
+### Tests
+- [x] ISC-23: `tests/governed-step.test.ts` covers every routing path (ISC-5..16) with scripted providers
+- [x] ISC-24: plan acceptance test: one run traverses all three layers (ask → defer → gate pass) with all three verdicts in the result
+- [x] ISC-25: `bun test` full suite passes; typecheck clean
 
-### Step primitive — runner
-- [x] ISC-24: `validateTribunal` rejects missing/empty `name`, absent or empty `seats`, malformed seat fields with path-qualified errors
-- [x] ISC-25: seats dispatch concurrently via injected `agentProvider` (probe: timing or dispatch-order test)
-- [x] ISC-26: seat prompts render `{field}` placeholders from payload via `renderPromptTemplate`
-- [x] ISC-27: runner appends the JSON verdict-format instruction to every seat prompt
-- [x] ISC-28: seat dispatch failure or timeout becomes an `abstain` vote — never a pipeline crash mid-panel
-- [x] ISC-29: split panel dispatches the configured tiebreaker seat once and re-aggregates with its vote included
-- [x] ISC-30: tie with no tiebreaker configured → `defer`
-- [x] ISC-31: tie persisting after tiebreaker vote → `defer`
-- [x] ISC-32: monoculture panel auto-reassigned before dispatch; reassignment recorded in `TribunalVerdict.diversity`
-- [x] ISC-33: full `TribunalVerdict` merged into payload under `collect` (default `tribunal_${name}`)
-- [x] ISC-34: `deny` verdict raises `StepFailure("tribunal:${name}")`
-- [x] ISC-35: `defer` raises `StepFailure` by default; `on_defer: "continue"` opts into downstream handling (fail-closed default)
-- [x] ISC-36: lifecycle events emitted via `onTribunalEvent` sink for convened/seat_voted/tiebreak/verdict
-- [x] ISC-37: parent abort signal cancels in-flight seat dispatches
-- [x] ISC-38: Anti: missing `agentProvider` with a tribunal step fails fast with a clear error — no silent hang
-- [x] ISC-39: `retry:` wrapping a tribunal step composes (StepFailure propagates; test proves)
+### Demo — containment runs the stack
+- [x] ISC-26: `examples/containment-tribunal/pipeline.yaml` uses one `governed:` step (policy inline, tribunal seats, analyst gate) — run-demo L0 prelude removed
+- [x] ISC-27: `--preapproved` scenario: sinkhole target → L0 allow → panel never convenes (zero-cost line in output)
+- [x] ISC-28: `--protected` scenario: L0 deny in-pipeline (was prelude)
+- [x] ISC-29: `--defer` scenario: low-confidence panel → defer → analyst gate opens (auto-pass default, `--interactive` for real verdict)
+- [x] ISC-30: existing scenarios still correct: default ALLOW via tribunal, `--split` DENY via oracle, `--degraded` incapacitated DENY
+- [x] ISC-31: each layer's verdict published to the bus as a `governance.verdict` envelope (demo wiring via transport; `nats sub` shows it)
+- [x] ISC-32: README rewritten: stack in-pipeline, scenario matrix updated, Stage-4 apology removed
 
-### Quality, example, ship
-- [x] ISC-40: `tests/tribunal.test.ts` covers pure core: parsing, aggregation table, diversity rules
-- [x] ISC-41: `tests/tribunal-step.test.ts` covers runner incl. the three plan acceptance scenarios (split→tiebreaker, monoculture→reassign, abstain→deny)
-- [x] ISC-42: `bun test` full suite passes; `bun run typecheck` clean
-- [x] ISC-43: `docs/verdict-tribunal.md` documents the pattern (L0 ask → L1 verdict, diversity rule, fail-closed table); CLAUDE.md primitive list updated to 8
-- [x] ISC-44: `blueprint.yaml` gains governance entries: P-700 (done, retroactive) and P-701; example `examples/tribunal/` runs offline with MockAgentProvider consuming an L0 `ask`
+### Docs & ship
+- [x] ISC-33: `docs/verdict-tribunal.md` gains the `governed:` composition section
+- [x] ISC-34: CLAUDE.md + README primitive counts → 9 with `governed` row/bullet
+- [x] ISC-35: blueprint.yaml: P-702 entry (depends P-700, P-701)
+- [x] ISC-36: Anti: `examples/soc-triage/` and `examples/tribunal/` untouched; existing tribunal/gate tests unmodified
 
 ## Test Strategy
 
 | isc | type | check | tool |
 |---|---|---|---|
-| 1–7 | static | types compile, exports present | `bun run typecheck`, Grep |
-| 8–23 | unit | pure core behavior table | `bun test tests/tribunal.test.ts` |
-| 24–39 | unit | runner with MockAgentProvider | `bun test tests/tribunal-step.test.ts` |
-| 40–42 | regression | full suite + typecheck | `bun test`, `tsc --noEmit` |
-| 43 | inspection | docs accurate | Read |
-| 44 | integration | example runs offline | `bun examples/tribunal/run-demo.ts` |
+| 1–4 | static | exports, union compiles | typecheck, Grep |
+| 5–22 | unit | routing table + mechanics | `bun test tests/governed-step.test.ts` |
+| 23–25 | regression | suite + typecheck | `bun test`, tsc |
+| 26–32 | integration | demo scenario runs | Bash runs + grep output |
+| 33–35 | inspection | docs/blueprint | Read |
+| 36 | diff scope | `git diff --stat` | Bash |
 
 ## Features
 
 | name | satisfies | depends_on | parallelizable |
 |---|---|---|---|
-| tribunal types | ISC-1..7 | — | no (foundation) |
-| pure core (parse/aggregate/diversity) | ISC-8..23 | types | no |
-| tribunal step primitive | ISC-24..39 | pure core | no |
-| tests | ISC-40..42 | core + primitive | partial |
-| docs + blueprint + example | ISC-43..44 | all | yes |
+| governed types | ISC-1..4 | — | no (foundation) |
+| governed runner + validation | ISC-5..22 | types | no |
+| tests | ISC-23..25 | runner | no |
+| demo upgrade | ISC-26..32 | runner | no |
+| docs + blueprint | ISC-33..35 | all | yes |
 
 ## Decisions
 
-- 2026-06-10: Tribunal is a primitive, not YAML composition — tiebreaker convening and seat reassignment are control flow YAML cannot express (conditional branching #22 still open); precedent: gate/agent are primitives.
-- 2026-06-10: Fail-closed defer default — `defer` raises StepFailure unless `on_defer: "continue"`; a pipeline silently proceeding past an unresolved judgment call would bypass L2.
-- 2026-06-10: Sovereignty outranks diversity — reassignment only restricts (→ local-only); an all-local-only panel keeps its monoculture and pays for it with allow→defer downgrade (human compensates where diversity is unattainable).
-- 2026-06-10: refined: ISC-19/ISC-20 — `checkDiversity()`/`reassignForDiversity()` merged into one pure `planDiversity()` (check + restrictive reassignment are one decision); behavior verified as specified.
-- 2026-06-10: sage review (PR #31) finding adopted — post-hoc monoculture check narrowed to the ALLOWING coalition; a denier sharing a model with an allower is not a monoculture grant.
-- 2026-06-10: Advisor tool (Inference.ts --mode advisor) drops prompt args — 2 attempts, both received only the literal word "advisor". Sage bus review stands as the commitment-boundary second opinion; tool defect to investigate separately.
-- 2026-06-10: show-your-math (delegation floor 2nd slot relaxed): all relevant source read directly in-session (6 files); an Explore agent would re-read the same files slower. Sage bus review at VERIFY is the substantive delegation.
+- 2026-06-10: `governed:` is one composite primitive, not three chained steps — linear YAML cannot express "allow skips the panel" or "defer opens the gate" without #22; internal routing follows the tribunal-tiebreaker precedent. #22 stays the generic answer; governed is the specific stack.
+- 2026-06-10: inline policy only (v1) — file loading belongs to the policy-loader/capability-guard path; the YAML block should read as one self-contained governance declaration.
+- 2026-06-10: bus publication of layer verdicts is demo wiring (event sinks → transport.publish), not pulse-core coupling — pulse stays capability-injected; Stage 5 consumes the subjects.
+- 2026-06-10: show-your-math (delegation 2nd slot): all three mechanisms built/read this session; sage at VERIFY is the substantive delegation.
 
 ## Changelog
 
-- conjectured: post-hoc model diversity means "no two votes share an executing model".
-  refuted_by: sage review on PR #31 — a tiebreaker (or any vote) sharing a model with a DENYING seat does not make the permission-granting coalition a monoculture.
-  learned: diversity guards the coalition that grants permission, not the panel roster; deny is never downgraded, so duplicate models outside the allowing set are noise.
-  criterion_now: ISC-23 (post-hoc check examines allowing votes only; two regression tests cover both directions).
+- conjectured: an L0 `ask` without a tribunal must fail closed.
+  refuted_by: FirstPrinciples pass — a deployment without a fleet still has a human; degrading ask to the gate (L0→L2) keeps every path fail-closed while keeping L1 optional.
+  learned: escalation is monotone descent in certainty; layers are optional joints, but the descent must always terminate at deny or a MORE authoritative layer — never at silent allow.
+  criterion_now: ISC-8 (neither → halt) + ISC-8.1 (no tribunal + gate → gate opens).
+
+- conjectured: recovering an inner verdict via reverse-search of stepRecords is safe because the inner runner always records before throwing.
+  refuted_by: sage PR #35 — abort paths record without a verdict field, so reverse-search can surface an EARLIER step's verdict in retry/multi-governed pipelines.
+  learned: when recovering state from a shared accumulator after a failed call, slice from the pre-call length — never search the whole history.
+  criterion_now: ISC-18 (catch paths recover only own-call records; fixed in follow-up commit).
 
 ## Verification
 
-- ISC-1..7: `bun run typecheck` clean; exports Grep-confirmed in `src/index.ts` + `src/types/pipeline.ts`
-- ISC-8..18: `bun test tests/tribunal.test.ts` — parsing/aggregation/diversity table, 30 tests pass
-- ISC-18: `grep -cE "import .*(nats|node:fs|fetch|agent-provider)" src/lib/tribunal.ts` → 0
-- ISC-19..23: planDiversity/checkPosthocDiversity/applyDiversityDowngrade tests pass (incl. allowing-coalition regression pair)
-- ISC-24..39: `bun test tests/tribunal-step.test.ts` — 27 tests pass; three plan acceptance scenarios green (split→tiebreaker, monoculture→reassign with restricted dispatch asserted, abstain→deny)
-- ISC-25: concurrency probe — maxInFlight ≥ 2, 3×40ms panel completes <100ms
-- ISC-42: full suite `bun test` → 287 pass, 0 fail; `tsc --noEmit` clean
-- ISC-43: `docs/verdict-tribunal.md` written; CLAUDE.md lists 8 primitives with tribunal bullet — Read-verified
-- ISC-44: blueprint P-700 (done) + P-701 entries merged; `bun examples/tribunal/run-demo.ts` → L0 ASK convenes panel: scenario 1 ALLOW (0.85 ≥ 0.6), scenario 2 tiebreak → DENY, scenario 3 incapacitated → DENY
-- Live deploy probe: `~/.config/metafactory/pkg/repos/pulse` at commit 9db242a, `arc-manifest.yaml version: 0.10.0`
-- Shipped: PR #31 (squash-merged 2026-06-10T16:30:35Z), issue #30 closed, sage review verdict "approve with one question" — question resolved in follow-up commit
+- ISC-1..4: typecheck clean; exports Grep-confirmed (types/governed.ts, pipeline.ts union, index.ts)
+- ISC-5..22: `bun test tests/governed-step.test.ts` — 17 pass: full routing table (allow-skip with 0 dispatches, L0 deny, ask→tribunal allow/deny, defer→gate pass/fail, defer-no-gate fail-closed, ask-no-tribunal→gate degradation, ask-neither fail-closed, malformed policy deny, events sequence, records, retry composition, validation)
+- ISC-24: all-three-layers test (ask → defer → gate pass, all verdicts in GovernedResult) + live demo --defer traverses L0/L1/L2
+- ISC-25: `bun test` → 304 pass, 0 fail; tsc clean; blueprint lint OK
+- ISC-26..30: all six scenarios probed post-sage-fix — default ALLOW/tribunal, --preapproved ALLOW/policy (0 seats), --protected DENY/policy, --split DENY/tribunal, --degraded DENY/tribunal, --defer ALLOW/gate
+- ISC-31: transport-level NATS probe captured governance.verdict.{l0,tribunal,gate,resolved} on local.switch-soc.default.governance.verdict.* (defer run, live bus)
+- ISC-32..35: README/docs/blueprint Read-verified; P-702 done in blueprint
+- ISC-36: git status scope check — soc-triage + tribunal intro untouched; existing tests unmodified
+- Sage: two review rounds; "blocker" (subdomain bypass) refuted empirically via loader probe + --protected scenario; 5 real findings fixed (own-record recovery, settled publishes, taxonomy, envelope sovereignty, demo-wiring honesty)
+- Live deploy probe: ~/.config/metafactory/pkg/repos/pulse at v0.12.0 runs --defer → ALLOW resolved by GATE
+- Shipped: PR #35 squash-merged, issue #34 closed, v0.12.0 deployed via arc
