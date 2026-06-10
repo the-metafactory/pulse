@@ -1,19 +1,38 @@
 {
   "name": "A_NOTIFY_MATTERMOST",
-  "version": "1.0.0",
-  "description": "Post the published community advisory to a Mattermost channel. Config via input fields or env: MATTERMOST_URL, MATTERMOST_BOT_TOKEN, MATTERMOST_CHANNEL_ID. Skipped (passthrough) when not configured so the demo stays offline-safe.",
+  "version": "2.0.0",
+  "description": "Post the advisory document to a Mattermost channel \u2014 control chars stripped, long messages chunked into a thread (root + replies). Config via input fields or env (MATTERMOST_URL, MATTERMOST_BOT_TOKEN, MATTERMOST_CHANNEL_ID); skipped when unset",
   "input": {
-    "published": { "type": "object", "required": true },
-    "mattermost_url": { "type": "string" },
-    "mattermost_channel_id": { "type": "string" },
-    "mattermost_bot_token": { "type": "string" }
+    "advisory_doc": {
+      "type": "object",
+      "required": true
+    },
+    "mattermost_url": {
+      "type": "string"
+    },
+    "mattermost_channel_id": {
+      "type": "string"
+    },
+    "mattermost_bot_token": {
+      "type": "string"
+    }
   },
   "output": {
-    "mattermost": { "type": "object" }
+    "mattermost": {
+      "type": "object"
+    }
   },
-  "requires": ["fetch"],
-  "tags": ["soc", "notify", "mattermost"],
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "notify",
+    "mattermost"
+  ],
   "deployment": {
-    "secrets": ["MATTERMOST_BOT_TOKEN"]
+    "secrets": [
+      "MATTERMOST_BOT_TOKEN"
+    ]
   }
 }

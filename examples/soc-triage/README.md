@@ -6,10 +6,10 @@ confidential member data on local models while shareable IOCs go to a frontier
 model.
 
 ```
-reported email ──► agent: triage ──► A_SANITIZE_IOCS ──► agent: enrich ──► gate ──► A_PUBLISH_ADVISORY ──► A_NOTIFY_MATTERMOST
-(confidential)     local-only LLM    strips member PII   frontier model    analyst   community advisory     post to channel
-                   frontier_ok:false (sovereignty         frontier_ok:true verdict                          (skips when unset)
-                                      boundary)
+reported email ──► agent: triage ──► A_SANITIZE_IOCS ──► agent: enrich ──► gate ──► A_FORMAT_ADVISORY ──► A_PUBLISH_ADVISORY
+(confidential)     local-only LLM    strips member PII   frontier model    analyst   one document for       └► A_NOTIFY_MATTERMOST
+                   frontier_ok:false (sovereignty         frontier_ok:true verdict   every channel          └► A_SEND_MAIL
+                                      boundary)                                      (never raw JSON)          (each skips when unset)
 ```
 
 ## Run it
@@ -54,6 +54,21 @@ uses the Sage bot on `securechat-test.switch.ch` (VPN required).
 
 When configured, a failed post fails the pipeline — a SOC that believes it
 notified members but didn't is worse than a visible error.
+
+## Mail notification (optional)
+
+`A_FORMAT_ADVISORY` renders one markdown document for every channel; the
+KAI email CLI converts it to HTML on send — Mattermost and mail can never
+drift apart.
+
+```bash
+export ADVISORY_MAIL_TO="soc-members@example.ch"   # comma-separated recipients
+export ADVISORY_MAIL_ACCOUNT="kai"                 # optional: SMTP account name
+
+bun examples/soc-triage/run-demo.ts
+```
+
+Unset → the step skips itself. Same fail-loud contract as Mattermost.
 
 ## NetSecWG demo script (~5 min)
 
