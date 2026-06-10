@@ -202,7 +202,7 @@ features:
 
   - id: P-701
     name: Verdict tribunal (L1)
-    status: in-progress
+    status: done
     iteration: 7
     issue: 30
     depends: [ P-700, P-600 ]
