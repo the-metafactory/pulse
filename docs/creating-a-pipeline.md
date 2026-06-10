@@ -38,7 +38,7 @@ actions:
 
 Actions run in order. Each one's output becomes the next one's input. Data accumulates — nothing is lost.
 
-Steps don't have to be plain action names. Pipelines support 8 composition primitives — `map`, `filter`, `reduce`, `parallel`, `retry`, `gate` (human verdict), `agent` (fleet task over the bus), and `tribunal` (model-diverse agent panel ruling allow/deny/defer):
+Steps don't have to be plain action names. Pipelines support 9 composition primitives — `map`, `filter`, `reduce`, `parallel`, `retry`, `gate` (human verdict), `agent` (fleet task over the bus), `tribunal` (model-diverse agent panel ruling allow/deny/defer), and `governed` (the full policy → tribunal → human-gate stack in one step):
 
 ```yaml
 actions:
@@ -54,7 +54,7 @@ actions:
   - A_PUBLISH
 ```
 
-See `docs/iteration-primitives.md` (map/filter/reduce/parallel/retry design), `docs/agent-actions.md` (`agent:` + `gate:`, the D/A/H taxonomy), and `docs/verdict-tribunal.md` (`tribunal:`, the governed-action stack).
+See `docs/iteration-primitives.md` (map/filter/reduce/parallel/retry design), `docs/agent-actions.md` (`agent:` + `gate:`, the D/A/H taxonomy), and `docs/verdict-tribunal.md` (`tribunal:` + `governed:`, the governed-action stack).
 
 ## Step 2: Create actions
 

@@ -126,7 +126,7 @@ const result = await runPipeline(
 // result.output has ALL fields from ALL actions
 ```
 
-**Compose with primitives** — pipelines support 8 composition primitives that let you process collections, fan out to parallel branches, wrap steps with retry policies, pause for operator input, dispatch an agent task to the fleet, or convene a model-diverse verdict panel. Actions stay pure — they never know composition is happening.
+**Compose with primitives** — pipelines support 9 composition primitives that let you process collections, fan out to parallel branches, wrap steps with retry policies, pause for operator input, dispatch an agent task to the fleet, or convene a model-diverse verdict panel. Actions stay pure — they never know composition is happening.
 
 | Primitive | Purpose | Key options |
 |-----------|---------|-------------|
@@ -138,6 +138,7 @@ const result = await runPipeline(
 | `gate` | Pause for operator verdict (interactive H-step) | `name`, `prompt`, `timeout_ms?`, `collect?` |
 | `agent` | Dispatch an LLM/agent task to the fleet (agentic A-step) | `capability`, `prompt`, `sovereignty?`, `timeout_ms?`, `collect?` |
 | `tribunal` | Model-diverse agent panel rules allow/deny/defer on a judgment call | `seats[]`, `tiebreaker?`, `confidence_bar?`, `on_defer: fail\|continue` |
+| `governed` | Full L0→L1→L2 governed-action stack: policy → tribunal → human gate | `tool`, `input_fields[]`, `policy`, `tribunal?`, `gate?` |
 
 The three step kinds map onto miner's D/A/H process taxonomy: **D**eterministic = action, **A**gentic = `agent`, **H**uman = `gate`. Agent tasks travel as myelin envelopes over NATS via a pluggable `AgentProvider` — see [`docs/agent-actions.md`](docs/agent-actions.md) and [`examples/soc-triage/`](examples/soc-triage/). `tribunal` composes the A-step into governance: N model-diverse seats vote, a deterministic fail-closed aggregator rules `allow/deny/defer` — L1 of the governed-action stack between the enforcement gate (L0) and the human gate (L2). See [`docs/verdict-tribunal.md`](docs/verdict-tribunal.md) and [`examples/tribunal/`](examples/tribunal/).
 
@@ -188,7 +189,7 @@ actions:
 ```
 Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; the default `StdinGateProvider` reads pass/fail + notes from stdin. The result (`{ name, verdict, notes, opened_at, closed_at }`) is merged into payload context under the `collect` field. `verdict: "fail"` halts the pipeline with a `StepFailure` carrying the operator's notes — there is no "fail but continue" branch yet; treat the gate as a hard stop. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can route them to traces; the verdict + notes are also captured on the corresponding `StepRecord` so callers without a hook still see them via `PipelineResult.steps`.
 
-Gate, agent, and tribunal are the leaf composition primitives (no nested `actions`). The other primitives wrap sub-pipelines; the leaves are dispatch-and-collect terminals. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
+Gate, agent, tribunal, and governed are leaf primitives (no nested `actions`) — the composition primitives proper (map/filter/reduce/parallel/retry) wrap sub-pipelines; the leaves are dispatch-and-collect terminals. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
 
 **Parallel branches** — fan out to heterogeneous work:
 ```yaml
@@ -294,12 +295,13 @@ The capability injection pattern means the same action code runs locally on Bun 
 - **Agent primitive** — capability-addressed fleet tasks as myelin envelopes over NATS, sovereignty constraints travel with the payload (A-step)
 - **Enforcement gate (L0)** — deterministic fail-closed runtime tool-call policy (governance Stage 1)
 - **Verdict tribunal (L1)** — model-diverse agent panel adjudicates the gate's `ask` decisions (governance Stage 3)
+- **Governed actions (L0→L1→L2)** — `governed:` composes policy, tribunal, and human gate in one step; refusals terminal at every layer; demo publishes layer verdicts to the bus (governance Stage 4)
 - Arc package integration (arc-installed actions, pipelines, flows)
 - Step-level validation at parse time, partial output preservation, AbortController cancellation
 - 287 tests across 20 files, tsc clean
 
 ### Next
-- Layered governed-action pipeline (P-702): compose L0 → L1 → L2, SOC containment demo
+- Audit substrate + Mission Control observability tab (governance Stage 5)
 - Cortex event bridge (P-401): execution events surfaced in Mission Control
 - JSONL trace emission feeding back to miner (P-302)
 

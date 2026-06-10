@@ -95,6 +95,15 @@ export {
   VOTE_FORMAT_INSTRUCTION,
 } from "./lib/tribunal";
 
+// Governed actions (governance Stage 4, P-702) — the L0→L1→L2 stack as one step
+export type {
+  GovernedStepSpec,
+  GovernedResult,
+  GovernedEvent,
+  GovernedTribunalSpec,
+  GovernedGateSpec,
+} from "./types/governed";
+
 // Flow system (iteration 3) — the third primitive
 export { runFlow, scheduleFlow, loadFlow } from "./lib/flow";
 

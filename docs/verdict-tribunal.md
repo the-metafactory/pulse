@@ -115,6 +115,51 @@ tiebreak — also lands in the step record (`StepRecord.tribunal`).
 runner. Tests: `tests/tribunal.test.ts` (core), `tests/tribunal-step.test.ts`
 (runner, including the three plan acceptance scenarios).
 
+## The `governed:` step — the stack composed (Stage 4, P-702)
+
+One block declares a consequential action's whole governance:
+
+```yaml
+- governed:
+    name: containment
+    tool: containment
+    input_fields: [action, targets_list]
+    policy:                      # L0 — inline enforcement-gate policy
+      version: 1
+      default: deny
+      rules: [...]
+    tribunal:                    # L1 — optional; ask degrades to the gate without it
+      name: containment-panel
+      seats: [...]
+      tiebreaker: {...}
+      confidence_bar: 0.6
+    gate:                        # L2 — optional; defer without it fails closed
+      name: analyst
+    collect: governed_containment
+```
+
+Routing is monotone descent in certainty — **only uncertainty travels down;
+refusals are terminal at every layer**:
+
+| Layer | allow | deny | escalates |
+|---|---|---|---|
+| L0 `evaluate()` | continue — panel skipped, zero LLM cost | halt | `ask` → tribunal (or gate when no tribunal is configured) |
+| L1 tribunal | continue | halt — **no gate appeal** | `defer` → gate |
+| L2 gate | `pass` → continue | `fail`/timeout → halt | — |
+
+`ask` with neither tribunal nor gate fails closed. A tribunal deny never
+reaches the human: routing refusals to L2 would reopen human-in-every-loop
+and hand an attacker a fatigue channel — refusals are cheap to retry through
+proper channels. The `GovernedResult` in the payload (and step record)
+carries every layer's verdict: `l0`, `tribunal?`, `gate?`, `outcome`,
+`resolved_by`.
+
+The primitive **composes** the three existing mechanisms — pure
+`evaluate()`, the tribunal runner, the gate runner — it never reimplements
+them. Lifecycle: `governed.l0` / `governed.escalated` / `governed.resolved`
+via `onGovernedEvent`; the inner tribunal/gate events still fire on their own
+sinks.
+
 ## Demos
 
 ```bash
@@ -126,8 +171,10 @@ bun examples/containment-tribunal/run-demo.ts        # realistic: fleet seats ov
 three times (robust allow, split-then-tiebreak, abstaining panel denied) with
 a canned provider, no bus.
 
-`examples/containment-tribunal/` is the realistic flow: a SOC domain-block
-request adjudicated by fleet agents answering myelin envelopes over the bus
-(in-memory or `--live` NATS), sovereignty enforced consumer-side, scenario
-flags for split/degraded/protected paths, blocklist + append-only audit
+`examples/containment-tribunal/` is the realistic flow — since Stage 4 the
+full stack in one `governed:` step: a SOC domain-block request adjudicated
+through L0 policy, fleet-seat tribunal over the bus (in-memory or `--live`
+NATS), and analyst gate; sovereignty enforced consumer-side; scenario flags
+for preapproved/protected/split/degraded/defer paths; every layer's verdict
+published as `governance.verdict.*` envelopes; blocklist + append-only audit
 artifacts on an allow.
