@@ -55,9 +55,9 @@ Cues are **not** embedded in process manifests. They are a standalone artifact t
                        │ events flow to
                        ▼
 ┌─────────────────────────────────────────────────────────┐
-│ grove (event relay)                                     │
-│   • cue.fired event in event taxonomy                   │
-│   • Relays cue events to Discord/dashboards             │
+│ cortex (agent fleet runtime)                            │
+│   • cue.fired event on the bus taxonomy                 │
+│   • Surfaces cue events in Mission Control / adapters   │
 │   • Can programmatically fire cues on behalf of agents  │
 └──────────────────────┬──────────────────────────────────┘
                        │ traces feed back to
@@ -77,14 +77,14 @@ Cues are **not** embedded in process manifests. They are a standalone artifact t
 | Where is a cue **defined**? | metafactory registry — as a 9th artifact type |
 | Where is a cue **installed**? | Local filesystem via arc |
 | Where is a cue **evaluated and fired**? | Pulse — the cue evaluator subsystem |
-| Where is a cue **relayed**? | Grove — cue.fired events in the event taxonomy |
+| Where is a cue **relayed**? | cortex — cue.fired events on the bus, surfaced via Mission Control/adapters |
 | Where is a cue **observed**? | Miner — cue provenance in execution traces |
 
 ### Cue Types (Initial Set)
 
 Start with core types, earn the rest through proven need:
 
-1. **Event cue** — fires when a matching event appears (e.g., `grove.tool_call`, `git.push`)
+1. **Event cue** — fires when a matching event appears (e.g., `cortex.tool_call`, `git.push`)
 2. **Schedule cue** — fires on a time schedule (cron expression)
 3. **State cue** — fires when a state condition is met (e.g., "all tests pass", "PR merged")
 
@@ -107,11 +107,11 @@ Security lives at the **binding**, not the cue:
 | P-300 (Flow) | Flows already have sources — cues become a new source type |
 | P-301 (D/A/H) | Cue-triggered processes still respect D/A/H classification |
 | P-302 (Traces) | cue.fired events are a new trace type |
-| P-401 (Grove bridge) | Natural relay point for cue.fired events |
+| P-401 (Cortex bridge) | Natural relay point for cue.fired events |
 
 ### Blueprint Features
 
-See meta-factory blueprint C-100 through C-103 and grove G-600 for the implementation roadmap.
+See meta-factory blueprint C-100 through C-103 (cue artifact features — distinct from cortex's C-1xx migration IDs) and the cortex blueprint for the relay-side roadmap.
 
 ---
 

@@ -9,7 +9,7 @@
 
 ## Overview
 
-A shared transport abstraction layer (`packages/transport/`) providing a thin interface over publish/subscribe operations. This is the foundation for all NATS-based communication in the metafactory ecosystem, enabling Pulse, Grove, Spawn, and Miner to publish and subscribe to events without coupling to a specific transport implementation.
+A shared transport abstraction layer (`packages/transport/`) providing a thin interface over publish/subscribe operations. This is the foundation for all NATS-based communication in the metafactory ecosystem, enabling Pulse, cortex, Spawn, and Miner to publish and subscribe to events without coupling to a specific transport implementation.
 
 The abstraction enables:
 - **Production use** via NATS + JetStream
@@ -81,7 +81,7 @@ The event envelope follows CloudEvents v1.0 specification with metafactory exten
 | `specversion` | `"1.0"` | CloudEvents spec version |
 | `id` | `string` | Unique event ID (ULID recommended) |
 | `source` | `string` | URI: `metafactory://{network_id}/{component}` |
-| `type` | `string` | Hierarchical event type: `grove.agent.task.completed`, `cue.fired`, `pulse.process.completed` |
+| `type` | `string` | Hierarchical event type: `cortex.agent.task.completed`, `cue.fired`, `pulse.process.completed` |
 
 ### Optional CloudEvents Fields
 
@@ -230,7 +230,7 @@ function createTransport(config: TransportConfig): {
 1. NATS server is available for integration tests (can be local via Docker or native install)
 2. `@nats-io/transport-node` and `@nats-io/jetstream` packages are stable and suitable for production
 3. JetStream is required for durable subscriptions with acknowledgment semantics
-4. The package will be consumed by Grove, Spawn, and Miner in future iterations
+4. The package will be consumed by cortex, Spawn, and Miner in future iterations
 
 ---
 

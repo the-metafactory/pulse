@@ -28,7 +28,7 @@ miner captures traces → metafactory distributes → arc installs → pulse exe
 
 - **Runtime:** Bun
 - **Language:** TypeScript (strict)
-- **Test:** `bun test` (191 tests across 16 files)
+- **Test:** `bun test` (287 tests across 20 files)
 - **Dependencies:** commander, zod, yaml
 
 ## Architecture
@@ -105,7 +105,7 @@ Flows connect source → pipeline → destination. Sources: inline, file, RSS, c
 ## Key commands
 
 ```bash
-bun test              # Run all 191 tests
+bun test              # Run all 287 tests
 bun run typecheck     # TypeScript check
 bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
@@ -213,7 +213,7 @@ Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration
 - **Iteration 1 — Execution Core:** P-100 (parser/validator), P-101 (scheduler), P-102 (executor), P-103 (PulseRunner), P-104 (CLI)
 - **Iteration 2 — Pipe Model & Action Contract:** P-200 (Action contract), P-201 (passthrough pipe), P-202 (Pipeline primitive), P-203 (miner process import), P-205 (local/cloud dispatch), P-206 (pipeline YAML loader)
 - **Iteration 3 — Flow & Ecosystem:** P-300 (Flow primitive), P-301 (D/A/H classification), P-302 (trace emission), P-303 (Arc package integration)
-- **Iteration 4 — Runtime & Distribution:** P-400 (runtime adapters), P-401 (Grove event bridge), P-402 (metafactory process runner)
+- **Iteration 4 — Runtime & Distribution:** P-400 (runtime adapters), P-401 (Cortex event bridge), P-402 (metafactory process runner)
 
 **Workflow:**
 ```
@@ -257,7 +257,7 @@ blueprint lint   # Validate graph integrity
 
 **Statuses:** Only `planned`, `in-progress`, and `done` are settable. `ready`, `blocked`, and `next` are computed from the dependency graph.
 
-**Cross-repo dependencies:** Use `{repo}:{ID}` format (e.g., `grove:G-200`, `arc:A-100`). A feature is `blocked` if any dependency in another repo isn't `done`.
+**Cross-repo dependencies:** Use `{repo}:{ID}` format (e.g., `cortex:C-102`, `arc:A-100`). A feature is `blocked` if any dependency in another repo isn't `done`.
 
 ## Versioning & Releases
 

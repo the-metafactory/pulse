@@ -134,11 +134,11 @@ features:
     description: "Abstract execution target — run same pipeline on Bun, Node, Cloudflare Workers, or Deno"
 
   - id: P-401
-    name: Grove event bridge
+    name: Cortex event bridge
     status: planned
     iteration: 4
-    depends: [ P-302, grove:G-101 ]
-    description: "Publish execution events to Grove for multi-agent visibility and human-in-the-loop via Discord/Mattermost. Design note: P-302's JSONL events (beat-start/complete/failed, pulse-complete) are natural Grove relay signals — Grove can pipe execution status to dashboards and Discord without Pulse knowing about destinations. Also support programmatic invocation so Grove can trigger Pulse executions on behalf of agents."
+    depends: [ P-302, cortex:C-102 ]
+    description: "Publish execution events to the bus for multi-agent visibility and human-in-the-loop via cortex (Mission Control dashboard, Discord/Mattermost adapters). Design note: P-302's JSONL events (beat-start/complete/failed, pulse-complete) are natural bus signals — cortex surfaces execution status without Pulse knowing about destinations. Also support programmatic invocation so cortex agents can trigger Pulse executions."
 
   - id: P-402
     name: Metafactory process runner
@@ -175,7 +175,7 @@ features:
     status: planned
     iteration: 5
     depends: [ P-502 ]
-    description: "Publish pulse.process.started/completed/failed events to NATS for Miner observability and Grove dashboard visibility."
+    description: "Publish pulse.process.started/completed/failed events to NATS for Miner observability and cortex Mission Control visibility."
 
   # aPaaS: Marketplace composition (earned by usage — deferred until manual wiring reveals patterns)
   - id: P-600

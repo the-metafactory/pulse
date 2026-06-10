@@ -6,7 +6,7 @@ Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration
 - **Iteration 1 — Execution Core:** P-100 (parser/validator), P-101 (scheduler), P-102 (executor), P-103 (PulseRunner), P-104 (CLI)
 - **Iteration 2 — Pipe Model & Action Contract:** P-200 (Action contract), P-201 (passthrough pipe), P-202 (Pipeline primitive), P-203 (miner process import), P-205 (local/cloud dispatch), P-206 (pipeline YAML loader)
 - **Iteration 3 — Flow & Ecosystem:** P-300 (Flow primitive), P-301 (D/A/H classification), P-302 (trace emission), P-303 (Arc package integration)
-- **Iteration 4 — Runtime & Distribution:** P-400 (runtime adapters), P-401 (Grove event bridge), P-402 (metafactory process runner)
+- **Iteration 4 — Runtime & Distribution:** P-400 (runtime adapters), P-401 (Cortex event bridge), P-402 (metafactory process runner)
 
 **Workflow:**
 ```
