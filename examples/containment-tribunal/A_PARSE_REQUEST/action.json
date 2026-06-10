@@ -1,0 +1,16 @@
+{
+  "name": "A_PARSE_REQUEST",
+  "version": "1.0.0",
+  "description": "Validate the containment request and derive its blast radius. Fails loudly on malformed input — nothing downstream should guess.",
+  "input": {
+    "request": { "type": "object", "required": true }
+  },
+  "output": {
+    "action": { "type": "string" },
+    "targets": { "type": "array" },
+    "blast_radius": { "type": "string" },
+    "sanitized_summary": { "type": "string" },
+    "confidential_telemetry": { "type": "string" }
+  },
+  "tags": ["soc", "containment", "validation"]
+}

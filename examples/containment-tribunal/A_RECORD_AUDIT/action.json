@@ -1,0 +1,15 @@
+{
+  "name": "A_RECORD_AUDIT",
+  "version": "1.0.0",
+  "description": "Append the full tribunal verdict — every vote, abstain cause, diversity record — to the append-only audit log out/audit.jsonl.",
+  "requires": ["readFile", "writeFile"],
+  "input": {
+    "request_id": { "type": "string", "required": true },
+    "tribunal_containment": { "type": "object", "required": true },
+    "containment": { "type": "object", "required": true }
+  },
+  "output": {
+    "audit_record": { "type": "object" }
+  },
+  "tags": ["soc", "containment", "audit"]
+}

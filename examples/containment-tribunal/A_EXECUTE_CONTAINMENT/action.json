@@ -1,0 +1,15 @@
+{
+  "name": "A_EXECUTE_CONTAINMENT",
+  "version": "1.0.0",
+  "description": "Apply the approved containment (demo: write the resolver blocklist artifact). Only reachable when the tribunal ruled allow.",
+  "requires": ["writeFile"],
+  "input": {
+    "targets": { "type": "array", "required": true },
+    "ttl_hours": { "type": "number", "required": true },
+    "tribunal_containment": { "type": "object", "required": true }
+  },
+  "output": {
+    "containment": { "type": "object" }
+  },
+  "tags": ["soc", "containment", "enforcement"]
+}

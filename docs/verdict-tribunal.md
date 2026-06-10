@@ -115,11 +115,19 @@ tiebreak — also lands in the step record (`StepRecord.tribunal`).
 runner. Tests: `tests/tribunal.test.ts` (core), `tests/tribunal-step.test.ts`
 (runner, including the three plan acceptance scenarios).
 
-## Demo
+## Demos
 
 ```bash
-bun examples/tribunal/run-demo.ts
+bun examples/tribunal/run-demo.ts                    # minimal API intro (scripted panel)
+bun examples/containment-tribunal/run-demo.ts        # realistic: fleet seats over the bus
 ```
 
-Offline, scripted panel: an L0 `ask` convenes the tribunal three times —
-robust allow, split-then-tiebreak, abstaining panel denied.
+`examples/tribunal/` is the scripted intro — an L0 `ask` convenes the panel
+three times (robust allow, split-then-tiebreak, abstaining panel denied) with
+a canned provider, no bus.
+
+`examples/containment-tribunal/` is the realistic flow: a SOC domain-block
+request adjudicated by fleet agents answering myelin envelopes over the bus
+(in-memory or `--live` NATS), sovereignty enforced consumer-side, scenario
+flags for split/degraded/protected paths, blocklist + append-only audit
+artifacts on an allow.

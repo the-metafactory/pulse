@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "default": "deny",
+  "rules": [
+    {
+      "tool": "containment",
+      "match": { "targets": "(^|[\"\\s,.])(switch\\.ch|swissuniversities\\.ch|admin\\.ch)([\"\\s,]|$)" },
+      "decision": "deny",
+      "reason": "protected zone — never blockable by automation, file a change request"
+    },
+    {
+      "tool": "containment",
+      "match": { "targets": "sinkhole-test\\.example" },
+      "decision": "allow",
+      "reason": "designated sinkhole test domain — pre-approved"
+    },
+    {
+      "tool": "containment",
+      "match": { "action": "^block-domain$" },
+      "decision": "ask",
+      "reason": "domain block is a judgment call — convene the tribunal"
+    }
+  ]
+}
