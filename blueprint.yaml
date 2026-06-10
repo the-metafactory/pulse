@@ -210,7 +210,7 @@ features:
 
   - id: P-702
     name: Governed-action pipeline (L0→L1→L2)
-    status: in-progress
+    status: done
     iteration: 7
     issue: 34
     depends: [ P-700, P-701 ]
