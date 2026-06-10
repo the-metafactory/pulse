@@ -44,14 +44,14 @@ This iteration is where pulse becomes a team player:
 miner:M-103 (trace classification) ──► P-301 (D/A/H execution)
 miner:M-101 (JSONL ingestion)      ◄── P-302 (trace emission)
 arc:A-101 (install pipeline)       ──► P-303 (load installed packages)
-grove:G-101 (event relay)          ◄── P-302 (execution events)
+cortex:C-102 (bus runtime)         ◄── P-302 (execution events)
 ```
 
-### Integration notes (from Grove perspective)
+### Integration notes (from the cortex perspective — formerly Grove)
 
-**Event bridging priority:** P-302's JSONL trace events (beat-start, beat-complete, beat-failed, pulse-complete) map directly to what Grove relays. Design the event schema with Grove consumption in mind — these signals enable real-time pipeline monitoring in Discord/dashboards without Pulse needing to know about those destinations.
+**Event bridging priority:** P-302's JSONL trace events (beat-start, beat-complete, beat-failed, pulse-complete) map directly to what cortex surfaces. Design the event schema with bus consumption in mind — these signals enable real-time pipeline monitoring in Mission Control and Discord/Mattermost without Pulse needing to know about those destinations.
 
-**Arc → Pulse trigger path:** Grove already integrates with Arc for bot upgrades. P-303 should consider that Grove may trigger Pulse executions on behalf of agents — the API surface should support programmatic invocation, not just CLI.
+**Arc → Pulse trigger path:** Cortex already integrates with Arc for agent upgrades. P-303 should consider that cortex may trigger Pulse executions on behalf of agents — the API surface should support programmatic invocation, not just CLI.
 
 **Self-improving feedback loop:** The Miner → Pulse → Miner cycle (P-302 feeding traces back to M-101) is the highest-value integration. Each execution refines the process patterns that generated it. Prioritize trace fidelity — include timing, input/output snapshots, and retry history so Miner has rich data to work with.
 

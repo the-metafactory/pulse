@@ -30,7 +30,7 @@ The name reflects what it does: **a pulse propagates through the system, each ac
 |---------|------|
 | [metafactory](../meta-factory/) | Trusted marketplace for agentic components |
 | [arc](../arc/) | Package manager — installs skills, tools, agents, processes |
-| [grove](../grove/) | Event relay & multi-agent collaboration bridge |
+| [cortex](../cortex/) | Agent fleet runtime — bus dispatch, Mission Control, surface adapters |
 | [miner](../miner/) | Process mining — captures traces, extracts patterns |
 | [blueprint](../blueprint/) | Cross-repo dependency tracking |
 | **pulse** | **Process execution engine** |
@@ -126,7 +126,7 @@ const result = await runPipeline(
 // result.output has ALL fields from ALL actions
 ```
 
-**Compose with primitives** — pipelines support 7 composition primitives that let you process collections, fan out to parallel branches, wrap steps with retry policies, pause for operator input, or dispatch an agent task to the fleet. Actions stay pure — they never know composition is happening.
+**Compose with primitives** — pipelines support 8 composition primitives that let you process collections, fan out to parallel branches, wrap steps with retry policies, pause for operator input, dispatch an agent task to the fleet, or convene a model-diverse verdict panel. Actions stay pure — they never know composition is happening.
 
 | Primitive | Purpose | Key options |
 |-----------|---------|-------------|
@@ -137,8 +137,9 @@ const result = await runPipeline(
 | `retry` | Wrap a sub-pipeline with retry + backoff policy | `attempts`, `backoff`, `on` (error types) |
 | `gate` | Pause for operator verdict (interactive H-step) | `name`, `prompt`, `timeout_ms?`, `collect?` |
 | `agent` | Dispatch an LLM/agent task to the fleet (agentic A-step) | `capability`, `prompt`, `sovereignty?`, `timeout_ms?`, `collect?` |
+| `tribunal` | Model-diverse agent panel rules allow/deny/defer on a judgment call | `seats[]`, `tiebreaker?`, `confidence_bar?`, `on_defer: fail\|continue` |
 
-The three step kinds map onto miner's D/A/H process taxonomy: **D**eterministic = action, **A**gentic = `agent`, **H**uman = `gate`. Agent tasks travel as myelin envelopes over NATS via a pluggable `AgentProvider` — see [`docs/agent-actions.md`](docs/agent-actions.md) and [`examples/soc-triage/`](examples/soc-triage/).
+The three step kinds map onto miner's D/A/H process taxonomy: **D**eterministic = action, **A**gentic = `agent`, **H**uman = `gate`. Agent tasks travel as myelin envelopes over NATS via a pluggable `AgentProvider` — see [`docs/agent-actions.md`](docs/agent-actions.md) and [`examples/soc-triage/`](examples/soc-triage/). `tribunal` composes the A-step into governance: N model-diverse seats vote, a deterministic fail-closed aggregator rules `allow/deny/defer` — L1 of the governed-action stack between the enforcement gate (L0) and the human gate (L2). See [`docs/verdict-tribunal.md`](docs/verdict-tribunal.md) and [`examples/tribunal/`](examples/tribunal/).
 
 **YAML example** — filter, map with retry, reduce into a report:
 ```yaml
@@ -187,7 +188,7 @@ actions:
 ```
 Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; the default `StdinGateProvider` reads pass/fail + notes from stdin. The result (`{ name, verdict, notes, opened_at, closed_at }`) is merged into payload context under the `collect` field. `verdict: "fail"` halts the pipeline with a `StepFailure` carrying the operator's notes — there is no "fail but continue" branch yet; treat the gate as a hard stop. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can route them to traces; the verdict + notes are also captured on the corresponding `StepRecord` so callers without a hook still see them via `PipelineResult.steps`.
 
-Gate is the only leaf composition primitive (no nested `actions`). The other primitives wrap sub-pipelines; gate is a pause-and-collect terminal. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
+Gate, agent, and tribunal are the leaf composition primitives (no nested `actions`). The other primitives wrap sub-pipelines; the leaves are dispatch-and-collect terminals. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
 
 **Parallel branches** — fan out to heterogeneous work:
 ```yaml
@@ -254,15 +255,15 @@ Actions that require `shell` or `readFile` can only run locally. Actions that on
 
 ## Ecosystem Integration
 
-Pulse completes the "capture → distribute → execute" loop. The ecosystem analogy: Miner is the brain (captures how work happens), metafactory + Arc form the distribution network, Grove is the nervous system (event relay and collaboration bridge), and Pulse provides the muscles that actually *do* things.
+Pulse completes the "capture → distribute → execute" loop. The ecosystem analogy: Miner is the brain (captures how work happens), metafactory + Arc form the distribution network, cortex is the nervous system (the bus-native agent runtime — dispatch, Mission Control, Discord/Mattermost surfaces), and Pulse provides the muscles that actually *do* things.
 
-### Grove event bridging
+### Cortex event bridging
 
-Pulse emits real-time events during execution (node-start, node-complete, node-failed, tree-complete). These are natural signals for Grove to relay — once JSONL trace emission lands (P-302), piping execution status through Grove to dashboards or Discord becomes straightforward. An agent kicks off a Pulse pipeline, and collaborators can watch it run in real time.
+Pulse emits real-time events during execution (node-start, node-complete, node-failed, tree-complete) plus gate/agent/tribunal lifecycle events. These ride the NATS bus that cortex already runs — agent tasks and tribunal seats dispatch as myelin envelopes today, and the event bridge (P-401) extends that so cortex's Mission Control and Discord/Mattermost adapters surface execution status. An agent kicks off a Pulse pipeline, and collaborators watch it run in real time.
 
 ### Arc as the glue
 
-Pulse loads actions from directories today. The key connector is P-303 (Arc package integration): Arc installs packages, Pulse runs them. Grove already integrates with Arc for bot upgrades — extending that to trigger Pulse executions is the logical next step. The flow becomes: `arc install` → actions appear → `pulse run` picks them up.
+Pulse loads actions from directories today. The key connector is P-303 (Arc package integration): Arc installs packages, Pulse runs them. Cortex already integrates with Arc for agent upgrades — extending that to trigger Pulse executions is the logical next step. The flow becomes: `arc install` → actions appear → `pulse run` picks them up.
 
 ### The self-improving loop
 
@@ -279,27 +280,28 @@ Each cycle tightens the process definitions. Miner's D/A/H step classification (
 
 ### Portability
 
-The capability injection pattern means the same action code runs locally on Bun or on Cloudflare Workers. This aligns with Grove's model of straddling local and cloud execution — actions that only need `llm` and `fetch` can run anywhere, while those requiring `shell` or `readFile` stay local.
+The capability injection pattern means the same action code runs locally on Bun or on Cloudflare Workers. This aligns with cortex's model of straddling local and cloud execution — actions that only need `llm` and `fetch` can run anywhere, while those requiring `shell` or `readFile` stay local.
 
 ## Roadmap
 
-### Done (v0.7.0)
+### Done (v0.10.0)
 - Tree runner with dependency scheduling, parallel execution, retry/timeout
 - Action system with capability injection (local + cloud dispatch)
-- Pipeline primitive with passthrough pipe model
-- Pipeline YAML loader (declarative pipeline definitions)
+- Pipeline primitive with passthrough pipe model + YAML loader
 - Flow primitive: source → pipeline → destination with scheduling
-- **Composition primitives: map, filter, reduce, parallel, retry, gate** — functional + control-flow composition for pipelines
-- **Interactive gate primitive** — pause execution for operator verdict (pluggable GateProvider; default: stdin); emits gate.opened / gate.closed / gate.timeout events
-- Step-level validation at parse time (catches unknown step types before execution)
-- Partial output preservation on pipeline failure
-- AbortController-based cancellation for parallel branches
-- 191 tests across 16 files, tsc clean
+- **Composition primitives: map, filter, reduce, parallel, retry, gate, agent, tribunal** — functional, control-flow, agentic, and governance composition
+- **Interactive gate primitive** — operator verdict, pluggable GateProvider, lifecycle events (H-step)
+- **Agent primitive** — capability-addressed fleet tasks as myelin envelopes over NATS, sovereignty constraints travel with the payload (A-step)
+- **Enforcement gate (L0)** — deterministic fail-closed runtime tool-call policy (governance Stage 1)
+- **Verdict tribunal (L1)** — model-diverse agent panel adjudicates the gate's `ask` decisions (governance Stage 3)
+- Arc package integration (arc-installed actions, pipelines, flows)
+- Step-level validation at parse time, partial output preservation, AbortController cancellation
+- 287 tests across 20 files, tsc clean
 
 ### Next
-- D/A/H step classification (from miner's trace types)
-- JSONL trace emission (feeding back to miner)
-- Arc package integration (load installed packages as actions)
+- Layered governed-action pipeline (P-702): compose L0 → L1 → L2, SOC containment demo
+- Cortex event bridge (P-401): execution events surfaced in Mission Control
+- JSONL trace emission feeding back to miner (P-302)
 
 See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-repo dependencies.
 
@@ -307,7 +309,7 @@ See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-r
 
 ```bash
 bun install
-bun test           # 191 tests across 16 files
+bun test           # 287 tests across 20 files
 bun run typecheck  # tsc --noEmit
 ```
 

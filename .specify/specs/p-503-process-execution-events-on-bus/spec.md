@@ -6,18 +6,18 @@ P-503 enables Pulse to publish process execution lifecycle events to NATS, makin
 
 **Primary consumers:**
 - **Miner** — captures traces for process mining and observability
-- **Grove** — surfaces execution status on dashboards
+- **cortex** — surfaces execution status in Mission Control
 
 **Dependency:** P-502 (Cue.fired event publisher) — the transport abstraction (P-500) and NATS connection are already available.
 
 ## User Scenarios
 
-### Scenario 1: Flow Execution Visibility in Grove Dashboard
+### Scenario 1: Flow Execution Visibility in cortex Mission Control
 
-- **Given** a user has Grove dashboard open showing process activity
+- **Given** a user has the cortex Mission Control dashboard open showing process activity
 - **When** a Flow is triggered (manually, via cue, or on schedule)
-- **Then** Grove receives `pulse.process.started` and displays the Flow as "running"
-- **And** when the Flow completes, Grove receives `pulse.process.completed` and updates status to "done"
+- **Then** cortex receives `pulse.process.started` and displays the Flow as "running"
+- **And** when the Flow completes, cortex receives `pulse.process.completed` and updates status to "done"
 
 ### Scenario 2: Miner Trace Capture
 
@@ -153,7 +153,7 @@ Consumers can subscribe to:
 | System | Role | Subject Pattern |
 |--------|------|-----------------|
 | Miner | Consumer | `mf.{network_id}.pulse.process.>` |
-| Grove | Consumer | `mf.{network_id}.pulse.process.>` |
+| cortex | Consumer | `mf.{network_id}.pulse.process.>` |
 | Pulse | Publisher | Uses TransportPublisher from P-500 |
 
 ## Success Criteria
@@ -171,7 +171,7 @@ Consumers can subscribe to:
 1. P-500 transport abstraction is complete and provides `TransportPublisher`
 2. P-502 establishes the pattern for CloudEvents emission that P-503 follows
 3. `network_id` is available from runtime configuration (e.g., environment variable or config file)
-4. Miner and Grove are already subscribed to the appropriate subjects (out of scope for this feature)
+4. Miner and cortex are already subscribed to the appropriate subjects (out of scope for this feature)
 
 ## Open Questions
 
@@ -182,6 +182,6 @@ Consumers can subscribe to:
 ## Out of Scope
 
 - Miner subscription and trace storage (Miner's responsibility)
-- Grove dashboard rendering (Grove's responsibility)
+- Mission Control rendering (cortex's responsibility)
 - Tree-level node events (existing EventEmitter pattern, separate concern)
 - Retry/dead-letter handling for failed event publication (Stage 2)

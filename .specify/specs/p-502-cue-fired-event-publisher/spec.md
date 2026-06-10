@@ -74,7 +74,7 @@ P-502 builds on P-501 (cue consumer) and uses P-500's transport abstraction. Whe
 ## Out of Scope
 
 - Cue evaluation logic (determines whether to fire — separate subsystem)
-- Consumer-side handling of `cue.fired` events (Miner, Grove, Spawn responsibility)
+- Consumer-side handling of `cue.fired` events (Miner, cortex, Spawn responsibility)
 - Cross-network cue routing (Stage 4)
 - Dead letter queue for undeliverable events (Stage 3)
 - Cryptographic signing (`mfsignature` — reserved, not implemented)
@@ -161,7 +161,7 @@ Per DD-69 and DD-70:
 | P-500 Transport | Uses `TransportPublisher.publish()` | Outbound |
 | P-501 Cue Consumer | Triggered after successful cue evaluation | Internal |
 | Miner | Subscribes to `cue.fired` for provenance | Downstream |
-| Grove | May relay to Discord/dashboards | Downstream |
+| cortex | May surface in Mission Control / Discord/Mattermost adapters | Downstream |
 | Spawn | Subscribes for execution dispatch (Stage 4) | Downstream |
 
 ## Success Criteria
@@ -172,7 +172,7 @@ Per DD-69 and DD-70:
 - [ ] Required extension `mfnetworkid` always populated
 - [ ] Unit tests pass using InMemoryTransport (no NATS in test)
 - [ ] Integration test with local NATS verifies end-to-end publish
-- [ ] TypeScript types exported for consumers (Miner, Grove)
+- [ ] TypeScript types exported for consumers (Miner, cortex)
 - [ ] Publish throughput sustains > 100 events/second on local NATS
 
 ## Assumptions
