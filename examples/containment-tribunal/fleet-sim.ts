@@ -6,7 +6,7 @@
  *
  *   net-reviewer        containment.review.network     frontier
  *   intel-reviewer      containment.review.intel       local-only (Ollama when --llm)
- *   provenance-reviewer containment.review.provenance  local-only backbone, claims `any` tasks
+ *   provenance-reviewer containment.review.provenance  frontier (claims `any`-class tasks)
  *   oracle              review.adversarial             frontier (the Honest Oracle)
  *
  * Scenarios (canned votes; --llm replaces them with real model answers):
@@ -122,7 +122,7 @@ export async function startFleetSim(
   const agents: SimAgent[] = [
     { id: "net-reviewer", capability: "containment.review.network", modelClass: "frontier", answer: frontierAnswer("canned/frontier-a") },
     { id: "intel-reviewer", capability: "containment.review.intel", modelClass: "local-only", answer: localAnswer },
-    { id: "provenance-reviewer", capability: "containment.review.provenance", modelClass: "local-only", answer: frontierAnswer("canned/local-b") },
+    { id: "provenance-reviewer", capability: "containment.review.provenance", modelClass: "frontier", answer: frontierAnswer("canned/frontier-c") },
     { id: "oracle", capability: "review.adversarial", modelClass: "frontier", answer: frontierAnswer("canned/frontier-b") },
   ];
 

@@ -23,7 +23,7 @@ bun examples/containment-tribunal/run-demo.ts --degraded   # DENY — fleet majo
 bun examples/containment-tribunal/run-demo.ts --protected  # DENY at L0 — tribunal never convenes, zero LLM cost
 bun examples/containment-tribunal/run-demo.ts --llm        # real models: Ollama (local seat), claude CLI (frontier seats)
 bun examples/containment-tribunal/run-demo.ts --live       # real NATS bus on localhost:4222
-bun examples/containment-tribunal/run-demo.ts --live --no-fleet   # a real cortex fleet claims the seats
+bun examples/containment-tribunal/run-demo.ts --live --no-fleet   # simulator off — seat subjects left free for an external fleet you run
 ```
 
 Watch the envelopes on a live bus:

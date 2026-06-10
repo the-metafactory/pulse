@@ -7,7 +7,7 @@
   },
   "output": {
     "action": { "type": "string" },
-    "targets": { "type": "object" },
+    "targets": { "type": "array" },
     "blast_radius": { "type": "string" },
     "sanitized_summary": { "type": "string" },
     "confidential_telemetry": { "type": "string" }

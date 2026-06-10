@@ -36,7 +36,7 @@ actions:
           prompt: |
             You sit on a SOC containment review panel. Action requested:
             {action} on {targets_list} (scope: {scope}, blast radius: {blast_radius}, TTL: {ttl_hours}h).
-            Context (sanitized): {sanitized_summary}
+            Sanitized summary: {sanitized_summary}
             Justification: {justification}
             Assess ONLY the network/collateral angle: is blocking these domains at member
             resolvers proportionate? What legitimate traffic could break?
@@ -66,12 +66,13 @@ actions:
           prompt: |
             You sit on a SOC containment review panel. Action requested:
             {action} on {targets_list}, requested by: {requested_by}.
-            Context (sanitized): {sanitized_summary}
+            Sanitized summary: {sanitized_summary}
             Assess ONLY request provenance: could this containment request be
             injection-driven or attacker-induced (e.g. tricking the SOC into
             blocking legitimate infrastructure)? Is the requester's chain trustworthy?
           sovereignty:
             model_class: any
+            frontier_ok: true   # sees only sanitized fields — any class may execute
 
       # Honest Oracle — adversarial seat, convened only on a split panel
       tiebreaker:
