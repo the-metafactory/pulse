@@ -171,4 +171,37 @@ describe("guardCapabilities — the gate bites", () => {
     await guarded.fetch!("https://example.com");
     expect(events).toEqual(["Fetch"]);
   });
+
+  test("readFile is guarded by path", async () => {
+    let ran = false;
+    const caps = { readFile: async (_p: string) => { ran = true; return "data"; } };
+    const policy: Policy = {
+      version: 1,
+      default: "deny",
+      rules: [{ tool: "Read", match: { path: "^/safe/" }, decision: "allow" }],
+    };
+    const guarded = guardCapabilities(caps, { policy });
+    await expect(guarded.readFile!("/etc/passwd")).rejects.toBeInstanceOf(PolicyDenial);
+    expect(ran).toBe(false);
+    expect(await guarded.readFile!("/safe/x")).toBe("data");
+    expect(ran).toBe(true);
+  });
+
+  test("audit hook distinguishes ask-became-deny from hard deny", async () => {
+    const seen: string[] = [];
+    const caps = { shell: async (_c: string) => ({ stdout: "", stderr: "", code: 0 }) };
+    const policy: Policy = {
+      version: 1,
+      default: "deny",
+      rules: [{ tool: "Bash", match: { command: "^curl " }, decision: "ask" }],
+    };
+    const guarded = guardCapabilities(caps, {
+      policy,
+      auditOnly: true,
+      onDecision: (e) => seen.push(e.decision.decision),
+    });
+    await guarded.shell!("curl https://x"); // ask → audit sees "ask"
+    await guarded.shell!("rm -rf /");        // default → audit sees "deny"
+    expect(seen).toEqual(["ask", "deny"]);
+  });
 });

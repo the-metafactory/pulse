@@ -13,6 +13,21 @@ import type { Decision, GateDecision, Policy, PolicyRule } from "../types/policy
 
 const VALID_DECISIONS = new Set<Decision>(["allow", "ask", "deny"]);
 
+// Compile each match pattern once. The gate runs on every guarded capability
+// call but policies are loaded once at startup, so the pattern set is tiny and
+// stable — caching turns per-call regex compilation into a map lookup. An
+// invalid pattern throws (uncached) and evaluate() turns the throw into a deny,
+// every call, consistently.
+const regexCache = new Map<string, RegExp>();
+function compile(pattern: string): RegExp {
+  let re = regexCache.get(pattern);
+  if (re === undefined) {
+    re = new RegExp(pattern); // throws on an invalid pattern — caller turns it into a deny
+    regexCache.set(pattern, re);
+  }
+  return re;
+}
+
 /** Coerce an absent/invalid decision to "deny" — the fail-closed core move. */
 function coerceDecision(value: unknown): Decision {
   return typeof value === "string" && VALID_DECISIONS.has(value as Decision)
@@ -46,7 +61,7 @@ function ruleMatches(rule: PolicyRule, toolName: string, toolInput: Record<strin
     for (const [field, pattern] of Object.entries(rule.match)) {
       if (!(field in toolInput)) return false;
       // An invalid regex throws here; evaluate() turns that into a deny.
-      const re = new RegExp(pattern);
+      const re = compile(pattern);
       if (!re.test(fieldToString(toolInput[field]))) return false;
     }
   }
@@ -71,8 +86,14 @@ export function evaluate(
   if (typeof toolName !== "string" || toolName.length === 0) {
     return { decision: "deny", reason: "tool name missing or not a string", rule_index: -1 };
   }
-  if (!policy || typeof policy !== "object" || !Array.isArray(policy.rules ?? [])) {
+  if (!policy || typeof policy !== "object") {
     return { decision: "deny", reason: "policy missing or malformed", rule_index: -1 };
+  }
+  // rules may be absent (→ falls through to default) but a present non-array
+  // rules field is malformed → deny. Clearer than the `?? []` form: this
+  // rejects only the genuinely-wrong case, never the legitimately-absent one.
+  if (policy.rules !== undefined && !Array.isArray(policy.rules)) {
+    return { decision: "deny", reason: "policy.rules is not an array", rule_index: -1 };
   }
 
   const input = (toolInput && typeof toolInput === "object" ? toolInput : {}) as Record<string, unknown>;

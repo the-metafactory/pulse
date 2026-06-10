@@ -95,6 +95,11 @@ function guard<TArgs extends unknown[], TReturn>(
     const input = toInput(...args);
     const decision = evaluate(tool, input, opts.policy);
     if (decision.decision !== "allow") {
+      // The audit hook receives the TRUE decision: `decision.decision` is
+      // "ask" when the policy said ask (and the capability layer is treating
+      // it as deny for lack of a prompt) vs "deny" for a hard refusal. An
+      // audit consumer distinguishes "would have prompted a human" from
+      // "blocked outright" on that field — informs whether to add a prompt flow.
       opts.onDecision?.({ tool, input, decision });
       if (!opts.auditOnly) {
         return Promise.reject(new PolicyDenial(tool, decision));
