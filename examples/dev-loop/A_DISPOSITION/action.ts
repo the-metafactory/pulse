@@ -35,9 +35,15 @@ interface ReviewOutput {
 
 function isFixSmall(f: Finding): boolean {
   const sev = (f.severity ?? "").toLowerCase();
+  // blocking / high → always fix-small (must clear before merge).
   if (sev === "blocking" || sev === "high") return true;
-  // medium/low: fix in-cycle only when it does not expand scope.
-  return f.scope_expanding !== true;
+  // medium / low → fix in-cycle ONLY on an explicit opt-in
+  // (`scope_expanding === false`, i.e. the reviewer affirmed it's contained).
+  // Absent / ambiguous / unknown-severity → defer-big. The DEFAULT is the
+  // conservative classification: when the reviewer didn't say a finding is
+  // safe to fix in-cycle, it does NOT bloat the fix-cycle — it gets a
+  // follow-up issue. (Severity unset also lands here: nothing claims it.)
+  return f.scope_expanding === false;
 }
 
 export default {

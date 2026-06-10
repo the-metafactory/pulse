@@ -141,6 +141,94 @@ describe("dev-loop pipeline.yaml — happy-path round-trip", () => {
     expect(d.counts.defer_big).toBe(1); // the scope-expanding low finding
   });
 
+  test("A_DISPOSITION defaults absent/ambiguous findings to defer-big (conservative)", async () => {
+    // The safe default: a medium/low finding the reviewer did NOT explicitly
+    // affirm as contained (`scope_expanding === false`) goes to defer-big — it
+    // does not bloat the fix-cycle. blocking/high always fix-small regardless.
+    const provider = new MockAgentProvider({
+      "dev.implement": { pr: 545, head_sha: "bbb" },
+      "code-review.typescript": {
+        verdict: "changes-requested",
+        findings: [
+          { id: "A", severity: "low" },                         // absent flag → defer-big
+          { id: "B", severity: "medium", scope_expanding: false }, // opt-in    → fix-small
+          { id: "C", severity: "blocking" },                    // severity    → fix-small
+          { id: "D" },                                          // no severity → defer-big
+        ],
+      },
+      "merge.approve": { merged: true },
+      "release.cut": { version: "v0.9.3" },
+    });
+
+    const result = await runPipelineFromYaml(
+      YAML,
+      { slice: { id: "C-901.4", issue_ref: "x", design_ref: "y", branch: "b", gates: "g" } },
+      { agentProvider: provider, gateProvider: new AutoGateProvider() },
+    );
+
+    expect(result.success).toBe(true);
+    const d = (result.output as Record<string, any>).disposition;
+    expect(d.counts.fix_small).toBe(2); // B (opt-in) + C (blocking)
+    expect(d.counts.defer_big).toBe(2); // A (absent flag) + D (no severity)
+    expect(d.fix_small.map((f: any) => f.id).sort()).toEqual(["B", "C"]);
+    expect(d.defer_big.map((f: any) => f.id).sort()).toEqual(["A", "D"]);
+  });
+
+  test("A_MERGE_PRECHECK emits ok=false and reason on CI failure", async () => {
+    // The precheck only emits DATA — the engine cannot branch on ok=false
+    // (gap G2), so merge.approve still runs and the pipeline still succeeds.
+    // That is exactly why a failing-precheck test is valuable: it documents
+    // that the precheck is advisory until a conditional construct exists.
+    const provider = new MockAgentProvider({
+      "dev.implement": { pr: 546, head_sha: "ccc" },
+      "code-review.typescript": { verdict: "approved", findings: [] },
+      "merge.approve": { merged: true },
+      "release.cut": { version: "v0.9.4" },
+    });
+
+    const result = await runPipelineFromYaml(
+      YAML,
+      {
+        slice: { id: "C-901.5", issue_ref: "x", design_ref: "y", branch: "b", gates: "g" },
+        // Injected merge state: CI failed, mergeable, not stale.
+        merge_state: { ci_conclusion: "failure", mergeable: true, behind_by: 0 },
+      },
+      { agentProvider: provider, gateProvider: new AutoGateProvider() },
+    );
+
+    expect(result.success).toBe(true);
+    const out = result.output as Record<string, any>;
+    expect(out.precheck.ok).toBe(false);
+    expect(out.precheck.checks).toEqual({ ci_green: false, mergeable: true, fresh: true });
+    expect(out.precheck.reason).toContain("CI not green");
+    // The precheck did NOT greenlight, yet merge.approve still ran (gap G2).
+    expect(provider.dispatched.map((p) => p.capability)).toContain("merge.approve");
+  });
+
+  test("A_MERGE_PRECHECK composes a multi-cause reason on stale + unmergeable head", async () => {
+    const provider = new MockAgentProvider({
+      "dev.implement": { pr: 547 },
+      "code-review.typescript": { verdict: "approved", findings: [] },
+      "merge.approve": { merged: true },
+      "release.cut": { version: "v0.9.5" },
+    });
+
+    const result = await runPipelineFromYaml(
+      YAML,
+      {
+        slice: { id: "C-901.6", issue_ref: "x", design_ref: "y", branch: "b", gates: "g" },
+        merge_state: { ci_conclusion: "success", mergeable: false, behind_by: 3 },
+      },
+      { agentProvider: provider, gateProvider: new AutoGateProvider() },
+    );
+
+    expect(result.success).toBe(true);
+    const pre = (result.output as Record<string, any>).precheck;
+    expect(pre.ok).toBe(false);
+    expect(pre.reason).toContain("not MERGEABLE");
+    expect(pre.reason).toContain("stale: base ahead by 3");
+  });
+
   test("a held release gate (verdict=fail) stops before release.cut", async () => {
     class HoldGate implements GateProvider {
       async requestVerdict(): Promise<GateInput> {
