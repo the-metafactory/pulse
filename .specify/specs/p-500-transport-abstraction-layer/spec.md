@@ -81,7 +81,7 @@ The event envelope follows CloudEvents v1.0 specification with metafactory exten
 | `specversion` | `"1.0"` | CloudEvents spec version |
 | `id` | `string` | Unique event ID (ULID recommended) |
 | `source` | `string` | URI: `metafactory://{network_id}/{component}` |
-| `type` | `string` | Hierarchical event type: `cortex.agent.task.completed`, `cue.fired`, `pulse.process.completed` |
+| `type` | `string` | Hierarchical event type: `dispatch.task.completed`, `cue.fired`, `pulse.process.completed` |
 
 ### Optional CloudEvents Fields
 

@@ -257,7 +257,7 @@ blueprint lint   # Validate graph integrity
 
 **Statuses:** Only `planned`, `in-progress`, and `done` are settable. `ready`, `blocked`, and `next` are computed from the dependency graph.
 
-**Cross-repo dependencies:** Use `{repo}:{ID}` format (e.g., `cortex:C-102`, `arc:A-100`). A feature is `blocked` if any dependency in another repo isn't `done`.
+**Cross-repo dependencies:** Use `{repo}:{ID}` format (e.g., `cortex:C-102`, `arc:A-100`). A feature is `blocked` if any dependency in another repo isn't `done`. Note: meta-factory's C-1xx IDs (cue artifact features) and cortex's C-1xx IDs (migration phases) are distinct namespaces — the `{repo}:` prefix disambiguates.
 
 ## Versioning & Releases
 
