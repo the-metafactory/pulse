@@ -192,6 +192,29 @@ describe("post-hoc diversity + downgrade", () => {
     expect(d.posthoc_monoculture).toBeUndefined();
   });
 
+  test("only the allowing coalition is checked — a denier sharing a model does not flag", () => {
+    // Diverse allowing coalition (m1 + m2); the deny vote shares m2 with the
+    // tiebreaker-style allow. The coalition that GRANTS permission is diverse,
+    // so no downgrade (sage review on PR #31).
+    const votes = [
+      { ...vote("allow", 1, "a"), model: "m1" },
+      { ...vote("deny", 1, "b"), model: "m2" },
+      { ...vote("allow", 1, "oracle"), model: "m2" },
+    ];
+    const d = checkPosthocDiversity(votes, { classes: ["a", "b"] });
+    expect(d.posthoc_monoculture).toBeUndefined();
+  });
+
+  test("duplicate models within the allowing coalition flag even via tiebreaker", () => {
+    const votes = [
+      { ...vote("allow", 1, "a"), model: "m1" },
+      { ...vote("deny", 1, "b"), model: "m2" },
+      { ...vote("allow", 1, "oracle"), model: "m1" },
+    ];
+    const d = checkPosthocDiversity(votes, { classes: ["a", "b"] });
+    expect(d.posthoc_monoculture).toBe(true);
+  });
+
   test("allow downgrades to defer when diversity unsatisfiable", () => {
     const r = applyDiversityDowngrade({ outcome: "allow", reason: "ok" }, { classes: [], unsatisfiable: true });
     expect(r.outcome).toBe("defer");

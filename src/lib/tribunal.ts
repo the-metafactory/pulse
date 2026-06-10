@@ -205,15 +205,22 @@ export function planDiversity(seats: SeatSpec[]): DiversityPlan {
 }
 
 /**
- * Post-hoc executing-model check: declared classes can lie about backbones,
- * so when ≥2 seats report the identical model string the panel was a
- * monoculture in fact. Mutates nothing — returns the updated diversity record.
+ * Post-hoc executing-model check: declared classes can lie about backbones.
+ * Only the ALLOWING votes are examined — the diversity rule defends against a
+ * monoculture coalition *granting* permission; duplicate models among denying
+ * or abstaining votes are irrelevant (deny is never downgraded, and the
+ * tiebreaker only matters when it joined the allowing side). When ≥2 allowing
+ * votes report the identical model string, the coalition was a monoculture in
+ * fact. Mutates nothing — returns the updated diversity record.
  */
 export function checkPosthocDiversity(
   votes: SeatVote[],
   diversity: TribunalDiversity,
 ): TribunalDiversity {
-  const models = votes.map((v) => v.model).filter((m): m is string => typeof m === "string" && m.length > 0);
+  const models = votes
+    .filter((v) => v.verdict === "allow")
+    .map((v) => v.model)
+    .filter((m): m is string => typeof m === "string" && m.length > 0);
   const duplicates = models.length !== new Set(models).size;
   return duplicates ? { ...diversity, posthoc_monoculture: true } : diversity;
 }
