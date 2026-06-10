@@ -11,27 +11,8 @@
 
 import type { ActionContext } from "../../../src/types/action";
 
-interface PublishedAdvisory {
-  title?: string;
-  body?: string;
-  enrichment?: string;
-  analyst_notes?: string;
-  approved_by_gate?: string;
-  approved_at?: string;
-}
-
-function formatMessage(advisory: PublishedAdvisory): string {
-  const lines = [
-    `#### ${advisory.title ?? "CommunitySOC Advisory"}`,
-    "",
-    advisory.body ?? "(no advisory text)",
-  ];
-  if (advisory.enrichment) lines.push("", `**Enrichment:** ${advisory.enrichment}`);
-  if (advisory.analyst_notes) lines.push("", `**Analyst notes:** ${advisory.analyst_notes}`);
-  if (advisory.approved_by_gate) {
-    lines.push("", `_Approved via gate \`${advisory.approved_by_gate}\`${advisory.approved_at ? ` at ${advisory.approved_at}` : ""}_`);
-  }
-  return lines.join("\n");
+interface AdvisoryDoc {
+  markdown?: string;
 }
 
 // Two independent ceilings, measured against securechat-test (2026-06-10):
@@ -87,8 +68,8 @@ function splitMessage(message: string): string[] {
 
 export default {
   async execute(input: Record<string, unknown>, ctx: ActionContext) {
-    const { published, mattermost_url, mattermost_channel_id, mattermost_bot_token, ...payload } = input;
-    const advisory = (published ?? {}) as PublishedAdvisory;
+    const { advisory_doc, mattermost_url, mattermost_channel_id, mattermost_bot_token, ...payload } = input;
+    const doc = (advisory_doc ?? {}) as AdvisoryDoc;
 
     const url = (mattermost_url as string | undefined) ?? process.env.MATTERMOST_URL;
     const channelId = (mattermost_channel_id as string | undefined) ?? process.env.MATTERMOST_CHANNEL_ID;
@@ -101,14 +82,14 @@ export default {
         !token && "MATTERMOST_BOT_TOKEN",
       ].filter(Boolean);
       console.log(`📭 [A_NOTIFY_MATTERMOST] not configured (missing: ${missing.join(", ")}) — skipping`);
-      return { ...payload, published, mattermost: { skipped: true, missing } };
+      return { ...payload, advisory_doc, mattermost: { skipped: true, missing } };
     }
 
     const fetchFn = ctx.capabilities.fetch;
     if (!fetchFn) throw new Error("A_NOTIFY_MATTERMOST requires the 'fetch' capability");
 
     const apiUrl = `${url.replace(/\/$/, "")}/api/v4/posts`;
-    const chunks = splitMessage(sanitize(formatMessage(advisory)));
+    const chunks = splitMessage(sanitize(doc.markdown ?? "(no advisory document)"));
 
     // First chunk is the root post; the rest reply into its thread so a long
     // advisory stays one conversation in the channel, not a wall of posts.
@@ -142,7 +123,7 @@ export default {
 
     return {
       ...payload,
-      published,
+      advisory_doc,
       mattermost: { skipped: false, post_id: rootId, channel_id: channelId, chunk_count: chunks.length },
     };
   },

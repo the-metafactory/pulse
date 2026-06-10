@@ -62,9 +62,17 @@ actions:
       prompt: "Advisory drafted from enriched IOCs. Publish to the community? (verdict + notes)"
       collect: approval
 
-  # D — deterministic: publish
+  # D — deterministic: render ONE advisory document (markdown + subject)
+  # consumed by every publisher below — no raw JSON ever reaches a reader
+  - A_FORMAT_ADVISORY
+
+  # D — deterministic: publish (demo: stdout)
   - A_PUBLISH_ADVISORY
 
   # D — deterministic: post advisory to Mattermost channel
   # (needs MATTERMOST_URL, MATTERMOST_BOT_TOKEN, MATTERMOST_CHANNEL_ID; skips itself when unset)
   - A_NOTIFY_MATTERMOST
+
+  # D — deterministic: mail advisory to members via KAI email CLI
+  # (needs ADVISORY_MAIL_TO, optional ADVISORY_MAIL_ACCOUNT; skips itself when unset)
+  - A_SEND_MAIL

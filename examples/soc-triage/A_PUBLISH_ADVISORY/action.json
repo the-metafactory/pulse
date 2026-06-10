@@ -1,9 +1,9 @@
 {
   "name": "A_PUBLISH_ADVISORY",
-  "version": "1.0.0",
-  "description": "Publish the analyst-approved community advisory (demo: render to stdout)",
+  "version": "2.0.0",
+  "description": "Publish the analyst-approved advisory document (demo: render to stdout). Formatting lives in A_FORMAT_ADVISORY",
   "input": {
-    "enrichment": { "type": "object", "required": true },
+    "advisory_doc": { "type": "object", "required": true },
     "approval": { "type": "object", "required": true }
   },
   "output": {
