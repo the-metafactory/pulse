@@ -77,6 +77,12 @@ export type {
 // Flow system (iteration 3) — the third primitive
 export { runFlow, scheduleFlow, loadFlow } from "./lib/flow";
 
+// Enforcement gate (governance Stage 1) — the runtime complement to manifests
+export { evaluate } from "./lib/enforcement-gate";
+export { loadPolicy, guardCapabilities, DENY_ALL, PolicyDenial } from "./lib/policy-loader";
+export type { GateAuditHook, GuardOptions, PolicyLoadResult } from "./lib/policy-loader";
+export type { Policy, PolicyRule, Decision, GateDecision } from "./types/policy";
+
 // Arc integration (iteration 3) — discover arc-installed packages
 export { discoverArcActions, discoverArcPipelines, discoverArcFlows, createArcActionDirs } from "./lib/arc";
 export type { ArcAction, ArcPipeline, ArcFlow } from "./lib/arc";

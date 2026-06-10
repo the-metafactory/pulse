@@ -1,0 +1,142 @@
+/**
+ * Policy loading + capability guarding — the host adapter around the pure gate.
+ *
+ * `loadPolicy` reads a policy.json fail-closed (any error → a deny-all policy).
+ * `guardCapabilities` wraps the injected capabilities so each guarded tool call
+ * passes through `evaluate` before it runs — the manifest declares, this bites.
+ *
+ * Tool-name mapping (capability → policy tool, matched field):
+ *   shell     → "Bash"  (match: command)
+ *   fetch     → "Fetch" (match: url)
+ *   writeFile → "Write" (match: path)
+ *   readFile  → "Read"  (match: path)
+ *
+ * `ask` has no host prompt at the capability layer (pulse runs autonomously),
+ * so a guarded call resolving to `ask` is treated as `deny` with a clear
+ * reason. A future GateProvider-style prompt can relax this; failing closed
+ * is the safe default until then.
+ */
+
+import type { ActionCapabilities } from "../types/action";
+import type { GateDecision, Policy } from "../types/policy";
+import { evaluate } from "./enforcement-gate";
+
+/** A policy that denies everything — the fail-closed fallback for any load error. */
+export const DENY_ALL: Policy = { version: 1, default: "deny", rules: [] };
+
+export interface PolicyLoadResult {
+  policy: Policy;
+  /** True when the on-disk policy loaded cleanly; false when we fell back to DENY_ALL. */
+  ok: boolean;
+  /** Populated when ok is false. */
+  error?: string;
+}
+
+/**
+ * Load a policy from disk, fail-closed. Any problem — missing file, unreadable,
+ * malformed JSON, wrong shape — resolves to DENY_ALL, never throws. The caller
+ * can inspect `ok`/`error` for diagnostics but the returned policy is always safe.
+ */
+export async function loadPolicy(path: string): Promise<PolicyLoadResult> {
+  try {
+    const raw = await Bun.file(path).text();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return { policy: DENY_ALL, ok: false, error: "policy is not an object" };
+    }
+    const p = parsed as Policy;
+    if (typeof p.version !== "number") {
+      return { policy: DENY_ALL, ok: false, error: "policy.version missing or not a number" };
+    }
+    if (p.rules !== undefined && !Array.isArray(p.rules)) {
+      return { policy: DENY_ALL, ok: false, error: "policy.rules is not an array" };
+    }
+    return { policy: p, ok: true };
+  } catch (err) {
+    return { policy: DENY_ALL, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Hook fired on every gate decision — wire to append-only logging / bus emission. */
+export type GateAuditHook = (event: {
+  tool: string;
+  input: Record<string, unknown>;
+  decision: GateDecision;
+}) => void;
+
+export interface GuardOptions {
+  policy: Policy;
+  /** Called on every non-allow decision (and optionally all decisions). */
+  onDecision?: GateAuditHook;
+  /** When true, audit-parity mode: log denies but let calls through (Stage 1b ships this first). */
+  auditOnly?: boolean;
+}
+
+class PolicyDenial extends Error {
+  constructor(tool: string, decision: GateDecision) {
+    super(`enforcement gate denied ${tool}: ${decision.reason}`);
+    this.name = "PolicyDenial";
+  }
+}
+
+/**
+ * Guard a single async capability call: evaluate, audit, then run or refuse.
+ * The four guarded capabilities (shell/fetch/writeFile/readFile) are all
+ * promise-returning, so a denial REJECTS the promise rather than throwing
+ * synchronously — callers `await` the capability and see a clean rejection.
+ */
+function guard<TArgs extends unknown[], TReturn>(
+  tool: string,
+  toInput: (...args: TArgs) => Record<string, unknown>,
+  fn: (...args: TArgs) => Promise<TReturn>,
+  opts: GuardOptions,
+): (...args: TArgs) => Promise<TReturn> {
+  return (...args: TArgs): Promise<TReturn> => {
+    const input = toInput(...args);
+    const decision = evaluate(tool, input, opts.policy);
+    if (decision.decision !== "allow") {
+      // The audit hook receives the TRUE decision: `decision.decision` is
+      // "ask" when the policy said ask (and the capability layer is treating
+      // it as deny for lack of a prompt) vs "deny" for a hard refusal. An
+      // audit consumer distinguishes "would have prompted a human" from
+      // "blocked outright" on that field — informs whether to add a prompt flow.
+      opts.onDecision?.({ tool, input, decision });
+      if (!opts.auditOnly) {
+        return Promise.reject(new PolicyDenial(tool, decision));
+      }
+    }
+    return fn(...args);
+  };
+}
+
+/**
+ * Wrap injected capabilities so every guarded tool call passes the gate first.
+ * Only the capabilities present on the object are wrapped; absent ones stay
+ * absent (an action never gains a capability it didn't request). `llm`, `agent`,
+ * and `kv` are not blast-radius tools and pass through unwrapped.
+ */
+export function guardCapabilities(caps: ActionCapabilities, opts: GuardOptions): ActionCapabilities {
+  const guarded: ActionCapabilities = { ...caps };
+
+  if (caps.shell) {
+    guarded.shell = guard("Bash", (cmd: string) => ({ command: cmd }), caps.shell, opts);
+  }
+  if (caps.fetch) {
+    guarded.fetch = guard(
+      "Fetch",
+      (input: Parameters<typeof fetch>[0]) => ({ url: typeof input === "string" ? input : String(input) }),
+      caps.fetch,
+      opts,
+    ) as typeof fetch;
+  }
+  if (caps.writeFile) {
+    guarded.writeFile = guard("Write", (path: string, content: string) => ({ path, content }), caps.writeFile, opts);
+  }
+  if (caps.readFile) {
+    guarded.readFile = guard("Read", (path: string) => ({ path }), caps.readFile, opts);
+  }
+
+  return guarded;
+}
+
+export { PolicyDenial };
