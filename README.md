@@ -189,7 +189,7 @@ actions:
 ```
 Inject a custom `GateProvider` (HTTP, UI, Slack, etc.) via `StepRunnerOptions.gateProvider`; the default `StdinGateProvider` reads pass/fail + notes from stdin. The result (`{ name, verdict, notes, opened_at, closed_at }`) is merged into payload context under the `collect` field. `verdict: "fail"` halts the pipeline with a `StepFailure` carrying the operator's notes — there is no "fail but continue" branch yet; treat the gate as a hard stop. Lifecycle events (`gate.opened`, `gate.closed`, `gate.timeout`) are emitted via the optional `onGateEvent` hook so hosts can route them to traces; the verdict + notes are also captured on the corresponding `StepRecord` so callers without a hook still see them via `PipelineResult.steps`.
 
-Gate, agent, tribunal, and governed are the leaf composition primitives (no nested `actions`). The other primitives wrap sub-pipelines; the leaves are dispatch-and-collect terminals. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
+Gate, agent, tribunal, and governed are leaf primitives (no nested `actions`) — the composition primitives proper (map/filter/reduce/parallel/retry) wrap sub-pipelines; the leaves are dispatch-and-collect terminals. Future control-flow primitives (sleep, wait-for-event, manual-checkpoint) will follow this same shape.
 
 **Parallel branches** — fan out to heterogeneous work:
 ```yaml
@@ -295,7 +295,7 @@ The capability injection pattern means the same action code runs locally on Bun 
 - **Agent primitive** — capability-addressed fleet tasks as myelin envelopes over NATS, sovereignty constraints travel with the payload (A-step)
 - **Enforcement gate (L0)** — deterministic fail-closed runtime tool-call policy (governance Stage 1)
 - **Verdict tribunal (L1)** — model-diverse agent panel adjudicates the gate's `ask` decisions (governance Stage 3)
-- **Governed actions (L0→L1→L2)** — `governed:` composes policy, tribunal, and human gate in one step; refusals terminal at every layer (governance Stage 4)
+- **Governed actions (L0→L1→L2)** — `governed:` composes policy, tribunal, and human gate in one step; refusals terminal at every layer; demo publishes layer verdicts to the bus (governance Stage 4)
 - Arc package integration (arc-installed actions, pipelines, flows)
 - Step-level validation at parse time, partial output preservation, AbortController cancellation
 - 287 tests across 20 files, tsc clean

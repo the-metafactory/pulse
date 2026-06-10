@@ -86,18 +86,24 @@ async function main() {
     ? await NatsAgentTransport.connect({ servers: process.env.NATS_URL ?? "localhost:4222" })
     : new InMemoryAgentTransport();
 
-  // Publish every layer's verdict to the bus — the free audit trail Stage 5
-  // reads back. Demo wiring: event sinks → transport.publish.
+  // Publish every layer's verdict to the bus — the audit trail Stage 5 reads
+  // back. Demo wiring (event sinks → transport.publish); Stage 5 standardizes
+  // the subject + envelope. Promises collected and settled before teardown so
+  // the printed bus trail is real, not hoped-for.
+  const verdictPublishes: Promise<void>[] = [];
   const publishVerdict = (layer: string, payload: Record<string, unknown>) => {
-    void transport.publish(
-      `local.${PRINCIPAL}.${STACK}.governance.verdict.${layer}`,
-      JSON.stringify({
-        id: crypto.randomUUID(),
-        source: `${PRINCIPAL}.${STACK}.pulse.P_CONTAINMENT`,
-        type: `governance.verdict.${layer}`,
-        timestamp: new Date().toISOString(),
-        payload,
-      }),
+    verdictPublishes.push(
+      transport.publish(
+        `local.${PRINCIPAL}.${STACK}.governance.verdict.${layer}`,
+        JSON.stringify({
+          id: crypto.randomUUID(),
+          source: `${PRINCIPAL}.${STACK}.pulse.P_CONTAINMENT`,
+          type: `governance.verdict.${layer}`,
+          timestamp: new Date().toISOString(),
+          sovereignty: { classification: "local", data_residency: "CH" },
+          payload,
+        }),
+      ),
     );
   };
 
@@ -187,6 +193,11 @@ async function main() {
     console.log(`Bus trail: governance.verdict.l0 [+ .tribunal] [+ .gate] + .resolved`);
   }
 
+  const settled = await Promise.allSettled(verdictPublishes);
+  const failedPublishes = settled.filter((s) => s.status === "rejected");
+  if (failedPublishes.length > 0) {
+    console.log(`⚠️  ${failedPublishes.length} verdict publish(es) failed — bus trail incomplete`);
+  }
   if (stopFleet) await stopFleet();
   if (transport instanceof NatsAgentTransport) await transport.close();
   process.exit(result.success ? 0 : 1);

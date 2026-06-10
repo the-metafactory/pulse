@@ -1228,15 +1228,16 @@ async function runGoverned(
       on_defer: "continue", // governed owns the defer routing
     };
     let tribunalPayload: Record<string, unknown>;
+    const recordsBeforeTribunal = stepRecords.length;
     try {
       tribunalPayload = await runTribunal(tribunalSpec, payload, options, stepRecords);
     } catch (err) {
       // Tribunal deny (or abort) — terminal. Recover the verdict from the
-      // tribunal's own step record for the governed audit surface.
+      // record THIS call pushed (never an earlier step's — sage PR #35).
       const errMsg = err instanceof Error ? err.message : String(err);
-      const lastTribunalRecord = [...stepRecords].reverse().find((r) => r.tribunal !== undefined);
+      const ownRecord = stepRecords.slice(recordsBeforeTribunal).find((r) => r.tribunal !== undefined);
       const result = baseResult("deny", "tribunal");
-      result.tribunal = lastTribunalRecord?.tribunal;
+      result.tribunal = ownRecord?.tribunal;
       return refuse(result, errMsg);
     }
     tribunalVerdict = tribunalPayload[innerCollect] as TribunalVerdict;
@@ -1269,14 +1270,15 @@ async function runGoverned(
     collect: innerGateCollect,
   };
   let gatePayload: Record<string, unknown>;
+  const recordsBeforeGate = stepRecords.length;
   try {
     gatePayload = await runGate(gateSpec, payload, options, stepRecords);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
-    const lastGateRecord = [...stepRecords].reverse().find((r) => r.gate !== undefined);
+    const ownRecord = stepRecords.slice(recordsBeforeGate).find((r) => r.gate !== undefined);
     const result = baseResult("deny", "gate");
     result.tribunal = tribunalVerdict;
-    result.gate = lastGateRecord?.gate;
+    result.gate = ownRecord?.gate;
     return refuse(result, errMsg);
   }
 

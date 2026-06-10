@@ -13,9 +13,9 @@ L2  analyst gate        pass → proceed · fail → halt
 ```
 
 **Refusals are terminal at every layer — only uncertainty travels down.**
-A tribunal deny never reaches the analyst; only its *defer* does. Every
-layer's verdict is published to the bus as `governance.verdict.*` envelopes —
-the audit trail Stage 5 reads back.
+A tribunal deny never reaches the analyst; only its *defer* does. The demo
+publishes every layer's verdict to the bus as `governance.verdict.*`
+envelopes (demo wiring — Stage 5 standardizes the subject and reads it back).
 
 ## Run it
 
