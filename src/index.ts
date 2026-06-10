@@ -74,6 +74,27 @@ export type {
   ShellResult,
 } from "./types/action";
 
+// Verdict tribunal (governance Stage 3, P-701) — L1 of the governed-action stack
+export type {
+  TribunalStepSpec,
+  SeatSpec,
+  SeatVote,
+  SeatVerdict,
+  TribunalRuling,
+  TribunalVerdict,
+  TribunalDiversity,
+  TribunalEvent,
+} from "./types/tribunal";
+export {
+  parseSeatVote,
+  abstainVote,
+  aggregate,
+  planDiversity,
+  checkPosthocDiversity,
+  applyDiversityDowngrade,
+  VOTE_FORMAT_INSTRUCTION,
+} from "./lib/tribunal";
+
 // Flow system (iteration 3) — the third primitive
 export { runFlow, scheduleFlow, loadFlow } from "./lib/flow";
 

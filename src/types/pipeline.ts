@@ -7,6 +7,7 @@
  */
 
 import type { AgentStepSpec } from "./agent";
+import type { TribunalStepSpec } from "./tribunal";
 
 // Agent step types live in ./agent (shared with the capability surface);
 // re-exported here so pipeline consumers see one vocabulary.
@@ -18,6 +19,19 @@ export type {
   AgentProvider,
   AgentEvent,
 } from "./agent";
+
+// Tribunal step types live in ./tribunal (governance L1, P-701);
+// re-exported so pipeline consumers see one vocabulary.
+export type {
+  TribunalStepSpec,
+  SeatSpec,
+  SeatVote,
+  SeatVerdict,
+  TribunalRuling,
+  TribunalVerdict,
+  TribunalDiversity,
+  TribunalEvent,
+} from "./tribunal";
 
 // ---------------------------------------------------------------------------
 // Step type — discriminated union
@@ -31,7 +45,8 @@ export type PipelineStep =
   | { parallel: ParallelStepSpec }
   | { retry: RetryStepSpec }
   | { gate: GateStepSpec }
-  | { agent: AgentStepSpec };
+  | { agent: AgentStepSpec }
+  | { tribunal: TribunalStepSpec };
 
 // ---------------------------------------------------------------------------
 // Primitive specs

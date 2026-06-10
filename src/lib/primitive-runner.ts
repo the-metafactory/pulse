@@ -15,6 +15,23 @@ import type {
   AgentEvent,
   AgentTaskResult,
 } from "../types/pipeline";
+import type {
+  SeatSpec,
+  SeatVote,
+  TribunalEvent,
+  TribunalRuling,
+  TribunalStepSpec,
+  TribunalVerdict,
+} from "../types/tribunal";
+import {
+  VOTE_FORMAT_INSTRUCTION,
+  abstainVote,
+  aggregate,
+  applyDiversityDowngrade,
+  checkPosthocDiversity,
+  parseSeatVote,
+  planDiversity,
+} from "./tribunal";
 
 export class StepFailure extends Error {
   constructor(
@@ -44,6 +61,8 @@ export interface StepRecord {
   error?: string;
   /** Populated for gate steps — full GateResult so downstream traces can audit verdict + notes. */
   gate?: GateResult;
+  /** Populated for tribunal steps — full TribunalVerdict (votes, diversity, tiebreak). */
+  tribunal?: TribunalVerdict;
 }
 
 /** Options threaded through the step runner, extending ActionRunnerOptions */
@@ -57,6 +76,8 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
   onGateEvent?: (event: GateEvent) => void;
   /** Optional sink for agent lifecycle events. */
   onAgentEvent?: (event: AgentEvent) => void;
+  /** Optional sink for tribunal lifecycle events. */
+  onTribunalEvent?: (event: TribunalEvent) => void;
 }
 
 type ValidateStep = (step: unknown, path?: string) => PipelineStep;
@@ -78,7 +99,8 @@ type PrimitiveSpec =
   | ParallelStepSpec
   | RetryStepSpec
   | GateStepSpec
-  | AgentStepSpec;
+  | AgentStepSpec
+  | TribunalStepSpec;
 
 interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
   validate?: (spec: Record<string, unknown>, path: string, validateStep: ValidateStep) => void;
@@ -119,6 +141,10 @@ const PRIMITIVES = {
   agent: {
     validate: validateAgent,
     run: runAgent,
+  },
+  tribunal: {
+    validate: validateTribunal,
+    run: runTribunal,
   },
 } satisfies Record<string, PrimitiveHandler<any>>;
 
@@ -824,4 +850,243 @@ async function runAgent(
 
   const collectField = spec.collect ?? `agent_${spec.name}`;
   return { ...payload, [collectField]: result };
+}
+
+// ---------------------------------------------------------------------------
+// Tribunal primitive — model-diverse agent panel adjudicates a judgment call
+// ---------------------------------------------------------------------------
+
+function validateSeat(seat: unknown, path: string): void {
+  if (seat === null || typeof seat !== "object" || Array.isArray(seat)) {
+    throw new Error(`${path}: seat must be an object`);
+  }
+  const s = seat as Record<string, unknown>;
+  if (typeof s.name !== "string" || s.name.length === 0) {
+    throw new Error(`${path}: 'name' must be a non-empty string`);
+  }
+  if (typeof s.capability !== "string" || s.capability.length === 0) {
+    throw new Error(`${path}: 'capability' must be a non-empty string`);
+  }
+  if (typeof s.prompt !== "string" || s.prompt.length === 0) {
+    throw new Error(`${path}: 'prompt' must be a non-empty string`);
+  }
+  if ("timeout_ms" in s && s.timeout_ms !== undefined) {
+    if (typeof s.timeout_ms !== "number" || s.timeout_ms <= 0) {
+      throw new Error(`${path}: 'timeout_ms' must be a positive number when set`);
+    }
+  }
+}
+
+function validateTribunal(spec: Record<string, unknown>, path: string): void {
+  if (typeof spec.name !== "string" || spec.name.length === 0) {
+    throw new Error(`${path}: 'name' must be a non-empty string`);
+  }
+  if (!Array.isArray(spec.seats) || spec.seats.length === 0) {
+    throw new Error(`${path}: 'seats' must be a non-empty array — an empty panel cannot rule`);
+  }
+  for (let i = 0; i < spec.seats.length; i++) {
+    validateSeat(spec.seats[i], `${path}.seats[${i}]`);
+  }
+  const seatNames = (spec.seats as Record<string, unknown>[]).map((s) => s.name);
+  if (new Set(seatNames).size !== seatNames.length) {
+    throw new Error(`${path}: duplicate seat names detected`);
+  }
+  if ("tiebreaker" in spec && spec.tiebreaker !== undefined) {
+    validateSeat(spec.tiebreaker, `${path}.tiebreaker`);
+  }
+  if ("confidence_bar" in spec && spec.confidence_bar !== undefined) {
+    const bar = spec.confidence_bar;
+    if (typeof bar !== "number" || bar < 0 || bar > 1) {
+      throw new Error(`${path}: 'confidence_bar' must be a number in [0, 1]`);
+    }
+  }
+  if ("on_defer" in spec && spec.on_defer !== undefined && spec.on_defer !== "fail" && spec.on_defer !== "continue") {
+    throw new Error(`${path}: 'on_defer' must be "fail" or "continue"`);
+  }
+  if ("timeout_ms" in spec && spec.timeout_ms !== undefined) {
+    if (typeof spec.timeout_ms !== "number" || spec.timeout_ms <= 0) {
+      throw new Error(`${path}: 'timeout_ms' must be a positive number when set`);
+    }
+  }
+}
+
+/**
+ * Dispatch one seat and return its vote. Total: dispatch failures, timeouts,
+ * and aborts all coerce to an abstain vote with a recorded cause — one broken
+ * seat must never crash the panel mid-session. The runner owns the timer;
+ * the provider only sees the AbortSignal (gate/agent precedent).
+ */
+async function dispatchSeat(
+  seat: SeatSpec,
+  payload: Record<string, unknown>,
+  options: StepRunnerOptions,
+  defaultTimeoutMs: number | undefined,
+): Promise<SeatVote> {
+  let prompt: string;
+  try {
+    prompt = renderPromptTemplate(seat.prompt, payload) + VOTE_FORMAT_INSTRUCTION;
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return abstainVote(seat.name, `prompt template error: ${errMsg}`);
+  }
+
+  const timeoutMs = seat.timeout_ms ?? defaultTimeoutMs;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let timedOut = false;
+  if (timeoutMs !== undefined) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+
+  let parentAbortListener: (() => void) | null = null;
+  if (options.signal) {
+    if (options.signal.aborted) {
+      controller.abort();
+    } else {
+      parentAbortListener = () => controller.abort();
+      options.signal.addEventListener("abort", parentAbortListener, { once: true });
+    }
+  }
+
+  const cleanup = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    if (parentAbortListener && options.signal) {
+      options.signal.removeEventListener("abort", parentAbortListener);
+      parentAbortListener = null;
+    }
+  };
+
+  try {
+    const result = await options.agentProvider!.dispatch(
+      {
+        capability: seat.capability,
+        prompt,
+        sovereignty: seat.sovereignty,
+        timeout_ms: timeoutMs,
+      },
+      { signal: controller.signal },
+    );
+    cleanup();
+    if (result.status === "failed") {
+      return abstainVote(seat.name, result.error ?? "seat task failed", result.model);
+    }
+    return parseSeatVote(seat.name, result.output, result.model);
+  } catch (err) {
+    cleanup();
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return abstainVote(seat.name, timedOut ? `seat timeout after ${timeoutMs}ms` : errMsg);
+  }
+}
+
+async function runTribunal(
+  spec: TribunalStepSpec,
+  payload: Record<string, unknown>,
+  options: StepRunnerOptions,
+  stepRecords: StepRecord[],
+): Promise<Record<string, unknown>> {
+  const stepStart = Date.now();
+
+  const recordAndThrow = (errMsg: string, verdict?: TribunalVerdict): never => {
+    stepRecords.push({
+      action: `tribunal:${spec.name}`,
+      success: false,
+      durationMs: Date.now() - stepStart,
+      error: errMsg,
+      tribunal: verdict,
+    });
+    throw new StepFailure(`tribunal:${spec.name}`, errMsg);
+  };
+
+  if (!options.agentProvider) {
+    return recordAndThrow(
+      "no agentProvider configured — pipelines with tribunal steps require one (StepRunnerOptions.agentProvider)",
+    );
+  }
+
+  // Diversity rule (Gate 22) applies BEFORE dispatch so the reassigned seat
+  // is dispatched with its restricted class, never re-dispatched.
+  const { seats, diversity } = planDiversity(spec.seats);
+  const convened_at = new Date().toISOString();
+
+  options.onTribunalEvent?.({
+    type: "tribunal.convened",
+    name: spec.name,
+    seats: seats.map((s) => s.name),
+    convened_at,
+  });
+
+  const votes = await Promise.all(
+    seats.map(async (seat) => {
+      const vote = await dispatchSeat(seat, payload, options, spec.timeout_ms);
+      options.onTribunalEvent?.({ type: "tribunal.seat_voted", name: spec.name, vote });
+      return vote;
+    }),
+  );
+
+  // A parent abort mid-panel is a cancelled step, not an incapacitated panel.
+  if (options.signal?.aborted) {
+    return recordAndThrow(`tribunal ${spec.name}: aborted`);
+  }
+
+  let tally = aggregate(votes, spec.confidence_bar ?? 0);
+  let tiebreak: SeatVote | undefined;
+
+  if (tally.outcome === "tie") {
+    if (spec.tiebreaker) {
+      tiebreak = await dispatchSeat(spec.tiebreaker, payload, options, spec.timeout_ms);
+      options.onTribunalEvent?.({ type: "tribunal.tiebreak", name: spec.name, vote: tiebreak });
+      if (options.signal?.aborted) {
+        return recordAndThrow(`tribunal ${spec.name}: aborted`);
+      }
+      tally = aggregate([...votes, tiebreak], spec.confidence_bar ?? 0);
+      if (tally.outcome === "tie") {
+        tally = { outcome: "defer", reason: `${tally.reason} — tie persisted after tiebreaker` };
+      }
+    } else {
+      tally = { outcome: "defer", reason: `${tally.reason} — no tiebreaker configured` };
+    }
+  }
+
+  const allVotes = tiebreak ? [...votes, tiebreak] : votes;
+  const finalDiversity = checkPosthocDiversity(allVotes, diversity);
+  const ruled = applyDiversityDowngrade(
+    { outcome: tally.outcome as TribunalRuling, reason: tally.reason },
+    finalDiversity,
+  );
+
+  const verdict: TribunalVerdict = {
+    name: spec.name,
+    verdict: ruled.outcome,
+    reason: ruled.reason,
+    votes,
+    diversity: finalDiversity,
+    tiebreak,
+    convened_at,
+    ruled_at: new Date().toISOString(),
+  };
+
+  options.onTribunalEvent?.({ type: "tribunal.verdict", name: spec.name, verdict });
+
+  if (verdict.verdict === "deny") {
+    return recordAndThrow(`verdict=deny — ${verdict.reason}`, verdict);
+  }
+  if (verdict.verdict === "defer" && (spec.on_defer ?? "fail") === "fail") {
+    return recordAndThrow(`verdict=defer — ${verdict.reason} (set on_defer: "continue" to handle downstream)`, verdict);
+  }
+
+  stepRecords.push({
+    action: `tribunal:${spec.name}`,
+    success: true,
+    durationMs: Date.now() - stepStart,
+    tribunal: verdict,
+  });
+
+  const collectField = spec.collect ?? `tribunal_${spec.name}`;
+  return { ...payload, [collectField]: verdict };
 }

@@ -191,3 +191,19 @@ features:
     iteration: 6
     depends: [ P-600, myelin:MY-101 ]
     description: "Pulse publishes jobs to federated.{org}.{domain}.{capability}.request with Myelin envelope. Jobs include capability requirements, sovereignty constraints, and optional budget. First step toward marketplace pattern — manual wiring replaced by published requests."
+
+  # Governance: the layered governed-action stack (docs/governance-upgrade-plan.md)
+  - id: P-700
+    name: Enforcement gate (L0)
+    status: done
+    iteration: 7
+    depends: [ P-200 ]
+    description: "Deterministic fail-closed runtime tool-call policy — evaluate(tool, input, policy) → allow/ask/deny, first-match-wins, errors deny. Built from the Sumarhús enforcement-gate SPEC (from spec, not code). Wired as guardCapabilities around injected capabilities. Shipped v0.9.0 (PR #29)."
+
+  - id: P-701
+    name: Verdict tribunal (L1)
+    status: in-progress
+    iteration: 7
+    issue: 30
+    depends: [ P-700, P-600 ]
+    description: "tribunal: step primitive — N model-diverse agent seats dispatched concurrently, pure fail-closed aggregator (worst-case abstain interpretation) ruling allow/deny/defer, Gate-22 diversity rule with restrictive-only reassignment, tiebreaker on split, abstaining panel denies. Consumes L0's ask; only defer reaches the human gate (L2)."
