@@ -1,0 +1,15 @@
+{
+  "name": "A_SEND_MAIL",
+  "version": "1.0.0",
+  "description": "Mail the advisory document via the KAI email CLI (markdown rendered to HTML by the mailer). Recipients via mail_to input or ADVISORY_MAIL_TO env (comma-separated); skipped when unset — mailing members is an explicit decision",
+  "input": {
+    "advisory_doc": { "type": "object", "required": true },
+    "mail_to": { "type": "string" },
+    "mail_account": { "type": "string" }
+  },
+  "output": {
+    "mail": { "type": "object" }
+  },
+  "requires": ["shell", "writeFile"],
+  "tags": ["soc", "advisory", "mail", "publish"]
+}

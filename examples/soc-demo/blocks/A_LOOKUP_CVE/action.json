@@ -1,0 +1,24 @@
+{
+  "name": "A_LOOKUP_CVE",
+  "version": "1.0.0",
+  "description": "Offline CVE → CVSS + KEV status. Input: cve (case-normalized). Resolves against an embedded JSON cache of ~15 well-known CVEs (Log4Shell, Heartbleed, EternalBlue, MOVEit, …) with approximate CVSS scores and KEV flags. Unknown CVEs return { known: false } rather than throwing — fully offline, no network ever.",
+  "input": {
+    "cve": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "cve_info": {
+      "type": "object"
+    }
+  },
+  "requires": [],
+  "tags": [
+    "soc",
+    "demo",
+    "enrich",
+    "vuln",
+    "offline"
+  ]
+}

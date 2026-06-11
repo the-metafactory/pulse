@@ -1,0 +1,13 @@
+{
+  "name": "A_PUBLISH_ADVISORY",
+  "version": "2.0.0",
+  "description": "Publish the analyst-approved advisory document (demo: render to stdout). Formatting lives in A_FORMAT_ADVISORY",
+  "input": {
+    "advisory_doc": { "type": "object", "required": true },
+    "approval": { "type": "object", "required": true }
+  },
+  "output": {
+    "published": { "type": "object" }
+  },
+  "tags": ["soc", "advisory", "publish"]
+}

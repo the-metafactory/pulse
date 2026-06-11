@@ -1,0 +1,30 @@
+{
+  "name": "A_FETCH_GREYNOISE",
+  "version": "1.0.0",
+  "description": "IP background-noise / scanner reputation via the GreyNoise community API. Input: ip. Stub-safe: when GREYNOISE_API_KEY is unset, prints intent and returns a canned known-scanner result (Censys) so demo flows run offline. On the real path a 404 means the IP has not been seen (noise: false), NOT an error.",
+  "input": {
+    "ip": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "greynoise": {
+      "type": "object"
+    }
+  },
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "demo",
+    "enrich",
+    "reputation"
+  ],
+  "deployment": {
+    "secrets": [
+      "GREYNOISE_API_KEY"
+    ]
+  }
+}

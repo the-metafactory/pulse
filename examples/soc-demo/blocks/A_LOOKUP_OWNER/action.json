@@ -1,0 +1,25 @@
+{
+  "name": "A_LOOKUP_OWNER",
+  "version": "1.0.0",
+  "description": "Offline IP → responsible OU + contact (the NREN CMDB/NetDB adapter, design §4). Input: ip. Resolves against an embedded fixture table mapping demo IPs to organizational units and NOC contacts. Unknown IPs return { known: false } rather than throwing — fully offline, no network ever.",
+  "input": {
+    "ip": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "owner": {
+      "type": "object"
+    }
+  },
+  "requires": [],
+  "tags": [
+    "soc",
+    "demo",
+    "enrich",
+    "cmdb",
+    "nren",
+    "offline"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "A_SANITIZE_IOCS",
+  "version": "1.0.0",
+  "description": "Filter IOCs whose host matches the CONFIGURED internal-domain patterns before frontier enrichment (demo fixture: example-university.ch, *.switch.ch). NOT a general PII boundary - unlisted member identifiers pass through; replace the pattern list per deployment. Malformed/unparseable URLs are dropped, never crash the block.",
+  "input": {
+    "triage": {
+      "type": "object",
+      "required": true
+    }
+  },
+  "output": {
+    "iocs_sanitized": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "soc",
+    "sanitize",
+    "sovereignty"
+  ]
+}

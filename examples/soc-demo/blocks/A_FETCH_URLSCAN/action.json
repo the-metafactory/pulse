@@ -1,0 +1,30 @@
+{
+  "name": "A_FETCH_URLSCAN",
+  "version": "1.0.0",
+  "description": "Submit a URL for scanning via urlscan.io. Input: url. Stub-safe: when URLSCAN_API_KEY is unset, prints intent and returns a canned malicious verdict (score 85) so demo flows run offline. The real path submits the scan and returns the submission's report/screenshot URLs honestly (verdict: submitted, score 0 — the scan is async).",
+  "input": {
+    "url": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "urlscan": {
+      "type": "object"
+    }
+  },
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "demo",
+    "enrich",
+    "url"
+  ],
+  "deployment": {
+    "secrets": [
+      "URLSCAN_API_KEY"
+    ]
+  }
+}
