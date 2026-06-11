@@ -7,7 +7,8 @@
  * (markdown native), and mail (the KAI email CLI renders markdown to HTML).
  *
  * The renderer is shape-tolerant: models return strings, objects, or arrays
- * for any field — everything becomes readable prose/bullets, never raw JSON.
+ * for the fields THIS block renders into advisory_doc — readable prose/bullets,
+ * never raw JSON. Other payload fields pass through unchanged downstream.
  */
 
 import type { ActionContext } from "../../../../src/types/action";

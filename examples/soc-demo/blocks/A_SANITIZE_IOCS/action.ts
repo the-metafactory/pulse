@@ -45,11 +45,20 @@ function hostnameOf(url: string): string | null {
   }
 }
 
+/**
+ * Model output often arrives ```json-fenced — strip optional fences before
+ * JSON.parse so a common response shape doesn't crash the block.
+ */
+function parseModelJson(raw: string): unknown {
+  const fenced = raw.match(/```(?:json)?\s*\n([\s\S]*?)```/i);
+  return JSON.parse((fenced ? fenced[1]! : raw).trim());
+}
+
 export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { triage, ...payload } = input;
     const result = triage as AgentTaskResult;
-    const out = (typeof result.output === "string" ? JSON.parse(result.output) : result.output) as TriageOutput;
+    const out = (typeof result.output === "string" ? parseModelJson(result.output) : result.output) as TriageOutput;
 
     const iocs = out.iocs ?? {};
     const sanitized = {

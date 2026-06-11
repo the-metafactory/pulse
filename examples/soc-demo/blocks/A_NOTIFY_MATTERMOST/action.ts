@@ -15,7 +15,9 @@ interface AdvisoryDoc {
   markdown?: string;
 }
 
-// Two independent ceilings, measured against securechat-test (2026-06-10):
+// Two independent ceilings, measured against securechat-test (2026-06-10) —
+// measurement provenance: examples/soc-triage/A_NOTIFY_MATTERMOST git history
+// (this block is the soc-demo copy; the numbers were binary-searched live):
 // the API validates MaxPostSize (16383) and returns a clean 400 above it,
 // but the SAVE layer 500s ("app.post.save.app_error") when the DB column
 // overflows — binary-searched to ~4000 characters (3000 two-byte chars

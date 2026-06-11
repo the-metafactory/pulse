@@ -1,15 +1,33 @@
 {
   "name": "A_FORMAT_ADVISORY",
   "version": "1.0.0",
-  "description": "Render triage + enrichment + gate verdict into one well-formed advisory document (markdown + subject + plain text) — the single source for stdout, Mattermost, and mail. No raw JSON ever reaches a reader",
+  "description": "Render triage + enrichment + gate verdict into one well-formed advisory document (markdown + subject + plain text) \u2014 the single source for stdout, Mattermost, and mail. This block renders its own advisory_doc as readable markdown (other payload fields pass through unchanged)",
   "input": {
-    "triage": { "type": "object", "required": true },
-    "enrichment": { "type": "object", "required": true },
-    "iocs_sanitized": { "type": "object", "required": true },
-    "approval": { "type": "object", "required": true }
+    "triage": {
+      "type": "object",
+      "required": true
+    },
+    "enrichment": {
+      "type": "object",
+      "required": true
+    },
+    "iocs_sanitized": {
+      "type": "object",
+      "required": true
+    },
+    "approval": {
+      "type": "object",
+      "required": true
+    }
   },
   "output": {
-    "advisory_doc": { "type": "object" }
+    "advisory_doc": {
+      "type": "object"
+    }
   },
-  "tags": ["soc", "advisory", "format"]
+  "tags": [
+    "soc",
+    "advisory",
+    "format"
+  ]
 }
