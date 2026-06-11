@@ -110,12 +110,19 @@ export async function compose(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     attempts++;
     const response = await llm(prompt, { system, tier: "smart" });
-    const text = response.text;
+    const text = response.text ?? "";
 
     const yaml = extractFence(text, "yaml");
     if (!yaml) {
-      // No YAML fence — the composer chose the no-match path (prompt rule 2).
-      return { ok: false, kind: "no-match", message: text.trim(), attempts };
+      // No YAML fence AND substantive text — the composer chose the no-match
+      // path (prompt rule 2). An EMPTY reply is a failure, not a pivot:
+      // retry it like a validation miss instead of surfacing "" to the stage.
+      if (text.trim().length > 0) {
+        return { ok: false, kind: "no-match", message: text.trim(), attempts };
+      }
+      lastFindings = [{ rule: "parse-error", step: -1, message: "empty composer reply" }];
+      prompt = `Your previous reply was empty. Emit the full response (yaml + mermaid + summary) for the scenario.`;
+      continue;
     }
 
     const validation = validatePipeline(yaml, catalog, { initialFields });
@@ -135,8 +142,11 @@ export async function compose(
     const findingLines = validation.findings
       .map((f) => `- [${f.rule}] step ${f.step}: ${f.message}`)
       .join("\n");
+    // Include the failed YAML — each llm() call is stateless, so without it
+    // the model would be fixing findings against a flow it can no longer see.
     prompt =
-      `Your previous YAML failed validation:\n${findingLines}\n\n` +
+      `Your previous YAML:\n\`\`\`yaml\n${yaml}\`\`\`\n\n` +
+      `failed validation:\n${findingLines}\n\n` +
       `Fix exactly these findings and re-emit the full response ` +
       `(yaml + mermaid + summary). Remember: only catalog blocks, ` +
       `sovereignty annotation on every step.`;

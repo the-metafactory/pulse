@@ -23,7 +23,9 @@ export async function renderMermaid(
   source: string,
   options: RenderOptions = {},
 ): Promise<Uint8Array | null> {
-  const cmd = options.cmd ?? ["bunx", "--yes", "@mermaid-js/mermaid-cli"];
+  // Pinned major — an unpinned bunx fetch could swap renderer behavior
+  // between rehearsal and stage.
+  const cmd = options.cmd ?? ["bunx", "--yes", "@mermaid-js/mermaid-cli@11"];
   const timeoutMs = options.timeoutMs ?? 30_000;
 
   let dir: string | null = null;
@@ -51,6 +53,13 @@ export async function renderMermaid(
     console.error(`[renderMermaid] render failed, falling back to source: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   } finally {
-    if (dir) await rm(dir, { recursive: true, force: true });
+    if (dir) {
+      try {
+        await rm(dir, { recursive: true, force: true });
+      } catch (cleanupErr) {
+        // Never let temp-dir cleanup mask the render result.
+        console.error(`[renderMermaid] temp cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+      }
+    }
   }
 }

@@ -178,5 +178,5 @@ describe("renderMermaid (ISC-33/34)", () => {
     const png = await renderMermaid("flowchart TD\n A[start] --> B[end]");
     expect(png).not.toBeNull();
     expect(png!.byteLength).toBeGreaterThan(1000);
-  });
+  }, 60_000);
 });
