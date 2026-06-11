@@ -25,8 +25,9 @@
  *
  * Sovereignty annotations are YAML *comments* (`# sovereignty: A, residency: EU`)
  * — they do not survive `yaml` parse, so check (c) runs as a raw-text line
- * scan. The extracted annotations are returned as a machine-readable map so
- * the execution wiring can tag per-step thread replies with D/A/H classes.
+ * scan. The extracted annotations come back as an ordered StepAnnotation[]
+ * (indexed by step position, not keyed) so the execution wiring can tag
+ * per-step thread replies with D/A/H classes.
  */
 
 import { parse } from "yaml";
@@ -119,8 +120,15 @@ function scanStepAnnotations(rawYaml: string): RawStep[] {
 
     const step: RawStep = { line: i };
     const trailing = line.match(SOVEREIGNTY_RE);
-    const above = i > 0 ? lines[i - 1]!.trim() : "";
-    const aboveMatch = above.startsWith("#") ? above.match(SOVEREIGNTY_RE) : null;
+    // Above-line comments count only at the SAME indentation as the step
+    // item — a comment nested inside the previous step's body must not
+    // satisfy the next top-level step's annotation requirement.
+    const aboveRaw = i > 0 ? lines[i - 1]! : "";
+    const aboveComment = aboveRaw.match(/^(\s*)#/);
+    const aboveMatch =
+      aboveComment && aboveComment[1]!.length === itemIndent
+        ? aboveRaw.match(SOVEREIGNTY_RE)
+        : null;
     const hit = trailing ?? aboveMatch;
     if (hit) {
       step.sovereignty = hit[1] as SovereigntyClass;
@@ -136,6 +144,20 @@ function scanStepAnnotations(rawYaml: string): RawStep[] {
 // ---------------------------------------------------------------------------
 
 /**
+ * Child sub-pipeline step arrays of a primitive step — one place to extend
+ * when a new primitive with nested actions lands. Gate / agent / tribunal /
+ * governed are leaves: no catalog blocks inside.
+ */
+function childActions(step: Exclude<PipelineStep, string>): PipelineStep[][] {
+  if ("map" in step) return [step.map.actions];
+  if ("filter" in step) return [step.filter.actions];
+  if ("reduce" in step) return [step.reduce.actions];
+  if ("retry" in step) return [step.retry.actions];
+  if ("parallel" in step) return Object.values(step.parallel.branches).map((b) => b.actions);
+  return [];
+}
+
+/**
  * Collect every plain action name reachable from a step, including nested
  * sub-pipelines, recording the owning top-level step index in one pass.
  */
@@ -148,16 +170,9 @@ function collectActionNames(
     into.push({ name: step, stepIndex });
     return;
   }
-  if ("map" in step) for (const s of step.map.actions) collectActionNames(s, stepIndex, into);
-  else if ("filter" in step) for (const s of step.filter.actions) collectActionNames(s, stepIndex, into);
-  else if ("reduce" in step) for (const s of step.reduce.actions) collectActionNames(s, stepIndex, into);
-  else if ("retry" in step) for (const s of step.retry.actions) collectActionNames(s, stepIndex, into);
-  else if ("parallel" in step) {
-    for (const branch of Object.values(step.parallel.branches)) {
-      for (const s of branch.actions) collectActionNames(s, stepIndex, into);
-    }
+  for (const actions of childActions(step)) {
+    for (const s of actions) collectActionNames(s, stepIndex, into);
   }
-  // gate / agent / tribunal / governed are leaves — no catalog blocks inside
 }
 
 /** Label for annotation pairing: action name or primitive keyword. */

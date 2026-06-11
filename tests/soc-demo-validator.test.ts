@@ -148,6 +148,24 @@ actions:
     expect(result.valid).toBe(true);
   });
 
+  test("comment nested inside the previous step does NOT annotate the next step (sage round 3)", () => {
+    const flow = `name: F_X
+actions:
+  - map:  # sovereignty: D, residency: CH
+      over: breaches
+      as: breach
+      collect: results
+      actions:
+        - A_FETCH_HIBP
+      # sovereignty: D, residency: CH
+  - A_NOTIFY_MATTERMOST
+`;
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["breaches", "email"] });
+    expect(result.valid).toBe(false);
+    const finding = result.findings.find((f) => f.rule === "missing-annotation");
+    expect(finding?.step).toBe(1);
+  });
+
   test("missing sovereignty annotation is rejected (ISC-4)", () => {
     const flow = `name: F_X
 actions:
@@ -211,21 +229,20 @@ describe("A_VALIDATE_FLOW block wrapper (ISC-9)", () => {
     rmSync(TRUST_DIR, { recursive: true, force: true });
   });
 
-  test("validates against the blocks_dir trust root and returns validation in payload", async () => {
+  test("validates against the blocks_dir trust root; available fields = actual payload keys", async () => {
     const mod = await import("../examples/soc-demo/blocks/A_VALIDATE_FLOW/action");
     const result = (await mod.default.execute(
       {
         flow_yaml: VALID_FLOW,
         blocks_dir: TRUST_DIR,
-        initial_fields: ["email"],
+        email: "test@example.org",
         scenario: "credential leak",
       },
       ctx,
     )) as Record<string, unknown>;
     expect((result.validation as { valid: boolean }).valid).toBe(true);
-    // passthrough preserved; control inputs consumed
+    // passthrough preserved
     expect(result.scenario).toBe("credential leak");
-    expect(result.initial_fields).toBeUndefined();
   });
 
   test("Anti: caller-supplied catalog input cannot vouch for invented blocks (sage blocker)", async () => {
@@ -246,18 +263,29 @@ actions:
     expect(validation.findings.some((f) => f.rule === "unknown-block")).toBe(true);
   });
 
-  test("defaults to its own installed blocks directory when blocks_dir omitted", async () => {
+  test("Anti: caller cannot forge available inputs via initial_fields (sage round 3)", async () => {
     const mod = await import("../examples/soc-demo/blocks/A_VALIDATE_FLOW/action");
-    const flow = `name: F_SELF
-actions:
-  - A_VALIDATE_FLOW  # sovereignty: D, residency: CH
-`;
+    // VALID_FLOW's first step requires `email`; the payload does NOT carry it.
+    // A claimed initial_fields list must not open the gate.
     const result = (await mod.default.execute(
-      { flow_yaml: flow, initial_fields: ["flow_yaml"] },
+      { flow_yaml: VALID_FLOW, blocks_dir: TRUST_DIR, initial_fields: ["email"] },
       ctx,
     )) as Record<string, unknown>;
-    // A_VALIDATE_FLOW itself is installed, so the only valid catalog is the real one
-    const validation = result.validation as { valid: boolean };
-    expect(validation.valid).toBe(true);
+    const validation = result.validation as { valid: boolean; findings: Array<{ rule: string }> };
+    expect(validation.valid).toBe(false);
+    expect(validation.findings.some((f) => f.rule === "missing-input")).toBe(true);
+  });
+
+  test("defaults to its own installed blocks directory when blocks_dir omitted", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_VALIDATE_FLOW/action");
+    const flow = `name: F_X
+actions:
+  - A_TOTALLY_INVENTED  # sovereignty: D, residency: CH
+`;
+    const result = (await mod.default.execute({ flow_yaml: flow }, ctx)) as Record<string, unknown>;
+    // Real installed dir doesn't contain the invented block → unknown-block.
+    const validation = result.validation as { valid: boolean; findings: Array<{ rule: string }> };
+    expect(validation.valid).toBe(false);
+    expect(validation.findings.some((f) => f.rule === "unknown-block")).toBe(true);
   });
 });

@@ -33,12 +33,12 @@ export default {
     const catalogDir = typeof blocks_dir === "string" ? blocks_dir : INSTALLED_BLOCKS_DIR;
     const catalog = await buildCatalog(catalogDir);
 
-    const initialFields = Array.isArray(input.initial_fields)
-      ? (input.initial_fields as string[])
-      : undefined;
-    delete (payload as Record<string, unknown>).initial_fields;
-
-    const validation = validatePipeline(flow_yaml, catalog, { initialFields });
+    // Available initial fields are the ACTUAL payload keys flowing into this
+    // step — never a caller-declared list, which could claim fields that
+    // don't exist and forge the required-input gate open (sage round 3).
+    const validation = validatePipeline(flow_yaml, catalog, {
+      initialFields: Object.keys(payload),
+    });
 
     return { ...payload, validation };
   },

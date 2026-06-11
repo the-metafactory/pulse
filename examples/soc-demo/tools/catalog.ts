@@ -4,8 +4,9 @@
  * Usage: bun examples/soc-demo/tools/catalog.ts [blocksDir]
  * Default blocksDir: examples/soc-demo/blocks (relative to this file).
  *
- * The composer wiring runs this at call time to load the catalog into the
- * composer prompt — the catalog is never hard-coded (design §8.4).
+ * Intended consumer: the composer wiring (P-803/P-805) loads the catalog into
+ * the composer prompt at call time — the catalog is never hard-coded
+ * (design §8.4). Until that wiring lands, this is a standalone inspection CLI.
  */
 
 import { join, dirname } from "node:path";
