@@ -97,11 +97,20 @@ async function main() {
         `local.${PRINCIPAL}.${STACK}.governance.verdict.${layer}`,
         JSON.stringify({
           id: crypto.randomUUID(),
-          source: `${PRINCIPAL}.${STACK}.pulse.P_CONTAINMENT`,
+          // Myelin envelope conformance (cortex G-1115 consumes these):
+          // source = exactly 3 lowercase dot-segments; sovereignty carries
+          // the full required block (max_hop / frontier_ok / model_class).
+          source: `${PRINCIPAL}.${STACK}.pulse`,
           type: `governance.verdict.${layer}`,
           timestamp: new Date().toISOString(),
-          sovereignty: { classification: "local", data_residency: "CH" },
-          payload,
+          sovereignty: {
+            classification: "local",
+            data_residency: "CH",
+            max_hop: 0,
+            frontier_ok: false,
+            model_class: "any",
+          },
+          payload: { ...payload, pipeline: "P_CONTAINMENT" },
         }),
       ),
     );
