@@ -39,6 +39,7 @@ export type {
   GateResult,
   GateVerdict,
   GateEvent,
+  ActionStepEvent,
 } from "./types/pipeline";
 export { StdinGateProvider } from "./lib/gate-provider";
 
