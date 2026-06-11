@@ -2,7 +2,7 @@ schema: pai/v1
 name: pulse
 type: tool
 tier: community
-version: 0.12.0
+version: 0.12.1
 description: Process execution engine — tree runner, action system with capability injection, pipeline pipe model, flow orchestration
 author:
   name: Jens-Christian Fischer

@@ -2,7 +2,7 @@
 
 _Draft 2026-06-10, status updated 2026-06-11 · synthesises two external inputs into a staged build plan for the metafactory ecosystem (pulse · cortex · compass · arc)._
 
-> **Status (2026-06-11):** Stages 1, 1b, 2, 3, 4 are **shipped and deployed** — pulse v0.12.0 (enforcement gate P-700, verdict tribunal P-701, governed-action stack P-702 + containment demo), cortex sovereignty gate (audit-parity), sage Honest Oracle lens v0.2.6. Stage 5 in progress. Per-stage annotations below.
+> **Status (2026-06-11):** Stages 1, 1b, 2, 3, 4, 5 are **shipped and deployed** — pulse v0.12.0 (enforcement gate P-700, verdict tribunal P-701, governed-action stack P-702 + containment demo), cortex sovereignty gate (audit-parity), sage Honest Oracle lens v0.2.6. Stages 6-8 remain. Per-stage annotations below.
 
 ## The convergence
 
@@ -99,13 +99,13 @@ _Acceptance:_ a split panel convenes a tiebreaker; a same-model panel auto-reass
 
 _Acceptance:_ a containment pipeline runs all three layers; each layer's verdict is on the bus. **Both proven** — `governed:` primitive (one YAML block: inline policy + tribunal + gate; routing axiom: only uncertainty travels down, refusals terminal at every layer; `ask` without a tribunal degrades to the gate); demo publishes `governance.verdict.{l0,tribunal,gate,resolved}` envelopes, live-probed over NATS.
 
-### Stage 5 — Audit substrate + observability tab `[cortex MC · G-1115]` 🔨 IN PROGRESS
+### Stage 5 — Audit substrate + observability tab `[cortex MC · G-1115]` ✅ SHIPPED (cortex#986, v5.10.0; pulse#41 envelope conformance, v0.12.1)
 **Make the verdicts visible.** Verdicts already land append-only on the bus (our free Sága). Add a read-only MC dashboard tab: recent denials + verdicts + sovereignty refusals, last 30d, tiered alarm banner, honest empty states (RavenClaude's Heimdall/Víðarr, but reading the bus instead of JSONL files).
 
 - We already emit sovereignty refusals (`--violate` demo) — this surfaces them.
 - **SOC compliance story made visible:** "every blocked action, every verdict, who approved, when."
 
-_Acceptance:_ a tab renders the last 30d of verdicts from the bus; empty state is honest (never a fake all-clear).
+_Acceptance:_ a tab renders the last 30d of verdicts from the bus; empty state is honest (never a fake all-clear). **Both met** — Governance tab on the MC-I1.S6 projection seam (`governance_verdicts`, idempotent on envelope id), `GET /api/governance` with deterministic alarm tiers (24h denials: 0 none / 1-4 elevated / ≥5 high), empty state honest in BOTH directions (zero rows = nothing ran OR verdicts never reached the projection). `governance` is now a documented bus domain (cortex CONTEXT.md).
 
 ### Stage 6 — Diplomatic pouch, trust rung 1 `[pulse + compass · P-703 / COMP-xx]`
 **Build our Gestur-equivalent from Magnus' Foreign Policy spec — do not install his zip** (matches his own philosophy: build the better-fitting version on your own substrate; and his border #1: nothing executable crosses on first contact).
