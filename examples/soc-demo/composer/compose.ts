@@ -1,5 +1,5 @@
 /**
- * Pulse Composer core — scenario + catalog + injected LLM → { yaml, mermaid,
+ * Yarrow (Pulse Composer) core — scenario + catalog + injected LLM → { yaml, mermaid,
  * summary } with the validator-retry loop (design/soc-demo-mm-composer.md §5).
  *
  * MM-agnostic and LLM-injected: the Mattermost wiring (P-805) supplies the
@@ -64,7 +64,7 @@ export type ComposeResult =
  * §3.4). The wiring posts this as part of the composer's first thread reply.
  */
 export const SELF_DISCLOSURE =
-  "⚖️ Pulse Composer is frontier-A (text → YAML is reasoning on a frontier model). " +
+  "⚖️ Yarrow (Pulse Composer) is frontier-A (text → YAML is reasoning on a frontier model). " +
   "The flows it emits can still route individual steps local-only — watch the annotations.";
 
 const here = dirname(fileURLToPath(import.meta.url));
