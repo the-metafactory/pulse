@@ -222,3 +222,60 @@ features:
     iteration: 7
     depends: [ P-202 ]
     description: "The Sumarhús Foreign Policy v1.0 implemented from spec (never its code): outbound pipeline sanitise (block-don't-redact) → rate gate (3/24h rolling, sha256 dedupe, topic discipline, fail-closed, deterministic time) → named-human gate → sidecar-signed pouch drop; inbound quarantine → tripwire (rule-rewrite attempt halts the channel — the attempt is the alarm) → strip injection → wrap untrusted → human promotion. The correct rung for a NEW peer, below NATS leaf federation. Ecosystem standard in compass/sops/peer-contact.md."
+
+  # SOC demo: Mattermost Pulse Composer (design/soc-demo-mm-composer.md, issue #37)
+  - id: P-800
+    name: Flow validator + block catalog
+    status: in-progress
+    iteration: 8
+    issue: 37
+    depends: [ P-206 ]
+    description: "Deterministic compose-to-execute gate: pure validatePipeline(rawYaml, catalog) checks block names against the installed catalog (incl. nested sub-pipelines), required-input satisfiability for TOP-LEVEL action steps (nested iteration bindings out of static scope), and per-step sovereignty comment annotations (raw-text scan — comments don't survive YAML parse); returns machine-readable annotations map. buildCatalog scans action.json manifests (installed blocks dir is the trust root); A_VALIDATE_FLOW block wraps the pure core. Returns findings; the execution wiring (P-805) refuses to run invalid flows."
+
+  - id: P-801
+    name: SOC demo block palette (12 stub-safe blocks)
+    status: planned
+    iteration: 8
+    issue: 37
+    depends: [ P-800 ]
+    description: "A_FETCH_{VIRUSTOTAL,HIBP,URLSCAN,GREYNOISE,CRTSH}, A_LOOKUP_{GEOIP_ASN,CVE,OWNER}, A_EXTRACT_IOCS, A_TAG_TLP, A_OPEN_TICKET, A_SHARE_MISP — each env-gated real path + canned stub fixture, mirroring A_NOTIFY_MATTERMOST's env-skip contract. Reused soc-triage blocks copied into examples/soc-demo/blocks/."
+
+  - id: P-802
+    name: Per-step lifecycle events (onActionStepEvent)
+    status: done
+    iteration: 8
+    issue: 37
+    depends: [ P-202 ]
+    description: "StepRunnerOptions.onActionStepEvent sink emitting step.started/completed/failed for plain action steps (ActionStepEvent — Step = Action | Primitive, this covers the action kind) — the hook the demo's per-step Mattermost thread replies hang on. Follows the onGateEvent/onAgentEvent precedent."
+
+  - id: P-803
+    name: Pulse Composer core
+    status: planned
+    iteration: 8
+    issue: 37
+    depends: [ P-800 ]
+    description: "compose(scenario, catalog, llm) → { yaml, mermaid, summary } with the design §3 prompt rules (catalog-is-truth, mandatory sovereignty annotations, frontier-A self-disclosure), validator-retry loop (max 2) and closest-match fallback. LLM injected as capability; MM-agnostic."
+
+  - id: P-804
+    name: Mermaid → PNG rendering
+    status: planned
+    iteration: 8
+    issue: 37
+    depends: [ P-803 ]
+    description: "renderMermaid via bunx @mermaid-js/mermaid-cli shell-out (zero new runtime deps); any failure falls back to posting the fenced Mermaid source — rendering must never break the demo."
+
+  - id: P-805
+    name: Mattermost execution wiring
+    status: planned
+    iteration: 8
+    issue: 37
+    depends: [ P-801, P-802, P-803, P-804 ]
+    description: "Thread listener (env-gated MATTERMOST_*) → compose → validate → operator ack gate → pulse runtime with per-step thread replies (block name, D/A/H class from validator annotations, 1-line result) → final artifact. Live probe blocked on composer bot identity (JC, design §10 Q1)."
+
+  - id: P-806
+    name: SOC demo rehearsal
+    status: planned
+    iteration: 8
+    issue: 37
+    depends: [ P-805 ]
+    description: "All 8 ranked design-§9 scenarios run end-to-end in stub mode; failures dispositioned as composer-prompt fixes (default) vs palette additions; results table in examples/soc-demo/README.md."

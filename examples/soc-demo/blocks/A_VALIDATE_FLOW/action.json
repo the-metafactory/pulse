@@ -1,0 +1,26 @@
+{
+  "name": "A_VALIDATE_FLOW",
+  "version": "1.2.0",
+  "description": "Deterministic compose-to-execute check: verifies every block name (including nested sub-pipeline blocks) exists in the installed catalog, required inputs of top-level action steps are satisfiable from the ACTUAL payload keys reaching this step (nested sub-pipeline input wiring is NOT statically checked - iteration bindings are out of scope), and sovereignty annotations exist on every top-level step. Pure static checks - never executes blocks. Loads the catalog from the installed blocks directory (trust root), never from pipeline input. Returns validation { valid, findings, annotations }; the execution wiring (P-805) is responsible for refusing to run flows where valid is false.",
+  "input": {
+    "flow_yaml": {
+      "type": "string",
+      "required": true
+    },
+    "blocks_dir": {
+      "type": "string"
+    }
+  },
+  "output": {
+    "validation": {
+      "type": "object"
+    }
+  },
+  "requires": [],
+  "tags": [
+    "soc",
+    "demo",
+    "guardrail",
+    "deterministic"
+  ]
+}
