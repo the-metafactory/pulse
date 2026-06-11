@@ -1,0 +1,12 @@
+{
+  "name": "A_SANITIZE_IOCS",
+  "version": "1.0.0",
+  "description": "Strip member PII from triage output — only shareable IOCs may cross the sovereignty boundary to frontier models",
+  "input": {
+    "triage": { "type": "object", "required": true }
+  },
+  "output": {
+    "iocs_sanitized": { "type": "object" }
+  },
+  "tags": ["soc", "sanitize", "sovereignty"]
+}

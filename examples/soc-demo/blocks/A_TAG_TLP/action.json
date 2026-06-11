@@ -1,0 +1,27 @@
+{
+  "name": "A_TAG_TLP",
+  "version": "1.0.0",
+  "description": "Assign a TLP 2.0 marking via a deterministic keyword heuristic (design §4). Input: text, optional default_tlp. RED for active-incident language, AMBER for personal-data/credential mentions, GREEN for internal-community language, else default_tlp or TLP:CLEAR. Demo heuristic, not a sharing policy. Fully offline, no network ever.",
+  "input": {
+    "text": {
+      "type": "string",
+      "required": true
+    },
+    "default_tlp": {
+      "type": "string"
+    }
+  },
+  "output": {
+    "tlp": {
+      "type": "object"
+    }
+  },
+  "requires": [],
+  "tags": [
+    "soc",
+    "demo",
+    "govern",
+    "tlp",
+    "offline"
+  ]
+}

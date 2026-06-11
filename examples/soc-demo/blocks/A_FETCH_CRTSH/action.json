@@ -1,0 +1,25 @@
+{
+  "name": "A_FETCH_CRTSH",
+  "version": "1.0.0",
+  "description": "Certificate-transparency search via crt.sh (typosquat / shadow-IT discovery). Input: domain. crt.sh is keyless, so the stub gate is the CRTSH_LIVE env flag instead of an API key: unset (or not '1') returns a canned 2-cert fixture; CRTSH_LIVE=1 queries crt.sh live. Diverges from the API-key stub pattern by design.",
+  "input": {
+    "domain": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "crtsh": {
+      "type": "object"
+    }
+  },
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "demo",
+    "enrich",
+    "certificates"
+  ]
+}

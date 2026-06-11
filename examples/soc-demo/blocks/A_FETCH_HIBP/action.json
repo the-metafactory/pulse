@@ -1,0 +1,30 @@
+{
+  "name": "A_FETCH_HIBP",
+  "version": "1.0.0",
+  "description": "Email/domain breach check via Have I Been Pwned v3. Input: email. Stub-safe: when HIBP_API_KEY is unset, prints intent and returns a canned 2-breach hit so demo flows run offline. On the real path a 404 means not breached (an empty list, not an error).",
+  "input": {
+    "email": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "hibp": {
+      "type": "object"
+    }
+  },
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "demo",
+    "enrich",
+    "breach"
+  ],
+  "deployment": {
+    "secrets": [
+      "HIBP_API_KEY"
+    ]
+  }
+}

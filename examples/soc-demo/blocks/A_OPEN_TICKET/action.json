@@ -1,0 +1,36 @@
+{
+  "name": "A_OPEN_TICKET",
+  "version": "1.0.0",
+  "description": "Open a ticket in RT / Jira ServiceDesk (design §4). Input: subject, body, optional queue. Stub-safe: when TICKET_API_URL or TICKET_API_TOKEN is unset, logs intent and returns a synthetic deterministic ticket id (DEMO-…) derived from the subject hash, so demo flows run offline. When configured, POSTs to RT REST 2.0 and a failed call fails the pipeline.",
+  "input": {
+    "subject": {
+      "type": "string",
+      "required": true
+    },
+    "body": {
+      "type": "string"
+    },
+    "queue": {
+      "type": "string"
+    }
+  },
+  "output": {
+    "ticket": {
+      "type": "object"
+    }
+  },
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "demo",
+    "act",
+    "ticket"
+  ],
+  "deployment": {
+    "secrets": [
+      "TICKET_API_TOKEN"
+    ]
+  }
+}

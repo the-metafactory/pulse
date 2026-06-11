@@ -1,0 +1,36 @@
+{
+  "name": "A_SHARE_MISP",
+  "version": "1.0.0",
+  "description": "Render and push a MISP event (design §4). Input: title, optional iocs (A_EXTRACT_IOCS shape), optional tlp (object or string). Always renders a MISP Event (distribution 0, threat_level_id 2, analysis 0) with Attributes from the IOCs and a TLP Tag. Stub-safe: when MISP_URL or MISP_API_KEY is unset, logs intent and returns the rendered event with event_id null. When configured, POSTs to /events and a failed call fails the pipeline.",
+  "input": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "iocs": {
+      "type": "object"
+    },
+    "tlp": {
+      "type": "object"
+    }
+  },
+  "output": {
+    "misp": {
+      "type": "object"
+    }
+  },
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "demo",
+    "share",
+    "misp"
+  ],
+  "deployment": {
+    "secrets": [
+      "MISP_API_KEY"
+    ]
+  }
+}
