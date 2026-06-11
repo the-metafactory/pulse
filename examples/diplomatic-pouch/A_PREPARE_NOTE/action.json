@@ -1,0 +1,30 @@
+{
+  "name": "A_PREPARE_NOTE",
+  "version": "1.0.0",
+  "description": "Read the human-authored source note, enforce the plaintext border, compute its sha256.",
+  "requires": [
+    "readFile"
+  ],
+  "input": {
+    "pouch_dir": {
+      "type": "string",
+      "required": true
+    },
+    "note_path": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "note_text": {
+      "type": "string"
+    },
+    "note_sha256": {
+      "type": "string"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

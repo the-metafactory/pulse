@@ -1,0 +1,21 @@
+# P_POUCH_OUT — outbound diplomatic note (Foreign Policy §§1-7, built from spec).
+#
+#   channel check → prepare (border 1) → border scan (border 3, block-don't-
+#   redact) → rate gate (§4 blueprint) → NAMED-HUMAN GATE (§3 — establishing
+#   relations is a human act) → seal + drop (his sidecar format verbatim)
+#
+# The pouch is human-relayed from outbox/: no API, no webhook, no trigger.
+
+name: P_POUCH_OUT
+description: Sanitise, rate-gate, human-approve, sign, and drop an outbound note into the diplomatic pouch.
+
+actions:
+  - A_CHANNEL_CHECK
+  - A_PREPARE_NOTE
+  - A_BORDER_CHECK
+  - A_RATE_GATE
+  - gate:
+      name: named-human-approval
+      prompt: "Diplomatic send requires a NAMED human (Foreign Policy §3). Review the note, thread, and rate-gate reason above. Type your NAME in the notes to approve (pass), or fail to refuse."
+      collect: approval
+  - A_SEAL_POUCH

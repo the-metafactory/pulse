@@ -215,3 +215,10 @@ features:
     issue: 34
     depends: [ P-700, P-701 ]
     description: "governed: step primitive composing the enforcement gate, the verdict tribunal, and the human gate with fail-closed routing — L0 allow skips the panel (zero LLM cost), deny is terminal at every layer, ask convenes the tribunal (or degrades to the gate), defer escalates to the human. Containment demo runs all three layers in-pipeline with every layer's verdict published to the bus (governance.verdict.*)."
+
+  - id: P-703
+    name: Diplomatic pouch (trust rung 1)
+    status: in-progress
+    iteration: 7
+    depends: [ P-202 ]
+    description: "The Sumarhús Foreign Policy v1.0 implemented from spec (never its code): outbound pipeline sanitise (block-don't-redact) → rate gate (3/24h rolling, sha256 dedupe, topic discipline, fail-closed, deterministic time) → named-human gate → sidecar-signed pouch drop; inbound quarantine → tripwire (rule-rewrite attempt halts the channel — the attempt is the alarm) → strip injection → wrap untrusted → human promotion. The correct rung for a NEW peer, below NATS leaf federation. Ecosystem standard in compass/sops/peer-contact.md."
