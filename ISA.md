@@ -150,6 +150,8 @@ Pulse ships the SOC demo stack — `A_VALIDATE_FLOW` + catalog export, 12 stub-s
 - 2026-06-11 (EXECUTE): P-803/804/805 + rehearsal shipped in one PR (#47) — wiring is the consumer the composer review findings pointed at; separate PRs would have re-reviewed the same surface. One-feature-per-PR rule consciously traded for convergence; noted per SOP.
 - 2026-06-11 (VERIFY): v0.13.0 was taken by P-703 (parallel governance session on main) — demo stack shipped as v0.14.0.
 
+- 2026-06-11 (post-ship): composer bot persona named **Yarrow** (JC) — yarrow stalks composed I Ching hexagrams from a fixed set, as the bot composes flows from a fixed catalog; soldier's woundwort fits SOC. Lands in MM display name + SYSTEM_PROMPT when JC provisions the bot identity (issue #37 item 1).
+
 ## Changelog
 
 - conjectured: the design doc's §8 build order is directly executable as written.
