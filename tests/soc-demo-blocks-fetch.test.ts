@@ -277,3 +277,43 @@ describe("A_FETCH_CRTSH", () => {
     ).rejects.toThrow("502");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A_FETCH_FEED — SSRF guard (sage PR #40 round 2)
+// ---------------------------------------------------------------------------
+
+describe("A_FETCH_FEED SSRF guard", () => {
+  test("rejects private/loopback/metadata targets without fetching", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_FETCH_FEED/action");
+    for (const bad of [
+      "http://localhost/feed.xml",
+      "http://127.0.0.1:8080/x",
+      "http://10.1.2.3/x",
+      "http://192.168.1.1/x",
+      "http://172.16.0.1/x",
+      "http://169.254.169.254/latest/meta-data/",
+      "file:///etc/passwd",
+      "http://[::1]/x",
+    ]) {
+      let fetchCalled = false;
+      await expect(
+        mod.default.execute({ feedUrl: bad } as never, ctxWith(async () => {
+          fetchCalled = true;
+          return new Response("<rss/>");
+        })),
+      ).rejects.toThrow(/A_FETCH_FEED/);
+      expect(fetchCalled).toBe(false);
+    }
+  });
+
+  test("public https feed passes the guard", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_FETCH_FEED/action");
+    const result = (await mod.default.execute(
+      { feedUrl: "https://feeds.example.org/advisories.xml" } as never,
+      ctxWith(async () =>
+        new Response("<rss><item><title>t</title><link>https://x.example/a</link><description>d</description></item></rss>"),
+      ),
+    )) as Record<string, unknown>;
+    expect((result.items as unknown[]).length).toBe(1);
+  });
+});
