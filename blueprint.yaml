@@ -223,7 +223,7 @@ features:
     iteration: 8
     issue: 37
     depends: [ P-206 ]
-    description: "Deterministic compose-to-execute gate: pure validatePipeline(rawYaml, catalog) checks block names against the installed catalog, required-input satisfiability, and per-step sovereignty comment annotations (raw-text scan — comments don't survive YAML parse); returns machine-readable annotations map. buildCatalog scans action.json manifests (installed blocks dir is the trust root); A_VALIDATE_FLOW block wraps the pure core. Returns findings; the execution wiring (P-805) refuses to run invalid flows."
+    description: "Deterministic compose-to-execute gate: pure validatePipeline(rawYaml, catalog) checks block names against the installed catalog (incl. nested sub-pipelines), required-input satisfiability for TOP-LEVEL action steps (nested iteration bindings out of static scope), and per-step sovereignty comment annotations (raw-text scan — comments don't survive YAML parse); returns machine-readable annotations map. buildCatalog scans action.json manifests (installed blocks dir is the trust root); A_VALIDATE_FLOW block wraps the pure core. Returns findings; the execution wiring (P-805) refuses to run invalid flows."
 
   - id: P-801
     name: SOC demo block palette (12 stub-safe blocks)
