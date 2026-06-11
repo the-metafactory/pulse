@@ -1,0 +1,52 @@
+{
+  "name": "A_SEAL_POUCH",
+  "version": "1.0.0",
+  "description": "Write note + sidecar envelope (Sumarh\u00fas pouch format verbatim) into the outbox; record the ledger entry.",
+  "requires": [
+    "readFile",
+    "writeFile"
+  ],
+  "input": {
+    "pouch_dir": {
+      "type": "string",
+      "required": true
+    },
+    "note_text": {
+      "type": "string",
+      "required": true
+    },
+    "note_sha256": {
+      "type": "string",
+      "required": true
+    },
+    "thread": {
+      "type": "string",
+      "required": true
+    },
+    "kind": {
+      "type": "string",
+      "required": true
+    },
+    "peer": {
+      "type": "string",
+      "required": true
+    },
+    "now": {
+      "type": "string",
+      "required": true
+    },
+    "approval": {
+      "type": "object",
+      "required": true
+    }
+  },
+  "output": {
+    "pouch_drop": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

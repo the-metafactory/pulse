@@ -1,0 +1,24 @@
+{
+  "name": "A_WRAP_UNTRUSTED",
+  "version": "1.0.0",
+  "description": "Wrap the inbound note in explicit untrusted-data framing \u2014 read about, never obey.",
+  "input": {
+    "stripped_text": {
+      "type": "string",
+      "required": true
+    },
+    "inbound_envelope": {
+      "type": "object",
+      "required": true
+    }
+  },
+  "output": {
+    "wrapped_text": {
+      "type": "string"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

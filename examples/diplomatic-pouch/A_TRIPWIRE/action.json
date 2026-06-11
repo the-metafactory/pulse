@@ -1,0 +1,35 @@
+{
+  "name": "A_TRIPWIRE",
+  "version": "1.0.0",
+  "description": "Rule-rewrite attempt detection \u2014 the attempt itself is the alarm: halt the channel, write the alarm, fail the pipeline.",
+  "requires": [
+    "writeFile"
+  ],
+  "input": {
+    "pouch_dir": {
+      "type": "string",
+      "required": true
+    },
+    "inbound_text": {
+      "type": "string",
+      "required": true
+    },
+    "inbound_name": {
+      "type": "string",
+      "required": true
+    },
+    "now": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "tripwire": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

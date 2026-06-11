@@ -1,0 +1,20 @@
+{
+  "name": "A_BORDER_CHECK",
+  "version": "1.0.0",
+  "description": "Outbound whitelist scan: any secret/access/persona finding BLOCKS the note (no silent redaction).",
+  "input": {
+    "note_text": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "border_scan": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

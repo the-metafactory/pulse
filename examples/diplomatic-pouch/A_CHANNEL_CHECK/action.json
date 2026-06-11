@@ -1,0 +1,23 @@
+{
+  "name": "A_CHANNEL_CHECK",
+  "version": "1.0.0",
+  "description": "Refuse fail-closed when the diplomatic channel is halted (tripwire state). Both pipelines run this first.",
+  "requires": [
+    "readFile"
+  ],
+  "input": {
+    "pouch_dir": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "channel": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}
