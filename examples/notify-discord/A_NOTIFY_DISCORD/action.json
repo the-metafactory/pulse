@@ -1,0 +1,17 @@
+{
+  "name": "A_NOTIFY_DISCORD",
+  "version": "1.0.0",
+  "description": "Deliver a pipeline's output to one of OUR Discord channels, with optional file attachments, by shelling out to the cortex `discord` CLI. Internal delivery only — NOT the diplomatic pouch (the pouch is human-relayed by design).",
+  "requires": ["shell"],
+  "input": {
+    "discord_channel": { "type": "string", "required": false },
+    "discord_message": { "type": "string", "required": false },
+    "discord_files": { "type": "array", "required": false },
+    "discord_files_root": { "type": "string", "required": false },
+    "discord_server": { "type": "string", "required": false }
+  },
+  "output": {
+    "discord": { "type": "object" }
+  },
+  "tags": ["notify", "discord", "delivery"]
+}
