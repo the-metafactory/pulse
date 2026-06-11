@@ -260,7 +260,7 @@ Pulse completes the "capture → distribute → execute" loop. The ecosystem ana
 
 ### Cortex event bridging
 
-Pulse emits real-time events during execution (node-start, node-complete, node-failed, tree-complete) plus gate/agent/tribunal lifecycle events. These ride the NATS bus that cortex already runs — agent tasks and tribunal seats dispatch as myelin envelopes today, and the event bridge (P-401) extends that so cortex's Mission Control and Discord/Mattermost adapters surface execution status. An agent kicks off a Pulse pipeline, and collaborators watch it run in real time.
+Pulse emits real-time events during execution (node-start, node-complete, node-failed, tree-complete) plus gate/agent/tribunal/governed lifecycle events. These ride the NATS bus that cortex already runs — agent tasks and tribunal seats dispatch as myelin envelopes, and the governed-action stack publishes `governance.verdict.*` envelopes that cortex Mission Control's Governance tab already reads back (cortex G-1115). The broader event bridge (P-401) extends this to the full execution lifecycle. An agent kicks off a Pulse pipeline, and collaborators watch it run in real time.
 
 ### Arc as the glue
 
@@ -285,23 +285,27 @@ The capability injection pattern means the same action code runs locally on Bun 
 
 ## Roadmap
 
-### Done (v0.10.0)
+### Done (v0.13.0)
 - Tree runner with dependency scheduling, parallel execution, retry/timeout
 - Action system with capability injection (local + cloud dispatch)
 - Pipeline primitive with passthrough pipe model + YAML loader
 - Flow primitive: source → pipeline → destination with scheduling
-- **Composition primitives: map, filter, reduce, parallel, retry, gate, agent, tribunal** — functional, control-flow, agentic, and governance composition
+- **9 composition primitives: map, filter, reduce, parallel, retry, gate, agent, tribunal, governed** — functional, control-flow, agentic, and governance composition
 - **Interactive gate primitive** — operator verdict, pluggable GateProvider, lifecycle events (H-step)
 - **Agent primitive** — capability-addressed fleet tasks as myelin envelopes over NATS, sovereignty constraints travel with the payload (A-step)
-- **Enforcement gate (L0)** — deterministic fail-closed runtime tool-call policy (governance Stage 1)
-- **Verdict tribunal (L1)** — model-diverse agent panel adjudicates the gate's `ask` decisions (governance Stage 3)
-- **Governed actions (L0→L1→L2)** — `governed:` composes policy, tribunal, and human gate in one step; refusals terminal at every layer; demo publishes layer verdicts to the bus (governance Stage 4)
+- **The governed-action stack (governance upgrade Stages 1-6):**
+  - Enforcement gate (L0) — deterministic fail-closed runtime tool-call policy (P-700)
+  - Verdict tribunal (L1) — model-diverse agent panel adjudicates the gate's `ask` decisions (P-701)
+  - Governed actions — `governed:` composes policy → tribunal → human gate in one step, refusals terminal at every layer, layer verdicts published to the bus (P-702)
+  - Governance observability — cortex Mission Control reads the bus verdicts (cortex G-1115)
+  - Diplomatic pouch — trust rung 1 for a new peer: sanitise → rate-gate → named-human gate → signed drop; inbound quarantine → tripwire → wrap-untrusted → human promote (P-703, `examples/diplomatic-pouch/`); ecosystem standard in `compass/sops/peer-contact.md`
 - Arc package integration (arc-installed actions, pipelines, flows)
 - Step-level validation at parse time, partial output preservation, AbortController cancellation
-- 287 tests across 20 files, tsc clean
+- 383 tests across 27 files, tsc clean
 
 ### Next
-- Audit substrate + Mission Control observability tab (governance Stage 5)
+- Compounding lessons loop — end-of-engagement scenario capture feeding miner (governance Stage 7)
+- Governance-as-code standard in compass + first diplomatic exchange (governance Stage 8)
 - Cortex event bridge (P-401): execution events surfaced in Mission Control
 - JSONL trace emission feeding back to miner (P-302)
 
@@ -311,7 +315,7 @@ See [blueprint.yaml](./blueprint.yaml) for the full feature roadmap with cross-r
 
 ```bash
 bun install
-bun test           # 287 tests across 20 files
+bun test           # 383 tests across 27 files
 bun run typecheck  # tsc --noEmit
 ```
 

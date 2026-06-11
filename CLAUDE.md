@@ -28,7 +28,7 @@ miner captures traces → metafactory distributes → arc installs → pulse exe
 
 - **Runtime:** Bun
 - **Language:** TypeScript (strict)
-- **Test:** `bun test` (287 tests across 20 files)
+- **Test:** `bun test` (383 tests across 27 files)
 - **Dependencies:** commander, zod, yaml
 
 ## Architecture
@@ -106,7 +106,7 @@ Flows connect source → pipeline → destination. Sources: inline, file, RSS, c
 ## Key commands
 
 ```bash
-bun test              # Run all 287 tests
+bun test              # Run all 383 tests
 bun run typecheck     # TypeScript check
 bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
@@ -215,6 +215,9 @@ Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration
 - **Iteration 2 — Pipe Model & Action Contract:** P-200 (Action contract), P-201 (passthrough pipe), P-202 (Pipeline primitive), P-203 (miner process import), P-205 (local/cloud dispatch), P-206 (pipeline YAML loader)
 - **Iteration 3 — Flow & Ecosystem:** P-300 (Flow primitive), P-301 (D/A/H classification), P-302 (trace emission), P-303 (Arc package integration)
 - **Iteration 4 — Runtime & Distribution:** P-400 (runtime adapters), P-401 (Cortex event bridge), P-402 (metafactory process runner)
+- **Iteration 5 — NATS Message Bus:** P-500 (transport abstraction), P-501 (cue.fired executor), P-502 (cue.fired publisher), P-503 (process events on bus)
+- **Iteration 6 — Agent actions:** P-600 (myelin envelope integration), P-601 (job publishing to NATS)
+- **Iteration 7 — Governance upgrade (Magnus × RavenClaude synthesis):** P-700 (enforcement gate L0), P-701 (verdict tribunal L1), P-702 (governed-action stack L0→L1→L2), P-703 (diplomatic pouch, trust rung 1). Cross-repo: cortex G-1115 (MC governance tab), `compass/sops/peer-contact.md`. Plan: `docs/governance-upgrade-plan.md`.
 
 **Workflow:**
 ```
