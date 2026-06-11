@@ -3,7 +3,7 @@
 Live composition of SOC processes on stage, driven from Mattermost
 (design: `design/soc-demo-mm-composer.md`, tracking: issue #37).
 
-A volunteer posts a security scenario into a thread; the **Pulse Composer**
+A volunteer posts a security scenario into a thread; **Yarrow** (the Pulse Composer)
 replies with pipeline YAML (per-step sovereignty annotations `D|A|H` +
 residency), a Mermaid diagram, and a one-line summary. The operator acks
 ("run it"), the flow executes, each step posts a thread reply, the final
@@ -63,7 +63,7 @@ gate-before-send carries it; Reflex stays a tease (design §1, §10 Q3).
 
 ## Open items before stage
 
-- Composer MM bot identity — JC provisions on the cortex stack (design §10 Q1; do not touch `cortex.yaml`).
+- Yarrow MM bot identity (display name "Yarrow — Pulse Composer", distinct avatar per design §2) — JC provisions on the cortex stack (design §10 Q1; do not touch `cortex.yaml`).
 - Real-LLM rehearsal of all 8 scenarios + results table refresh.
 - Whois / MISP real credentials (stub-safe until then, §10 Q2).
 - Backup recording of one canonical run during rehearsal (§10 Q4).
