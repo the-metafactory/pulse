@@ -1,6 +1,6 @@
 /**
  * P-801 — SOC demo block palette: stub + (mocked) real paths per block.
- * ISC-11..24 of the SOC demo plan (ISA.md, slug 2026-06-11-pulse-soc-demo-composer).
+ * ISC-11..23 of the SOC demo plan (ISC-24 catalog coverage lands with the integration wiring) (ISA.md, slug 2026-06-11-pulse-soc-demo-composer).
  *
  * Contract under test (the stub-safe scaffold, reference: A_FETCH_VIRUSTOTAL):
  *   - env unset  → prints intent, returns canned fixture, no network call
@@ -9,30 +9,9 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ActionContext } from "../src/types/action";
+import { ctxWith, setEnv, restoreEnv } from "./helpers/soc-demo-test-helpers";
 
-function ctxWith(fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>): ActionContext {
-  return {
-    capabilities: { fetch: fetchImpl as typeof globalThis.fetch },
-    env: {},
-    meta: { actionName: "test", startedAt: new Date().toISOString(), mode: "local" },
-  } as unknown as ActionContext;
-}
-
-const SAVED_ENV: Record<string, string | undefined> = {};
-function setEnv(key: string, value: string | undefined) {
-  if (!(key in SAVED_ENV)) SAVED_ENV[key] = process.env[key];
-  if (value === undefined) delete process.env[key];
-  else process.env[key] = value;
-}
-
-afterEach(() => {
-  for (const [key, value] of Object.entries(SAVED_ENV)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  for (const key of Object.keys(SAVED_ENV)) delete SAVED_ENV[key];
-});
+afterEach(restoreEnv);
 
 // ---------------------------------------------------------------------------
 // A_FETCH_VIRUSTOTAL (ISC-11) — the reference scaffold
@@ -90,5 +69,50 @@ describe("A_FETCH_VIRUSTOTAL", () => {
     await expect(
       mod.default.execute({ ioc: "https://evil.example/x" }, ctxWith(async () => new Response("nope", { status: 429 }))),
     ).rejects.toThrow("429");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A_NOTIFY_MATTERMOST — token/URL pairing rule (sage PR #40 blocker)
+// ---------------------------------------------------------------------------
+
+describe("A_NOTIFY_MATTERMOST token pairing", () => {
+  test("input mattermost_url without input token never sends the env token", async () => {
+    setEnv("MATTERMOST_URL", "https://trusted.example");
+    setEnv("MATTERMOST_CHANNEL_ID", "chan");
+    setEnv("MATTERMOST_BOT_TOKEN", "env-secret");
+    let fetchCalled = false;
+    const mod = await import("../examples/soc-demo/blocks/A_NOTIFY_MATTERMOST/action");
+    const result = (await mod.default.execute(
+      { advisory_doc: { markdown: "x" }, mattermost_url: "https://attacker.example" },
+      ctxWith(async () => {
+        fetchCalled = true;
+        return new Response("{}");
+      }),
+    )) as Record<string, unknown>;
+    // Env token must not travel to the input-supplied URL: block skips.
+    expect(fetchCalled).toBe(false);
+    expect((result.mattermost as { skipped?: boolean }).skipped).toBe(true);
+  });
+
+  test("input URL with input token is allowed (caller supplied both)", async () => {
+    setEnv("MATTERMOST_URL", undefined);
+    setEnv("MATTERMOST_CHANNEL_ID", undefined);
+    setEnv("MATTERMOST_BOT_TOKEN", undefined);
+    const auth: string[] = [];
+    const mod = await import("../examples/soc-demo/blocks/A_NOTIFY_MATTERMOST/action");
+    await mod.default.execute(
+      {
+        advisory_doc: { markdown: "hello" },
+        mattermost_url: "https://self-hosted.example",
+        mattermost_channel_id: "chan",
+        mattermost_bot_token: "input-token",
+      },
+      ctxWith(async (_url, init) => {
+        auth.push(String((init?.headers as Record<string, string>)?.Authorization));
+        return new Response(JSON.stringify({ id: "post1" }));
+      }),
+    );
+    expect(auth[0]).toBe("Bearer input-token");
   });
 });

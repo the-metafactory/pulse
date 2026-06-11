@@ -10,30 +10,9 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ActionContext } from "../src/types/action";
+import { ctxWith, setEnv, restoreEnv } from "./helpers/soc-demo-test-helpers";
 
-function ctxWith(fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>): ActionContext {
-  return {
-    capabilities: { fetch: fetchImpl as typeof globalThis.fetch },
-    env: {},
-    meta: { actionName: "test", startedAt: new Date().toISOString(), mode: "local" },
-  } as unknown as ActionContext;
-}
-
-const SAVED_ENV: Record<string, string | undefined> = {};
-function setEnv(key: string, value: string | undefined) {
-  if (!(key in SAVED_ENV)) SAVED_ENV[key] = process.env[key];
-  if (value === undefined) delete process.env[key];
-  else process.env[key] = value;
-}
-
-afterEach(() => {
-  for (const [key, value] of Object.entries(SAVED_ENV)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-  for (const key of Object.keys(SAVED_ENV)) delete SAVED_ENV[key];
-});
+afterEach(restoreEnv);
 
 // ---------------------------------------------------------------------------
 // 1. A_LOOKUP_GEOIP_ASN — offline IP → country + ASN

@@ -71,9 +71,15 @@ export default {
     const { advisory_doc, mattermost_url, mattermost_channel_id, mattermost_bot_token, ...payload } = input;
     const doc = (advisory_doc ?? {}) as AdvisoryDoc;
 
-    const url = (mattermost_url as string | undefined) ?? process.env.MATTERMOST_URL;
+    // Token/URL pairing rule: the env token may ONLY travel to the env URL.
+    // A pipeline-controlled mattermost_url combined with the env token would
+    // let untrusted input redirect MATTERMOST_BOT_TOKEN to an attacker host
+    // (sage PR #40 blocker). Input URL therefore requires an input token.
+    const inputUrl = mattermost_url as string | undefined;
+    const inputToken = mattermost_bot_token as string | undefined;
+    const url = inputUrl ?? process.env.MATTERMOST_URL;
     const channelId = (mattermost_channel_id as string | undefined) ?? process.env.MATTERMOST_CHANNEL_ID;
-    const token = (mattermost_bot_token as string | undefined) ?? process.env.MATTERMOST_BOT_TOKEN;
+    const token = inputUrl ? inputToken : (inputToken ?? process.env.MATTERMOST_BOT_TOKEN);
 
     if (!url || !channelId || !token) {
       const missing = [
