@@ -2,7 +2,7 @@
 
 _Draft 2026-06-10, status updated 2026-06-11 · synthesises two external inputs into a staged build plan for the metafactory ecosystem (pulse · cortex · compass · arc)._
 
-> **Status (2026-06-11):** Stages 1, 1b, 2, 3, 4, 5, 6 are **shipped and deployed** — pulse v0.12.0 (enforcement gate P-700, verdict tribunal P-701, governed-action stack P-702 + containment demo), cortex sovereignty gate (audit-parity), sage Honest Oracle lens v0.2.6. Stages 7-8 remain. Per-stage annotations below.
+> **Status (2026-06-11):** Stages 1, 1b, 2, 3, 4, 5, 6 are **shipped and deployed**; Stage 8's standard is shipped (compass v0.10.0) and its reply is drafted+held at the human gate — pulse v0.12.0 (enforcement gate P-700, verdict tribunal P-701, governed-action stack P-702 + containment demo), cortex sovereignty gate (audit-parity), sage Honest Oracle lens v0.2.6. Stage 7 (lessons loop) remains; Stage 8's reply awaits a human send. Per-stage annotations below.
 
 ## The convergence
 
@@ -125,14 +125,14 @@ _Acceptance:_ an outbound note is sanitised, human-gated, signed, dropped; an in
 
 _Acceptance:_ a `/wrap` run writes a schema-valid scenario; a corroborating second scenario triggers a promotion proposal.
 
-### Stage 8 — Governance-as-code, ecosystem standard `[compass · COMP-xx]`
+### Stage 8 — Governance-as-code, ecosystem standard `[compass · C-202]` ✅ STANDARD SHIPPED (compass#76, v0.10.0) · ✉️ REPLY DRAFTED, AWAITING HUMAN SEND
 **Promote the converged principles into compass as the standard, with a first reply to Magnus as the proof.**
 
 - An ADR + SOP: fail-closed enforcement, human-on-consequential, adversary-separate-from-fixer, append-only audit, trust-in-rungs — now an ecosystem law, not three private conventions.
 - **First diplomatic exchange:** reply to Magnus' proposed note on capability enforcement — we have the material (sovereignty demo + envelope schema + the gate we built in Stage 1). Human-relayed per his protocol; you/Andreas approve content (first contact = human act).
 - The reply *is* the proof the standard runs: "you sent a spec; we built it; here's the note, carried by the pouch we built from your Foreign Policy."
 
-_Acceptance:_ the ADR/SOP merged in compass; the note drafted, human-approved, sent via the Stage 6 pouch.
+_Acceptance:_ the ADR/SOP merged in compass; the note drafted, human-approved, sent via the Stage 6 pouch. **Standard met** — `compass/docs/adr/0001-governance-as-code.md` + `compass/sops/governance-standard.md` (the five principles as one root axiom — *certainty is earned, never assumed* — each tied to its shipped PR+version; #4 audit the keystone). **Reply: drafted + border-clean + staged through P_POUCH_OUT to the named-human gate, then HELD** — sending is a human act per Magnus' own Foreign Policy §0/§3, so the agent stops at the gate; JC/Andreas approve content and relay. The draft cites the seven live adoptions and asks one question back (manifest-declares vs runtime-enforces capability). RedTeam caught one audit-parity overclaim pre-send; fixed.
 
 ---
 
