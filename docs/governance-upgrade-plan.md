@@ -2,7 +2,7 @@
 
 _Draft 2026-06-10, status updated 2026-06-11 · synthesises two external inputs into a staged build plan for the metafactory ecosystem (pulse · cortex · compass · arc)._
 
-> **Status (2026-06-11):** Stages 1, 1b, 2, 3, 4, 5 are **shipped and deployed** — pulse v0.12.0 (enforcement gate P-700, verdict tribunal P-701, governed-action stack P-702 + containment demo), cortex sovereignty gate (audit-parity), sage Honest Oracle lens v0.2.6. Stages 6-8 remain. Per-stage annotations below.
+> **Status (2026-06-11):** Stages 1, 1b, 2, 3, 4, 5, 6 are **shipped and deployed** — pulse v0.12.0 (enforcement gate P-700, verdict tribunal P-701, governed-action stack P-702 + containment demo), cortex sovereignty gate (audit-parity), sage Honest Oracle lens v0.2.6. Stages 7-8 remain. Per-stage annotations below.
 
 ## The convergence
 
@@ -107,7 +107,7 @@ _Acceptance:_ a containment pipeline runs all three layers; each layer's verdict
 
 _Acceptance:_ a tab renders the last 30d of verdicts from the bus; empty state is honest (never a fake all-clear). **Both met** — Governance tab on the MC-I1.S6 projection seam (`governance_verdicts`, idempotent on envelope id), `GET /api/governance` with deterministic alarm tiers (24h denials: 0 none / 1-4 elevated / ≥5 high), empty state honest in BOTH directions (zero rows = nothing ran OR verdicts never reached the projection). `governance` is now a documented bus domain (cortex CONTEXT.md).
 
-### Stage 6 — Diplomatic pouch, trust rung 1 `[pulse + compass · P-703 / COMP-xx]`
+### Stage 6 — Diplomatic pouch, trust rung 1 `[pulse + compass · P-703 / compass#75]` ✅ SHIPPED (pulse#45, v0.13.0; compass#75)
 **Build our Gestur-equivalent from Magnus' Foreign Policy spec — do not install his zip** (matches his own philosophy: build the better-fitting version on your own substrate; and his border #1: nothing executable crosses on first contact).
 
 - A pulse pipeline: outbound note → sanitize + whitelist (the SOC sovereignty-boundary pattern, proven) → human gate (first contact / new topic = human act) → signed pouch drop. Inbound → quarantine → strip injection phrasing → wrap as untrusted data → tripwire on rule-rewrite attempts.
@@ -115,7 +115,7 @@ _Acceptance:_ a tab renders the last 30d of verdicts from the bus; empty state i
 - Codify the **three borders + rate gate** (≤3/24h, one thread per topic) in compass as the ecosystem peer-contact standard.
 - **This is the correct rung for a *new* peer** — distinct from the high-trust NATS leaf federation we run with Andreas. Trust is a ladder: pouch → … → live bus.
 
-_Acceptance:_ an outbound note is sanitised, human-gated, signed, dropped; an inbound rule-rewrite attempt trips the alarm and halts the channel.
+_Acceptance:_ an outbound note is sanitised, human-gated, signed, dropped; an inbound rule-rewrite attempt trips the alarm and halts the channel. **Both proven** — `examples/diplomatic-pouch/` (P_POUCH_OUT/P_POUCH_IN, rate-gate blueprint with deterministic time + fail-closed economy, block-don't-redact border 3, tripwire-before-strip with the evidence in the alarm, channel halt refusing both directions); ecosystem standard `compass/sops/peer-contact.md`. "Signed" per the spec's own §7 (provenance sidecar, who/when/sha256); key-based signatures deferred to the Accord.
 
 ### Stage 7 — Compounding lessons loop `[compass · COMP-xx]`
 **RavenClaude's `/wrap` + Magnus' skill-corpus telemetry → close miner's open circuit.** End-of-engagement capture: lesson → 9-field scenario YAML (problem/attempts/resolution, scope-tagged, PII-scrubbed via the sanitize pattern, `reviewed: false`) → commit to compass. When ≥2 independent scenarios corroborate → an agent proposes promotion to a best-practice (human approves).
