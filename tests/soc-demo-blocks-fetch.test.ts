@@ -317,3 +317,28 @@ describe("A_FETCH_FEED SSRF guard", () => {
     expect((result.items as unknown[]).length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// http-guard — redirect-hop re-validation (PR #40 round 3)
+// ---------------------------------------------------------------------------
+
+describe("fetchPublic redirect guard", () => {
+  test("public 302 bouncing to metadata endpoint is rejected", async () => {
+    const { fetchPublic } = await import("../examples/soc-demo/blocks/lib/http-guard");
+    const fetched: string[] = [];
+    const mockFetch = (async (url: RequestInfo | URL) => {
+      fetched.push(String(url));
+      return new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data/" } });
+    }) as typeof globalThis.fetch;
+    await expect(fetchPublic(mockFetch, "https://public.example/feed", {}, "TEST")).rejects.toThrow(/private|loopback/);
+    expect(fetched).toHaveLength(1); // metadata hop never fetched
+  });
+
+  test("integer and mapped-IPv6 literals are rejected up front", async () => {
+    const { assertPublicHttpUrl } = await import("../examples/soc-demo/blocks/lib/http-guard");
+    for (const bad of ["http://2130706433/", "http://[::ffff:127.0.0.1]/", "http://0.1.2.3/", "http://100.64.0.1/"]) {
+      expect(() => assertPublicHttpUrl(bad, "TEST")).toThrow();
+    }
+    expect(() => assertPublicHttpUrl("https://feeds.example.org/x", "TEST")).not.toThrow();
+  });
+});

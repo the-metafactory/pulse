@@ -83,13 +83,25 @@ export default {
     const iocs = (iocs_sanitized ?? {}) as SanitizedIocs;
     const date = new Date().toISOString().slice(0, 10);
 
+    // TLP marking: consume A_TAG_TLP's output when present in the payload —
+    // a pipeline that classified the advisory AMBER must not publish it
+    // labeled GREEN (sage PR #40). GREEN stays the default for flows
+    // without a tagging step.
+    const tlpInput = (input as { tlp?: { marking?: string } | string }).tlp;
+    const tlp =
+      typeof tlpInput === "string"
+        ? tlpInput
+        : typeof tlpInput?.marking === "string"
+          ? tlpInput.marking
+          : "TLP:GREEN";
+
     const advisoryText = typeof enriched.advisory === "string" ? enriched.advisory : undefined;
     const { advisory: _a, enrichment: enrichmentDetail, ...extraSections } = enriched;
 
     const md: string[] = [
       `#### 🛡️ CommunitySOC Advisory — Phishing Campaign`,
       "",
-      `\`TLP:GREEN\` · ${date}${iocs.verdict ? ` · verdict: **${iocs.verdict}**` : ""}${typeof iocs.confidence === "number" ? ` (confidence ${Math.round(iocs.confidence * 100)}%)` : ""}`,
+      `\`${tlp}\` · ${date}${iocs.verdict ? ` · verdict: **${iocs.verdict}**` : ""}${typeof iocs.confidence === "number" ? ` (confidence ${Math.round(iocs.confidence * 100)}%)` : ""}`,
       "",
       advisoryText ?? "(no advisory text)",
     ];
@@ -124,7 +136,8 @@ export default {
 
     const markdown = md.join("\n");
     const advisory_doc = {
-      subject: `[CommunitySOC] Advisory — Phishing Campaign (${date}, TLP:GREEN)`,
+      tlp,
+      subject: `[CommunitySOC] Advisory — Phishing Campaign (${date}, ${tlp})`,
       date,
       markdown,
       // Plain-text fallback for mailers without markdown rendering

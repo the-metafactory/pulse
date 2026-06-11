@@ -1,4 +1,5 @@
 import type { ActionContext } from "../../../../src/types/action";
+import { fetchPublic } from "../lib/http-guard";
 
 interface FeedItem {
   title: string;
@@ -28,17 +29,23 @@ export default {
       wordCount: item.description.split(/\s+/).length,
     });
 
+    // Cap is the upstream feed limit when provided — items beyond it are
+    // dropped deliberately, not silently (A_FETCH_FEED already capped).
+    const cap = typeof input.limit === "number" ? (input.limit as number) : 3;
+
     // Independent fetches run concurrently — end-to-end latency is the
     // slowest request, not the sum (sage PR #40 suggestion).
     const articles: Article[] = await Promise.all(
-      items.slice(0, 3).map(async (item): Promise<Article> => {
+      items.slice(0, cap).map(async (item): Promise<Article> => {
         if (!item.link) return fallback(item);
 
         try {
-          const response = await fetchFn(item.link, {
+          // item.link is feed-body data — attacker-influenced the moment the
+          // upstream feed is hostile. Same SSRF guard as A_FETCH_FEED, with
+          // per-redirect-hop re-validation.
+          const response = await fetchPublic(fetchFn, item.link, {
             headers: { "User-Agent": "pulse/0.1.0" },
-            redirect: "follow",
-          });
+          }, "A_EXTRACT_ARTICLE");
 
           if (!response.ok) return fallback(item);
 
