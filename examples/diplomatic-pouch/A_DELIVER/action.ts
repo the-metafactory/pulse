@@ -11,7 +11,11 @@ export default {
     const writeFile = ctx.capabilities.writeFile;
     if (!writeFile) throw new Error("A_DELIVER requires writeFile");
     const gate = promotion as GateResult;
-    const target = `${pouch_dir}/read/${String(inbound_name)}`;
+    const name = String(inbound_name);
+    if (name.includes("/") || name.includes("\\") || name.includes("..")) {
+      throw new Error(`A_DELIVER: refusing '${name}' — path separators / traversal in an inbound name`);
+    }
+    const target = `${pouch_dir}/read/${name}`;
     await writeFile(target, String(wrapped_text));
     console.log(`\n📬 delivered to ${target} (promoted by: ${gate.notes || "(unnamed)"})`);
     return { ...payload, delivered: { path: target, promoted_by: gate.notes } };

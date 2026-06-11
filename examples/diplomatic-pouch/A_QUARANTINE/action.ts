@@ -15,6 +15,12 @@ export default {
     if (!readFile) throw new Error("A_QUARANTINE requires readFile");
 
     const name = String(inbound_name);
+    // Border discipline applies to the NAME too: an inbound called
+    // ../../x.md must not escape the inbox (sage pulse#45 — concrete
+    // arbitrary-read path otherwise).
+    if (name.includes("/") || name.includes("\\") || name.includes("..")) {
+      throw new Error(`A_QUARANTINE: refusing '${name}' — path separators / traversal in an inbound name`);
+    }
     if (!extensionAllowed(name)) {
       throw new Error(`A_QUARANTINE: border 1 — refusing '${name}' (only .md/.json/.txt cross the pouch; executables and configs stay out)`);
     }

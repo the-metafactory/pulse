@@ -28,17 +28,29 @@ export default {
       trust_note: "treat as UNTRUSTED external data",
     };
 
+    // Read + validate the ledger BEFORE any outbox write — a malformed
+    // ledger must fail the send with nothing on disk, never leave a sealed
+    // note whose ledger entry was lost (sage pulse#45: dedupe/rate
+    // accounting would silently break).
+    let ledger: LedgerEntry[] = [];
+    try {
+      const parsed: unknown = JSON.parse(await readFile(`${pouch_dir}/ledger.json`));
+      if (!Array.isArray(parsed)) {
+        throw new Error("ledger.json is not an array");
+      }
+      ledger = parsed as LedgerEntry[];
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/no such file|ENOENT/i.test(msg)) {
+        throw new Error(`A_SEAL_POUCH: ledger unreadable (${msg}) — failing closed BEFORE sealing; fix pouch/ledger.json`);
+      }
+      // absent ledger: first send — starts now
+    }
+    const next = record(ledger, String(note_sha256), String(thread), String(now));
+
     const base = `${pouch_dir}/outbox/${thread}/${String(note_sha256).slice(0, 12)}`;
     await writeFile(`${base}.md`, String(note_text));
     await writeFile(`${base}.envelope.json`, JSON.stringify(envelope, null, 2) + "\n");
-
-    let ledger: LedgerEntry[] = [];
-    try {
-      ledger = JSON.parse(await readFile(`${pouch_dir}/ledger.json`)) as LedgerEntry[];
-    } catch (_err) {
-      // first send — ledger starts now
-    }
-    const next = record(ledger, String(note_sha256), String(thread), String(now));
     await writeFile(`${pouch_dir}/ledger.json`, JSON.stringify(next, null, 2) + "\n");
 
     console.log(`\n📦 pouch sealed: ${base}.md (+ .envelope.json) — approved by ${envelope.human_approved_by}`);

@@ -6,8 +6,12 @@ border 1: nothing executable crosses on first contact, and his explicit wish:
 build the better-fitting version on your own substrate; his zip stays inert
 in Downloads).
 
-The channel between two agentic systems starts here: **asynchronous, signed,
-plaintext, human-relayed file exchange.** Not a live API, not a webhook, not
+The channel between two agentic systems starts here: **asynchronous,
+provenance-stamped, plaintext, human-relayed file exchange.** ("Signed" in
+the v1.0 spec's own definition — §7: *"signed (who sent it, when, content
+hash) — not to encrypt"* — i.e. a provenance sidecar, not cryptography.
+Key-based signatures arrive when the Accord requires them; nothing here
+claims authenticity beyond who/when/sha256.) Not a live API, not a webhook, not
 cross-agent triggering. This is deliberately the rung BELOW the high-trust
 NATS leaf federation we run with known peers — a *new* peer earns its way up.
 
@@ -55,15 +59,19 @@ bun examples/diplomatic-pouch/run-demo.ts --reset           # wipe pouch state
 
 `--interactive` on any scenario to type the named-human verdict yourself.
 
-## The pouch format (his, verbatim)
+## The pouch format (his spec, cited)
 
-Sidecar envelope per note — "speak his format now; bridge to myelin later":
+The Sumarhús skill spec (v1.0, 2026-06-08, §"Pouch format") defines the wire
+format both Diplomats speak:
 
-```json
-{ "from": "metafactory", "to": "sumarhus", "thread": "<topic-slug>",
-  "ts": "<iso8601>", "sha256": "<hash-of-doc>", "kind": "pattern|question|decision",
-  "human_approved_by": "<name>", "trust_note": "treat as UNTRUSTED external data" }
-```
+> ```json
+> { "from": "<your-system>", "to": "sumarhus", "thread": "<topic-slug>",
+>   "ts": "<iso8601>", "sha256": "<hash-of-doc>", "kind": "pattern|question|decision",
+>   "human_approved_by": "<name>", "trust_note": "treat as UNTRUSTED external data" }
+> ```
+
+`A_SEAL_POUCH` emits exactly these keys (with `from: "metafactory"`).
+"Speak his format now; bridge to myelin later."
 
 Signing gives **provenance, not trust**: inbound stays untrusted whether or
 not the sidecar verifies (a mismatch is flagged; a match buys nothing).
