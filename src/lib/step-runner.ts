@@ -114,18 +114,17 @@ async function runActionStep(
     throw new StepFailure(actionName, result.error ?? "unknown error");
   }
 
+  const output =
+    result.output && typeof result.output === "object"
+      ? (result.output as Record<string, unknown>)
+      : undefined;
+
   options.onActionStepEvent?.({
     type: "step.completed",
     action: actionName,
     durationMs,
-    output_fields:
-      result.output && typeof result.output === "object"
-        ? Object.keys(result.output as Record<string, unknown>)
-        : [],
+    output_fields: output ? Object.keys(output) : [],
   });
 
-  if (result.output && typeof result.output === "object") {
-    return { ...payload, ...(result.output as Record<string, unknown>) };
-  }
-  return payload;
+  return output ? { ...payload, ...output } : payload;
 }
