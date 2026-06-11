@@ -8,20 +8,31 @@
  * A_NOTIFY_MATTERMOST delivers to Mattermost. Requires the `discord` CLI on
  * PATH (cortex ≥ v5.13.0 for `--file`).
  *
- * ── BOUNDARY (read this) ──────────────────────────────────────────────────
- * This action is for INTERNAL delivery to our own channels — a digest, a
- * report, a build artifact. It MUST NOT be wired into the diplomatic-pouch
- * pipelines. The pouch (Foreign Policy §1) is human-relayed by design: no
- * live API, no webhook, no auto-transmit. Auto-posting a pouch note to a
- * peer would break rung-1 trust. Keep this action on our side of the fence.
+ * ── BOUNDARY (structural, not just a rule) ───────────────────────────────
+ * This action delivers to a Discord CHANNEL — which is, by construction, one
+ * of OUR bot's guilds. It physically cannot reach a peer's diplomatic-pouch
+ * inbox: the pouch is a human-carried file drop with no Discord endpoint at
+ * all. So it is not that you "must not" wire this into the pouch — there is
+ * no wire to make. The pouch (Foreign Policy §1, compass/sops/peer-contact.md)
+ * stays human-relayed; this action is internal delivery (a digest, a report,
+ * a build artifact) to channels we own. The two never touch.
  *
  * Config resolution: explicit input fields, then env (DISCORD_CHANNEL,
- * DISCORD_SERVER). When no channel resolves the step is a passthrough no-op
- * (the demo runs offline). When configured, a failed post DOES fail the
+ * DISCORD_SERVER, DISCORD_FILES_ROOT) — same env-fallback posture as
+ * A_NOTIFY_MATTERMOST. When no channel resolves the step is a passthrough
+ * no-op (the demo runs offline). When configured, a failed post DOES fail the
  * pipeline — a system that thinks it delivered but didn't is worse than a
- * visible error (same posture as A_NOTIFY_MATTERMOST).
+ * visible error.
+ *
+ * Attachment safety: `discord_files` entries must be non-empty strings (a
+ * malformed entry is an ERROR, never a silent drop). When a confinement root
+ * is set (`discord_files_root` / DISCORD_FILES_ROOT) every path must resolve
+ * inside it — so a payload-controlled file list cannot exfiltrate arbitrary
+ * local files past the root. Set the root whenever the file list can come
+ * from untrusted payload.
  */
 
+import { resolve } from "node:path";
 import type { ActionContext } from "../../../src/types/action";
 
 /** POSIX single-quote escaping — wraps an arg so the shell treats it literally. */
@@ -31,12 +42,37 @@ function shq(arg: string): string {
 
 export default {
   async execute(input: Record<string, unknown>, ctx: ActionContext) {
-    const { discord_channel, discord_message, discord_files, discord_server, ...payload } = input;
+    const { discord_channel, discord_message, discord_files, discord_server, discord_files_root, ...payload } = input;
 
     const channel = (discord_channel as string | undefined) ?? process.env.DISCORD_CHANNEL;
     const server = (discord_server as string | undefined) ?? process.env.DISCORD_SERVER;
+    const filesRoot = (discord_files_root as string | undefined) ?? process.env.DISCORD_FILES_ROOT;
     const message = typeof discord_message === "string" ? discord_message : "";
-    const files = Array.isArray(discord_files) ? (discord_files as unknown[]).filter((f): f is string => typeof f === "string") : [];
+
+    // Validate the attachment list fail-closed: a non-string or empty entry is
+    // an error, not a silent drop (a "successful" post with files missing is a
+    // lie to the caller). When a confinement root is set, every path must
+    // resolve under it.
+    let files: string[] = [];
+    if (discord_files !== undefined) {
+      if (!Array.isArray(discord_files)) {
+        throw new Error("A_NOTIFY_DISCORD: discord_files must be an array of file paths");
+      }
+      const root = filesRoot ? resolve(filesRoot) : null;
+      files = (discord_files as unknown[]).map((f, i) => {
+        if (typeof f !== "string" || f.length === 0) {
+          throw new Error(`A_NOTIFY_DISCORD: discord_files[${i}] is not a non-empty string path`);
+        }
+        if (root) {
+          const abs = resolve(root, f);
+          if (abs !== root && !abs.startsWith(root + "/")) {
+            throw new Error(`A_NOTIFY_DISCORD: discord_files[${i}] ('${f}') escapes the confinement root ${root}`);
+          }
+          return abs;
+        }
+        return f;
+      });
+    }
 
     if (!channel) {
       console.log("📭 [A_NOTIFY_DISCORD] no channel configured (discord_channel / DISCORD_CHANNEL) — skipping");

@@ -30,7 +30,8 @@ Payload / env config:
 |-------|--------------|---------|
 | `discord_channel` | `DISCORD_CHANNEL` | target channel name (required to send) |
 | `discord_message` | — | message text (optional when files are given) |
-| `discord_files` | — | array of local file paths to attach |
+| `discord_files` | — | array of local file paths to attach (non-string/empty entry = error) |
+| `discord_files_root` | `DISCORD_FILES_ROOT` | confinement root — every attachment must resolve under it (set when the file list is untrusted) |
 | `discord_server` | `DISCORD_SERVER` | named server profile (multi-guild) |
 
 No channel resolves → the step is a passthrough no-op (pipelines run offline).

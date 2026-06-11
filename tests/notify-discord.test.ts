@@ -6,9 +6,17 @@
  * the skip-when-unconfigured behavior, and that a non-zero exit fails loudly.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach } from "bun:test";
 import action from "../examples/notify-discord/A_NOTIFY_DISCORD/action";
 import type { ActionContext, ShellResult } from "../src/types/action";
+
+// The action falls back to env config; clear it so the suite is deterministic
+// regardless of the developer/CI shell (sage pulse#51).
+beforeEach(() => {
+  delete process.env.DISCORD_CHANNEL;
+  delete process.env.DISCORD_SERVER;
+  delete process.env.DISCORD_FILES_ROOT;
+});
 
 function ctxWithShell(impl: (cmd: string) => Promise<ShellResult>): ActionContext {
   return { capabilities: { shell: impl } } as unknown as ActionContext;
@@ -79,5 +87,26 @@ describe("A_NOTIFY_DISCORD", () => {
     await expect(
       action.execute({ discord_channel: "ops", discord_message: "x" }, ctx),
     ).rejects.toThrow(/discord CLI exited 1 — Bot token required/);
+  });
+
+  test("a malformed attachment list is an error, never a silent drop", async () => {
+    const ctx = ctxWithShell(async () => ok);
+    await expect(
+      action.execute({ discord_channel: "ops", discord_files: ["/tmp/a.md", 42] }, ctx),
+    ).rejects.toThrow(/discord_files\[1\] is not a non-empty string/);
+    await expect(
+      action.execute({ discord_channel: "ops", discord_files: "not-an-array" }, ctx),
+    ).rejects.toThrow(/discord_files must be an array/);
+  });
+
+  test("confinement root rejects a path that escapes it, accepts one inside", async () => {
+    let seen = "";
+    const ctx = ctxWithShell(async (cmd) => ((seen = cmd), ok));
+    await expect(
+      action.execute({ discord_channel: "ops", discord_files_root: "/tmp/out", discord_files: ["../../etc/passwd"] }, ctx),
+    ).rejects.toThrow(/escapes the confinement root/);
+    // A path inside the root resolves to its absolute form and is sent.
+    await action.execute({ discord_channel: "ops", discord_files_root: "/tmp/out", discord_files: ["report.pdf"] }, ctx);
+    expect(seen).toBe("discord post --channel 'ops' --file '/tmp/out/report.pdf'");
   });
 });
