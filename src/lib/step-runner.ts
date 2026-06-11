@@ -86,7 +86,7 @@ async function runActionStep(
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const stepStart = Date.now();
-  options.onStepEvent?.({
+  options.onActionStepEvent?.({
     type: "step.started",
     action: actionName,
     started_at: new Date(stepStart).toISOString(),
@@ -105,7 +105,7 @@ async function runActionStep(
   });
 
   if (!result.success) {
-    options.onStepEvent?.({
+    options.onActionStepEvent?.({
       type: "step.failed",
       action: actionName,
       durationMs,
@@ -114,7 +114,7 @@ async function runActionStep(
     throw new StepFailure(actionName, result.error ?? "unknown error");
   }
 
-  options.onStepEvent?.({
+  options.onActionStepEvent?.({
     type: "step.completed",
     action: actionName,
     durationMs,

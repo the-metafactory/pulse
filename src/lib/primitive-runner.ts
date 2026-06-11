@@ -14,7 +14,7 @@ import type {
   AgentStepSpec,
   AgentEvent,
   AgentTaskResult,
-  StepEvent,
+  ActionStepEvent,
 } from "../types/pipeline";
 import type {
   SeatSpec,
@@ -78,7 +78,7 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
   /** Gate input source. Defaults to StdinGateProvider when omitted. */
   gateProvider?: GateProvider;
   /** Optional sink for plain-action step lifecycle events. Hosts can pipe to traces, dashboards, chat threads, etc. */
-  onStepEvent?: (event: StepEvent) => void;
+  onActionStepEvent?: (event: ActionStepEvent) => void;
   /** Optional sink for gate lifecycle events. Hosts can pipe to traces, dashboards, etc. */
   onGateEvent?: (event: GateEvent) => void;
   /** Optional sink for agent lifecycle events. */
