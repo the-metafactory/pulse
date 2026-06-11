@@ -1,0 +1,35 @@
+{
+  "name": "A_RATE_GATE",
+  "version": "1.0.0",
+  "description": "Token-economy guard: dedupe by hash, 3/24h rolling window, topic discipline. check never mutates.",
+  "requires": [
+    "readFile"
+  ],
+  "input": {
+    "pouch_dir": {
+      "type": "string",
+      "required": true
+    },
+    "note_sha256": {
+      "type": "string",
+      "required": true
+    },
+    "thread": {
+      "type": "string",
+      "required": true
+    },
+    "now": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "rate_decision": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

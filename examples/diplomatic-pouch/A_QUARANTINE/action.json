@@ -1,0 +1,33 @@
+{
+  "name": "A_QUARANTINE",
+  "version": "1.0.0",
+  "description": "Inbound intake: extension whitelist (border 1), sidecar sha256 verification (provenance, not trust).",
+  "requires": [
+    "readFile"
+  ],
+  "input": {
+    "pouch_dir": {
+      "type": "string",
+      "required": true
+    },
+    "inbound_name": {
+      "type": "string",
+      "required": true
+    }
+  },
+  "output": {
+    "inbound_text": {
+      "type": "string"
+    },
+    "inbound_envelope": {
+      "type": "object"
+    },
+    "provenance": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

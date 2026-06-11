@@ -1,0 +1,35 @@
+{
+  "name": "A_DELIVER",
+  "version": "1.0.0",
+  "description": "Write the human-promoted, wrapped note to pouch/read/ and log it.",
+  "requires": [
+    "writeFile"
+  ],
+  "input": {
+    "pouch_dir": {
+      "type": "string",
+      "required": true
+    },
+    "wrapped_text": {
+      "type": "string",
+      "required": true
+    },
+    "inbound_name": {
+      "type": "string",
+      "required": true
+    },
+    "promotion": {
+      "type": "object",
+      "required": true
+    }
+  },
+  "output": {
+    "delivered": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "pouch",
+    "diplomacy"
+  ]
+}

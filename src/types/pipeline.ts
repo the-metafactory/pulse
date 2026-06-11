@@ -136,6 +136,25 @@ export interface RetryStepSpec {
 }
 
 // ---------------------------------------------------------------------------
+// Step lifecycle events — plain action steps
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle event for a plain (string) action step — one kind of Step
+ * (Step = Action | Primitive). Emitted via the optional
+ * StepRunnerOptions.onActionStepEvent hook so hosts can surface per-step
+ * execution progress — e.g. the SOC demo posting one Mattermost thread reply
+ * per step. Composition primitives have their own event channels (onGateEvent,
+ * onAgentEvent, onTribunalEvent, onGovernedEvent); this one covers the plain
+ * action steps that previously executed silently. No determinism is implied —
+ * actions run arbitrary code.
+ */
+export type ActionStepEvent =
+  | { type: "step.started"; action: string; started_at: string }
+  | { type: "step.completed"; action: string; durationMs: number; output_fields: string[] }
+  | { type: "step.failed"; action: string; durationMs: number; error: string };
+
+// ---------------------------------------------------------------------------
 // Gate primitive — pause execution and wait for operator verdict
 // ---------------------------------------------------------------------------
 

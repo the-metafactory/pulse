@@ -86,6 +86,11 @@ async function runActionStep(
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
   const stepStart = Date.now();
+  options.onActionStepEvent?.({
+    type: "step.started",
+    action: actionName,
+    started_at: new Date(stepStart).toISOString(),
+  });
   const result = await runAction(actionName, payload, {
     ...options,
     traceId: crypto.randomUUID(),
@@ -100,11 +105,26 @@ async function runActionStep(
   });
 
   if (!result.success) {
+    options.onActionStepEvent?.({
+      type: "step.failed",
+      action: actionName,
+      durationMs,
+      error: result.error ?? "unknown error",
+    });
     throw new StepFailure(actionName, result.error ?? "unknown error");
   }
 
-  if (result.output && typeof result.output === "object") {
-    return { ...payload, ...(result.output as Record<string, unknown>) };
-  }
-  return payload;
+  const output =
+    result.output && typeof result.output === "object"
+      ? (result.output as Record<string, unknown>)
+      : undefined;
+
+  options.onActionStepEvent?.({
+    type: "step.completed",
+    action: actionName,
+    durationMs,
+    output_fields: output ? Object.keys(output) : [],
+  });
+
+  return output ? { ...payload, ...output } : payload;
 }

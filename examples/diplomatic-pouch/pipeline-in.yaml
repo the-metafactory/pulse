@@ -1,0 +1,24 @@
+# P_POUCH_IN — inbound diplomatic note (Foreign Policy §§2, 7, 9).
+#
+#   channel check → quarantine (border 1 + provenance) → TRIPWIRE (a rule-
+#   rewrite attempt halts the channel — the attempt is the alarm; runs BEFORE
+#   stripping so the alarm carries the evidence) → strip injection phrasing
+#   (border 2) → wrap as untrusted data → HUMAN PROMOTES → deliver to read/
+#
+# Provenance is not trust: a valid signature changes nothing about how the
+# content is treated.
+
+name: P_POUCH_IN
+description: Quarantine, tripwire, strip, wrap, human-promote, and deliver an inbound pouch note.
+
+actions:
+  - A_CHANNEL_CHECK
+  - A_QUARANTINE
+  - A_TRIPWIRE
+  - A_STRIP_INJECTION
+  - A_WRAP_UNTRUSTED
+  - gate:
+      name: human-promotion
+      prompt: "Inbound note quarantined, scanned, and wrapped as untrusted data (see flags above). Promote to read/? Type your name in the notes (pass) or fail to drop it in quarantine."
+      collect: promotion
+  - A_DELIVER
