@@ -1,12 +1,13 @@
 /**
- * P-800 — validateFlow + buildCatalog (examples/soc-demo).
+ * P-800 — validatePipeline + buildCatalog (examples/soc-demo).
  * ISC-1..10 of the SOC demo plan (ISA.md, slug 2026-06-11-pulse-soc-demo-composer).
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateFlow, type CatalogEntry } from "../examples/soc-demo/lib/validate-flow";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { validatePipeline, type CatalogEntry } from "../examples/soc-demo/lib/validate-pipeline";
 import { buildCatalog } from "../examples/soc-demo/lib/catalog";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -40,9 +41,9 @@ actions:
   - A_NOTIFY_MATTERMOST  # sovereignty: D, residency: CH
 `;
 
-describe("validateFlow — happy path", () => {
+describe("validatePipeline — happy path", () => {
   test("valid flow passes with extracted annotations", () => {
-    const result = validateFlow(VALID_FLOW, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(VALID_FLOW, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(true);
     expect(result.findings).toEqual([]);
     expect(result.annotations).toHaveLength(3);
@@ -60,7 +61,7 @@ actions:
   # sovereignty: A, residency: EU
   - A_FETCH_HIBP
 `;
-    const result = validateFlow(flow, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(true);
     expect(result.annotations[0]?.sovereignty).toBe("A");
     expect(result.annotations[0]?.residency).toBe("EU");
@@ -73,7 +74,7 @@ actions:
   # TODO(human): regulator queue handoff is not representable yet
   - A_NOTIFY_MATTERMOST  # sovereignty: D, residency: CH
 `;
-    const result = validateFlow(flow, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(true);
   });
 
@@ -89,21 +90,21 @@ actions:
       name: analyst
       prompt: "Block or accept?"
 `;
-    const result = validateFlow(flow, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(true);
     expect(result.annotations.map((a) => a.label)).toEqual(["A_FETCH_HIBP", "agent", "gate"]);
     expect(result.annotations.map((a) => a.sovereignty)).toEqual(["D", "A", "H"]);
   });
 });
 
-describe("validateFlow — failure modes", () => {
+describe("validatePipeline — failure modes", () => {
   test("unknown block name is rejected, finding names the block (ISC-2)", () => {
     const flow = `name: F_X
 actions:
   - A_FETCH_HIBP  # sovereignty: D, residency: CH
   - A_TOTALLY_INVENTED  # sovereignty: D, residency: CH
 `;
-    const result = validateFlow(flow, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(false);
     const finding = result.findings.find((f) => f.rule === "unknown-block");
     expect(finding?.message).toContain("A_TOTALLY_INVENTED");
@@ -120,7 +121,7 @@ actions:
       actions:
         - A_INVENTED_INNER
 `;
-    const result = validateFlow(flow, CATALOG, { initialFields: ["breaches"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["breaches"] });
     expect(result.valid).toBe(false);
     expect(result.findings.some((f) => f.rule === "unknown-block" && f.message.includes("A_INVENTED_INNER"))).toBe(true);
   });
@@ -131,7 +132,7 @@ actions:
   - A_LOOKUP_OWNER  # sovereignty: D, residency: CH
 `;
     // breaches is required but neither initial nor produced by a prior step
-    const result = validateFlow(flow, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(false);
     const finding = result.findings.find((f) => f.rule === "missing-input");
     expect(finding?.message).toContain("breaches");
@@ -143,7 +144,7 @@ actions:
   - A_FETCH_HIBP  # sovereignty: D, residency: CH
   - A_LOOKUP_OWNER  # sovereignty: D, residency: CH
 `;
-    const result = validateFlow(flow, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(true);
   });
 
@@ -152,7 +153,7 @@ actions:
 actions:
   - A_FETCH_HIBP
 `;
-    const result = validateFlow(flow, CATALOG, { initialFields: ["email"] });
+    const result = validatePipeline(flow, CATALOG, { initialFields: ["email"] });
     expect(result.valid).toBe(false);
     const finding = result.findings.find((f) => f.rule === "missing-annotation");
     expect(finding?.step).toBe(0);
@@ -160,13 +161,13 @@ actions:
   });
 
   test("unparseable YAML yields parse-error, not a throw", () => {
-    const result = validateFlow("actions:\n  - [unclosed", CATALOG);
+    const result = validatePipeline("actions:\n  - [unclosed", CATALOG);
     expect(result.valid).toBe(false);
     expect(result.findings[0]?.rule).toBe("parse-error");
   });
 
   test("empty actions list yields parse-error", () => {
-    const result = validateFlow("name: F_X\nactions: []\n", CATALOG);
+    const result = validatePipeline("name: F_X\nactions: []\n", CATALOG);
     expect(result.valid).toBe(false);
     expect(result.findings[0]?.rule).toBe("parse-error");
   });
@@ -185,19 +186,78 @@ describe("buildCatalog (ISC-8)", () => {
 });
 
 describe("A_VALIDATE_FLOW block wrapper (ISC-9)", () => {
-  test("wraps the pure core and returns validation in payload", async () => {
+  const ctx = {
+    capabilities: {},
+    env: {},
+    meta: { actionName: "A_VALIDATE_FLOW", startedAt: new Date().toISOString(), mode: "local" },
+  } as never;
+
+  // Trust-root fixture: a temp blocks dir holding the manifests the test
+  // flow references. The block loads its catalog from disk, never from input.
+  const TRUST_DIR = join(here, ".test-validate-flow-blocks");
+
+  beforeAll(() => {
+    for (const entry of CATALOG) {
+      const dir = join(TRUST_DIR, entry.name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "action.json"),
+        JSON.stringify({ ...entry, version: "1.0.0" }),
+      );
+    }
+  });
+
+  afterAll(() => {
+    rmSync(TRUST_DIR, { recursive: true, force: true });
+  });
+
+  test("validates against the blocks_dir trust root and returns validation in payload", async () => {
     const mod = await import("../examples/soc-demo/blocks/A_VALIDATE_FLOW/action");
     const result = (await mod.default.execute(
       {
         flow_yaml: VALID_FLOW,
-        catalog: CATALOG,
+        blocks_dir: TRUST_DIR,
         initial_fields: ["email"],
         scenario: "credential leak",
       },
-      { capabilities: {}, env: {}, meta: { actionName: "A_VALIDATE_FLOW", startedAt: new Date().toISOString(), mode: "local" } } as never,
+      ctx,
     )) as Record<string, unknown>;
     expect((result.validation as { valid: boolean }).valid).toBe(true);
-    // passthrough preserved
+    // passthrough preserved; control inputs consumed
     expect(result.scenario).toBe("credential leak");
+    expect(result.initial_fields).toBeUndefined();
+  });
+
+  test("Anti: caller-supplied catalog input cannot vouch for invented blocks (sage blocker)", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_VALIDATE_FLOW/action");
+    const inventedCatalog = [
+      { name: "A_TOTALLY_INVENTED", description: "fake", input: {}, output: {} },
+    ];
+    const flow = `name: F_X
+actions:
+  - A_TOTALLY_INVENTED  # sovereignty: D, residency: CH
+`;
+    const result = (await mod.default.execute(
+      { flow_yaml: flow, blocks_dir: TRUST_DIR, catalog: inventedCatalog },
+      ctx,
+    )) as Record<string, unknown>;
+    const validation = result.validation as { valid: boolean; findings: Array<{ rule: string }> };
+    expect(validation.valid).toBe(false);
+    expect(validation.findings.some((f) => f.rule === "unknown-block")).toBe(true);
+  });
+
+  test("defaults to its own installed blocks directory when blocks_dir omitted", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_VALIDATE_FLOW/action");
+    const flow = `name: F_SELF
+actions:
+  - A_VALIDATE_FLOW  # sovereignty: D, residency: CH
+`;
+    const result = (await mod.default.execute(
+      { flow_yaml: flow, initial_fields: ["flow_yaml"] },
+      ctx,
+    )) as Record<string, unknown>;
+    // A_VALIDATE_FLOW itself is installed, so the only valid catalog is the real one
+    const validation = result.validation as { valid: boolean };
+    expect(validation.valid).toBe(true);
   });
 });

@@ -1,10 +1,17 @@
 /**
- * validateFlow — the deterministic gate between compose and execute.
+ * validatePipeline — the deterministic gate between compose and execute.
  *
  * Pure function: raw YAML + installed-block catalog in, findings out. No I/O,
  * no block execution. This is the single biggest hedge against the worst
  * stage failure (the composer inventing a block name), per
  * design/soc-demo-mm-composer.md §4.
+ *
+ * Naming: the on-stage demo vocabulary says "flow" (and the palette block is
+ * A_VALIDATE_FLOW per the locked design), but what the composer emits and
+ * this function checks is pipeline-shaped YAML (`name:` + `actions:` with
+ * passthrough payload) — per CONTEXT.md, Flow is the deployment shape that
+ * binds a pipeline to source/destination/schedule. The public surface here
+ * uses the precise term.
  *
  * Three checks (design §4, A_VALIDATE_FLOW):
  *   (a) every block name exists in the installed catalog,
@@ -65,7 +72,7 @@ export interface ValidationResult {
   annotations: StepAnnotation[];
 }
 
-export interface ValidateFlowOptions {
+export interface ValidatePipelineOptions {
   /** Field names present in the pipeline's initial input (e.g. ["scenario"]) */
   initialFields?: string[];
 }
@@ -123,19 +130,26 @@ function scanStepAnnotations(rawYaml: string): RawStep[] {
 // Structural walk
 // ---------------------------------------------------------------------------
 
-/** Collect every plain action name reachable from a step, including nested sub-pipelines. */
-function collectActionNames(step: PipelineStep, into: Array<{ name: string; topLevel: boolean }>, topLevel: boolean): void {
+/**
+ * Collect every plain action name reachable from a step, including nested
+ * sub-pipelines, recording the owning top-level step index in one pass.
+ */
+function collectActionNames(
+  step: PipelineStep,
+  stepIndex: number,
+  into: Array<{ name: string; stepIndex: number }>,
+): void {
   if (typeof step === "string") {
-    into.push({ name: step, topLevel });
+    into.push({ name: step, stepIndex });
     return;
   }
-  if ("map" in step) for (const s of step.map.actions) collectActionNames(s, into, false);
-  else if ("filter" in step) for (const s of step.filter.actions) collectActionNames(s, into, false);
-  else if ("reduce" in step) for (const s of step.reduce.actions) collectActionNames(s, into, false);
-  else if ("retry" in step) for (const s of step.retry.actions) collectActionNames(s, into, false);
+  if ("map" in step) for (const s of step.map.actions) collectActionNames(s, stepIndex, into);
+  else if ("filter" in step) for (const s of step.filter.actions) collectActionNames(s, stepIndex, into);
+  else if ("reduce" in step) for (const s of step.reduce.actions) collectActionNames(s, stepIndex, into);
+  else if ("retry" in step) for (const s of step.retry.actions) collectActionNames(s, stepIndex, into);
   else if ("parallel" in step) {
     for (const branch of Object.values(step.parallel.branches)) {
-      for (const s of branch.actions) collectActionNames(s, into, false);
+      for (const s of branch.actions) collectActionNames(s, stepIndex, into);
     }
   }
   // gate / agent / tribunal / governed are leaves — no catalog blocks inside
@@ -167,10 +181,10 @@ function stepOutputs(step: PipelineStep, byName: Map<string, CatalogEntry>): str
 // Entry point
 // ---------------------------------------------------------------------------
 
-export function validateFlow(
+export function validatePipeline(
   rawYaml: string,
   catalog: CatalogEntry[],
-  options: ValidateFlowOptions = {},
+  options: ValidatePipelineOptions = {},
 ): ValidationResult {
   const findings: Finding[] = [];
   const annotations: StepAnnotation[] = [];
@@ -189,7 +203,7 @@ export function validateFlow(
 
   const doc = parsed as { name?: unknown; actions?: unknown } | null;
   if (!doc || !Array.isArray(doc.actions) || doc.actions.length === 0) {
-    findings.push({ rule: "parse-error", step: -1, message: "flow must declare a non-empty `actions:` list" });
+    findings.push({ rule: "parse-error", step: -1, message: "pipeline must declare a non-empty `actions:` list" });
     return { valid: false, findings, annotations };
   }
 
@@ -208,18 +222,13 @@ export function validateFlow(
   const byName = new Map(catalog.map((e) => [e.name, e]));
 
   // (a) every block name exists in the catalog — including nested sub-pipelines
-  const names: Array<{ name: string; topLevel: boolean }> = [];
-  steps.forEach((s) => collectActionNames(s, names, true));
-  for (const { name } of names) {
+  const names: Array<{ name: string; stepIndex: number }> = [];
+  steps.forEach((s, idx) => collectActionNames(s, idx, names));
+  for (const { name, stepIndex } of names) {
     if (!byName.has(name)) {
-      const idx = steps.findIndex((s) => {
-        const inner: Array<{ name: string; topLevel: boolean }> = [];
-        collectActionNames(s, inner, true);
-        return inner.some((n) => n.name === name);
-      });
       findings.push({
         rule: "unknown-block",
-        step: idx,
+        step: stepIndex,
         message: `block \`${name}\` is not in the installed catalog`,
       });
     }
