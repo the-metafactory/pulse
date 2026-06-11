@@ -1,0 +1,30 @@
+{
+  "name": "A_VALIDATE_FLOW",
+  "version": "1.0.0",
+  "description": "Deterministic compose-to-execute gate: checks every block name exists in the installed catalog, required inputs are satisfiable, and sovereignty annotations exist on every step. Pure static checks - never executes blocks. Returns validation { valid, findings, annotations }; the wiring refuses to run invalid flows (fail-closed).",
+  "input": {
+    "flow_yaml": {
+      "type": "string",
+      "required": true
+    },
+    "catalog": {
+      "type": "array",
+      "required": true
+    },
+    "initial_fields": {
+      "type": "array"
+    }
+  },
+  "output": {
+    "validation": {
+      "type": "object"
+    }
+  },
+  "requires": [],
+  "tags": [
+    "soc",
+    "demo",
+    "guardrail",
+    "deterministic"
+  ]
+}
