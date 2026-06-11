@@ -3,8 +3,9 @@
  *
  * Stub-safe like every demo adapter: when MATTERMOST_URL / MATTERMOST_BOT_TOKEN
  * / MATTERMOST_CHANNEL_ID are unset, the wiring uses ConsolePoster instead and
- * the demo runs fully offline. The env token never travels anywhere but the
- * env URL (no caller-supplied URL path exists here at all).
+ * the demo runs fully offline. In the env-config path (mmConfigFromEnv) the
+ * token only travels to the env URL; the constructor itself trusts whatever
+ * MMConfig the caller assembled — callers must not mix credential sources.
  *
  * Intentionally tiny: createPost + file upload + thread polling. The cortex
  * stack owns the bot identity and channel config (design §6 — JC provisions;
@@ -17,6 +18,12 @@ export interface MMConfig {
   url: string;
   token: string;
   channelId: string;
+  /**
+   * Mattermost user id allowed to satisfy operator gates. REQUIRED for live
+   * MM mode — without a principal check any channel participant (i.e. the
+   * audience) could reply "run it" and trigger execution.
+   */
+  operatorId: string;
 }
 
 export function mmConfigFromEnv(): MMConfig | null {
@@ -24,7 +31,14 @@ export function mmConfigFromEnv(): MMConfig | null {
   const token = process.env.MATTERMOST_BOT_TOKEN;
   const channelId = process.env.MATTERMOST_CHANNEL_ID;
   if (!url || !token || !channelId) return null;
-  return { url: url.replace(/\/$/, ""), token, channelId };
+  const operatorId = process.env.MATTERMOST_OPERATOR_ID;
+  if (!operatorId) {
+    // Fail closed: a gate anyone can open is not a gate.
+    throw new Error(
+      "MATTERMOST_OPERATOR_ID is required in live MM mode — the operator gate only accepts replies from this user id",
+    );
+  }
+  return { url: url.replace(/\/$/, ""), token, channelId, operatorId };
 }
 
 export interface ThreadPoster {
@@ -96,8 +110,10 @@ export class MattermostThread implements ThreadPoster {
   }
 
   /**
-   * Poll the thread for a reply (from anyone but the bot's own posts we made)
-   * whose text matches. Resolves with the matching message text.
+   * Poll the thread for a reply from the configured OPERATOR whose text
+   * matches. Principal check is the gate's security boundary: posts from any
+   * other user — including the bot's own gate prompt, which contains the ack
+   * vocabulary — never satisfy the matcher.
    */
   async waitForReply(matcher: RegExp, opts: { timeoutMs?: number; pollMs?: number; signal?: AbortSignal } = {}): Promise<string> {
     if (!this.rootId) throw new Error("waitForReply: no thread root yet");
@@ -111,9 +127,11 @@ export class MattermostThread implements ThreadPoster {
         headers: this.headers(),
       });
       if (res.ok) {
-        const body = (await res.json()) as { posts?: Record<string, { message: string; create_at: number }> };
+        const body = (await res.json()) as {
+          posts?: Record<string, { message: string; create_at: number; user_id?: string }>;
+        };
         const candidates = Object.values(body.posts ?? {})
-          .filter((p) => p.create_at > this.lastSeen)
+          .filter((p) => p.create_at > this.lastSeen && p.user_id === this.cfg.operatorId)
           .sort((a, b) => a.create_at - b.create_at);
         for (const p of candidates) {
           if (matcher.test(p.message)) {
@@ -128,10 +146,20 @@ export class MattermostThread implements ThreadPoster {
   }
 }
 
-/** Parse an operator ack reply into a gate verdict. Exported for tests. */
+// Shared ack vocabulary — single source for the parser and the poll matcher.
+const PASS_RE = /\b(run it|run|approve|go|ship it|lgtm)\b/i;
+const FAIL_RE = /\b(stop|abort|reject|no)\b/i;
+const NEGATED_RE = /\b(don'?t|do not|never|nicht)\b/i;
+export const ACK_VOCAB_RE = new RegExp(`${PASS_RE.source}|${FAIL_RE.source}|${NEGATED_RE.source}`, "i");
+
+/**
+ * Parse an operator ack reply into a gate verdict. Rejections and negations
+ * are checked FIRST — "no, don't run" must never parse as approval. Truly
+ * ambiguous replies return null and the gate keeps waiting.
+ */
 export function parseAckReply(text: string): GateInput | null {
-  if (/\b(run it|run|approve|go|ship it|lgtm)\b/i.test(text)) return { verdict: "pass", notes: text };
-  if (/\b(stop|abort|reject|no)\b/i.test(text)) return { verdict: "fail", notes: text };
+  if (NEGATED_RE.test(text) || FAIL_RE.test(text)) return { verdict: "fail", notes: text };
+  if (PASS_RE.test(text)) return { verdict: "pass", notes: text };
   return null;
 }
 
@@ -145,10 +173,11 @@ export class MMAckGateProvider implements GateProvider {
 
   async requestVerdict(spec: { name: string; prompt: string; signal?: AbortSignal }): Promise<GateInput> {
     await this.thread.post(`🚧 **Gate \`${spec.name}\`** — ${spec.prompt}\n_Reply "run it" / "approve" to continue, "stop" to abort._`);
-    // Poll until a reply parses to a verdict.
+    // Poll until an OPERATOR reply parses to a verdict (principal check
+    // lives in waitForReply; vocabulary shared with parseAckReply).
     const deadline = Date.now() + 10 * 60_000;
     while (Date.now() < deadline) {
-      const reply = await this.thread.waitForReply(/run it|run|approve|go|ship it|lgtm|stop|abort|reject|\bno\b/i, {
+      const reply = await this.thread.waitForReply(ACK_VOCAB_RE, {
         timeoutMs: deadline - Date.now(),
         signal: spec.signal,
       });

@@ -153,16 +153,23 @@ export async function compose(
   }
 
   // Retries exhausted — ask for the closest-match message (rule 2), so the
-  // operator gets a clean pivot line instead of broken YAML.
+  // operator gets a clean pivot line instead of broken YAML. A throwing LLM
+  // here must not mask the validation findings we already hold.
   attempts++;
-  const fallback = await llm(
-    `You could not produce a valid flow for the scenario after ${maxRetries + 1} attempts. ` +
-      `Last validator findings:\n${lastFindings.map((f) => `- ${f.message}`).join("\n")}\n\n` +
-      `Reply with ONLY the closest-match message per rule 2 of your instructions ` +
-      `(no YAML).`,
-    { system, tier: "smart" },
-  );
-  const message = fallback.text.trim();
+  let fallback: LLMResponse;
+  try {
+    fallback = await llm(
+      `You could not produce a valid flow for the scenario after ${maxRetries + 1} attempts. ` +
+        `Last validator findings:\n${lastFindings.map((f) => `- ${f.message}`).join("\n")}\n\n` +
+        `Reply with ONLY the closest-match message per rule 2 of your instructions ` +
+        `(no YAML).`,
+      { system, tier: "smart" },
+    );
+  } catch (err) {
+    console.error(`[compose] closest-match fallback call failed: ${err instanceof Error ? err.message : String(err)}`);
+    return { ok: false, kind: "invalid", findings: lastFindings, lastYaml, attempts };
+  }
+  const message = (fallback.text ?? "").trim();
   if (message.length > 0 && !extractFence(message, "yaml")) {
     return { ok: false, kind: "no-match", message, attempts };
   }

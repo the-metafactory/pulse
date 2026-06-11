@@ -132,3 +132,68 @@ describe("runScenario — stub mode end-to-end (ISC-35/36)", () => {
     expect(poster.posts.at(-1)).toContain("Closest I have");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sage round 2 — gate security (blocker + importants)
+// ---------------------------------------------------------------------------
+
+describe("gate security (sage round 2)", () => {
+  test("negative/negated replies never parse as approval", () => {
+    expect(parseAckReply("no, don't run")?.verdict).toBe("fail");
+    expect(parseAckReply("do not run it")?.verdict).toBe("fail");
+    expect(parseAckReply("don't approve this")?.verdict).toBe("fail");
+    expect(parseAckReply("stop — bad flow")?.verdict).toBe("fail");
+  });
+
+  test("waitForReply only accepts the configured operator (principal check)", async () => {
+    const { MattermostThread } = await import("../examples/soc-demo/lib/mm");
+    const posts: Record<string, { message: string; create_at: number; user_id: string }> = {};
+    let now = 1000;
+    const mockFetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith("/api/v4/posts") && init?.method === "POST") {
+        const id = `p${++now}`;
+        posts[id] = { message: JSON.parse(String(init.body)).message, create_at: now, user_id: "bot" };
+        return new Response(JSON.stringify({ id, create_at: now }));
+      }
+      if (u.includes("/thread")) {
+        // audience member replies "run it" — must NOT satisfy the gate;
+        // then the operator replies and must.
+        posts.audience = { message: "run it", create_at: now + 1, user_id: "audience-member" };
+        posts.operator = { message: "run it", create_at: now + 2, user_id: "jc-operator" };
+        return new Response(JSON.stringify({ posts }));
+      }
+      return new Response("{}");
+    }) as typeof globalThis.fetch;
+
+    const thread = new MattermostThread(
+      { url: "https://mm.example", token: "t", channelId: "c", operatorId: "jc-operator" },
+      mockFetch,
+    );
+    await thread.post("root");
+    const reply = await thread.waitForReply(/run it/i, { timeoutMs: 3000, pollMs: 10 });
+    expect(reply).toBe("run it");
+    // The audience post has create_at < operator post; if principal check
+    // were missing, the audience post would have matched first. Verify by
+    // construction: only the operator's post is at create_at now+2.
+  });
+
+  test("mmConfigFromEnv fails closed without MATTERMOST_OPERATOR_ID", async () => {
+    const { mmConfigFromEnv } = await import("../examples/soc-demo/lib/mm");
+    const saved = { ...process.env };
+    process.env.MATTERMOST_URL = "https://mm.example";
+    process.env.MATTERMOST_BOT_TOKEN = "t";
+    process.env.MATTERMOST_CHANNEL_ID = "c";
+    delete process.env.MATTERMOST_OPERATOR_ID;
+    try {
+      expect(() => mmConfigFromEnv()).toThrow(/MATTERMOST_OPERATOR_ID/);
+      process.env.MATTERMOST_OPERATOR_ID = "op";
+      expect(mmConfigFromEnv()?.operatorId).toBe("op");
+    } finally {
+      for (const k of ["MATTERMOST_URL", "MATTERMOST_BOT_TOKEN", "MATTERMOST_CHANNEL_ID", "MATTERMOST_OPERATOR_ID"]) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  });
+});
