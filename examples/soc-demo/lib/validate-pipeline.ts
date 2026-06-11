@@ -14,9 +14,14 @@
  * uses the precise term.
  *
  * Three checks (design §4, A_VALIDATE_FLOW):
- *   (a) every block name exists in the installed catalog,
- *   (b) required inputs are satisfiable from initial input or prior outputs,
- *   (c) sovereignty annotations exist on every step.
+ *   (a) every block name exists in the installed catalog — including blocks
+ *       nested inside map/filter/reduce/retry/parallel sub-pipelines,
+ *   (b) required inputs are satisfiable from initial input or prior outputs —
+ *       TOP-LEVEL plain action steps only: nested sub-pipelines bind iteration
+ *       names (`as`, `item_as`, branch scopes) that static analysis here does
+ *       not resolve, so their input wiring is NOT checked (finding rule
+ *       "missing-input" can produce false negatives inside primitives),
+ *   (c) sovereignty annotations exist on every top-level step.
  *
  * Sovereignty annotations are YAML *comments* (`# sovereignty: A, residency: EU`)
  * — they do not survive `yaml` parse, so check (c) runs as a raw-text line
