@@ -226,7 +226,7 @@ features:
   # SOC demo: Mattermost Pulse Composer (design/soc-demo-mm-composer.md, issue #37)
   - id: P-800
     name: Flow validator + block catalog
-    status: in-progress
+    status: done
     iteration: 8
     issue: 37
     depends: [ P-206 ]
@@ -234,7 +234,7 @@ features:
 
   - id: P-801
     name: SOC demo block palette (12 stub-safe blocks)
-    status: planned
+    status: done
     iteration: 8
     issue: 37
     depends: [ P-800 ]
@@ -250,7 +250,7 @@ features:
 
   - id: P-803
     name: Pulse Composer core
-    status: planned
+    status: done
     iteration: 8
     issue: 37
     depends: [ P-800 ]
@@ -258,7 +258,7 @@ features:
 
   - id: P-804
     name: Mermaid → PNG rendering
-    status: planned
+    status: done
     iteration: 8
     issue: 37
     depends: [ P-803 ]
@@ -266,7 +266,7 @@ features:
 
   - id: P-805
     name: Mattermost execution wiring
-    status: planned
+    status: done
     iteration: 8
     issue: 37
     depends: [ P-801, P-802, P-803, P-804 ]
@@ -274,7 +274,7 @@ features:
 
   - id: P-806
     name: SOC demo rehearsal
-    status: planned
+    status: done
     iteration: 8
     issue: 37
     depends: [ P-805 ]

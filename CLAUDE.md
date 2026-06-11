@@ -28,7 +28,7 @@ miner captures traces → metafactory distributes → arc installs → pulse exe
 
 - **Runtime:** Bun
 - **Language:** TypeScript (strict)
-- **Test:** `bun test` (383 tests across 27 files)
+- **Test:** `bun test` (405 tests across 29 files)
 - **Dependencies:** commander, zod, yaml
 
 ## Architecture
@@ -97,6 +97,12 @@ Pipelines support 9 composition primitives that operate on collections or contro
 
 Types in `src/types/pipeline.ts` + `src/types/agent.ts` + `src/types/tribunal.ts` + `src/types/governed.ts`, dispatcher in `src/lib/step-runner.ts`, gate provider in `src/lib/gate-provider.ts`, agent providers in `src/lib/agent-provider.ts`, tribunal pure core in `src/lib/tribunal.ts`. Design rationale in `docs/iteration-primitives.md`, `docs/agent-actions.md`, and `docs/verdict-tribunal.md`.
 
+### Step lifecycle events
+Plain action steps emit `step.started` / `step.completed` / `step.failed` via the optional `StepRunnerOptions.onActionStepEvent` sink (`ActionStepEvent` in `src/types/pipeline.ts`) — the hook hosts use to surface per-step execution progress (e.g. the SOC demo's per-step Mattermost thread replies). Primitives keep their own channels (`onGateEvent`, `onAgentEvent`, `onTribunalEvent`, `onGovernedEvent`).
+
+### SOC demo (P-800..P-806)
+`examples/soc-demo/` — live on-stage composition of SOC processes from Mattermost (design: `design/soc-demo-mm-composer.md`). 19-block stub-safe palette, deterministic compose→execute validator (`A_VALIDATE_FLOW` + pure `validatePipeline` with sovereignty-annotation lint), catalog-bound composer with validator-retry loop, Mermaid→PNG rendering with fallback-to-source, and execution wiring with operator-ack gate (principal-checked) + per-step thread replies. Fully offline by default; every external adapter returns canned fixtures when its env key is unset. `bun examples/soc-demo/rehearse.ts` runs the 8 design scenarios.
+
 ### Agent actions (D/A/H complete)
 Miner's step taxonomy maps 1:1 to pipeline steps: **D**eterministic = action, **A**gentic = `agent:`, **H**uman = `gate:`. Agent tasks are capability-addressed (`soc.triage.email`), sovereignty-constrained (`model_class: local-only` keeps confidential data off frontier models), and travel as myelin envelopes on `local.{principal}.{stack}.tasks.{capability}`. Pulse never talks to agents directly — it asks the bus. The `agent` capability (`requires: ["agent"]`) gives actions programmatic dispatch via `ctx.capabilities.agent(taskSpec)`. Demo: `examples/soc-triage/`.
 
@@ -106,7 +112,7 @@ Flows connect source → pipeline → destination. Sources: inline, file, RSS, c
 ## Key commands
 
 ```bash
-bun test              # Run all 383 tests
+bun test              # Run all 405 tests
 bun run typecheck     # TypeScript check
 bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
