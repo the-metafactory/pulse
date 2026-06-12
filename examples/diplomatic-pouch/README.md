@@ -59,6 +59,18 @@ bun examples/diplomatic-pouch/run-demo.ts --reset           # wipe pouch state
 
 `--interactive` on any scenario to type the named-human verdict yourself.
 
+Seal a **real** note (not the demo fixture) into a chosen outbox:
+
+```bash
+bun examples/diplomatic-pouch/run-demo.ts --send --interactive \
+  --note <path-to-note.md> --outbox <pouch-dir> --thread <topic-slug>
+```
+
+Runs the full outbound pipeline (borders, rate gate, your named-human gate) and
+drops `<hash>.md` + `<hash>.envelope.json` into `<pouch-dir>/outbox/<thread>/`.
+`--note`/`--outbox`/`--thread` all default to the demo's fixture + local `pouch/`
+when omitted, so existing scenarios are unchanged.
+
 ## The pouch format (his spec, cited)
 
 The Sumarhús skill spec (v1.0, 2026-06-08, §"Pouch format") defines the wire

@@ -15,22 +15,39 @@
  *   bun examples/diplomatic-pouch/run-demo.ts --inbound-attack    # rule-rewrite attempt → TRIPWIRE: channel halts, alarm written
  *   bun examples/diplomatic-pouch/run-demo.ts --reset             # wipe pouch state (fresh relationship)
  *
+ * Seal a REAL note (not the demo fixture) into a chosen outbox:
+ *   bun examples/diplomatic-pouch/run-demo.ts --send --interactive \
+ *     --note ~/Desktop/pouch/reply-to-sumarhus.md \
+ *     --outbox ~/Desktop/pouch --thread capability-enforcement
+ *   → runs the full pipeline (borders, rate gate, your named-human gate) and
+ *     drops <hash>.md + <hash>.envelope.json into <outbox>/outbox/<thread>/.
+ *
  * After --inbound-attack, any --send refuses too: the channel is halted until
  * a human reviews pouch/alarms/ and reopens pouch/channel-state.json.
  */
 
-import { join } from "path";
+import { join, resolve } from "path";
 import { mkdir, rm, cp, writeFile as fsWrite } from "fs/promises";
 import { runPipelineFromYaml } from "../../src/lib/pipeline";
 import { StdinGateProvider } from "../../src/lib/gate-provider";
 import type { GateInput, GateProvider } from "../../src/types/pipeline";
 import { sha256Hex } from "./lib/borders";
 
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
+/** Read a `--flag <value>` pair from argv (undefined when absent or value-less). */
+function flagValue(name: string): string | undefined {
+  const i = argv.indexOf(name);
+  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
+}
+
 const interactive = args.has("--interactive");
-const POUCH = join(import.meta.dir, "pouch");
 const PEER = "sumarhus";
-const THREAD = "prompt-injection-containment";
+// --outbox / --note / --thread let a real note be sealed outside the example's
+// own pouch/ dir (e.g. ~/Desktop/pouch). Defaults preserve the demo behaviour.
+const POUCH = flagValue("--outbox") ? resolve(flagValue("--outbox")!) : join(import.meta.dir, "pouch");
+const NOTE_OVERRIDE = flagValue("--note");
+const THREAD = flagValue("--thread") ?? "prompt-injection-containment";
 
 const banner = (s: string) => console.log(`\n━━━ ${s} ${"━".repeat(Math.max(0, 62 - s.length))}`);
 
@@ -99,8 +116,16 @@ async function main() {
   const now = new Date().toISOString();
 
   if (args.has("--send") || args.has("--resend")) {
-    banner(`OUTBOUND · ${args.has("--resend") ? "dedupe check (identical note)" : "first note to " + PEER}`);
-    await runOut(join(import.meta.dir, "fixtures/note-injection-containment.md"), now);
+    const notePath = NOTE_OVERRIDE ? resolve(NOTE_OVERRIDE) : join(import.meta.dir, "fixtures/note-injection-containment.md");
+    banner(
+      NOTE_OVERRIDE
+        ? `OUTBOUND · sealing ${notePath} → ${POUCH}/outbox/${THREAD}/`
+        : `OUTBOUND · ${args.has("--resend") ? "dedupe check (identical note)" : "first note to " + PEER}`,
+    );
+    const ok = await runOut(notePath, now);
+    if (ok && NOTE_OVERRIDE) {
+      console.log(`\nSealed. Carry both files from ${POUCH}/outbox/${THREAD}/ to the peer — by hand (Foreign Policy §1).`);
+    }
   } else if (args.has("--burst")) {
     banner("OUTBOUND · burst — the 24h window has three sends already");
     // Seed a full window deterministically, then attempt a fourth.
