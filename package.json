@@ -1,6 +1,6 @@
 {
   "name": "pulse",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "Process execution engine for the metafactory ecosystem",
   "type": "module",
   "main": "src/index.ts",
