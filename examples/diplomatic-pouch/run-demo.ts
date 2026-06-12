@@ -35,17 +35,29 @@ import { sha256Hex } from "./lib/borders";
 
 const argv = process.argv.slice(2);
 const args = new Set(argv);
-/** Read a `--flag <value>` pair from argv (undefined when absent or value-less). */
+/**
+ * Read a `--flag <value>` pair from argv. A flag present with no value (end of
+ * argv, or immediately followed by another `--flag`) is an error, not a silent
+ * fall-through to the default — `--note` with a forgotten path must not quietly
+ * seal the demo fixture.
+ */
 function flagValue(name: string): string | undefined {
   const i = argv.indexOf(name);
-  return i >= 0 && i + 1 < argv.length ? argv[i + 1] : undefined;
+  if (i < 0) return undefined;
+  const next = argv[i + 1];
+  if (next === undefined || next.startsWith("--")) {
+    console.error(`${name} requires a value`);
+    process.exit(1);
+  }
+  return next;
 }
 
 const interactive = args.has("--interactive");
 const PEER = "sumarhus";
 // --outbox / --note / --thread let a real note be sealed outside the example's
 // own pouch/ dir (e.g. ~/Desktop/pouch). Defaults preserve the demo behaviour.
-const POUCH = flagValue("--outbox") ? resolve(flagValue("--outbox")!) : join(import.meta.dir, "pouch");
+const OUTBOX_OVERRIDE = flagValue("--outbox");
+const POUCH = OUTBOX_OVERRIDE ? resolve(OUTBOX_OVERRIDE) : join(import.meta.dir, "pouch");
 const NOTE_OVERRIDE = flagValue("--note");
 const THREAD = flagValue("--thread") ?? "prompt-injection-containment";
 
