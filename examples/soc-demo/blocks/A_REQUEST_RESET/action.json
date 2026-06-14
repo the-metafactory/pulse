@@ -1,0 +1,24 @@
+{
+  "name": "A_REQUEST_RESET",
+  "version": "1.0.0",
+  "description": "Queue an IAM force-password-reset request for a resolved account (design §4). Input: account_owner (from A_RESOLVE_ACCOUNT_OWNER). Stub-safe: with no IAM creds it records a canned queued request (the demo stand-in for an IdP/IAM provisioning call) rather than performing a reset — the reset itself is a human/IAM action that belongs BEHIND a gate. Unknown owner ({ known: false }) yields { status: \"skipped\" }, never an error.",
+  "input": {
+    "account_owner": {
+      "type": "object",
+      "required": true
+    }
+  },
+  "output": {
+    "reset_request": {
+      "type": "object"
+    }
+  },
+  "requires": [],
+  "tags": [
+    "soc",
+    "demo",
+    "iam",
+    "remediation",
+    "offline"
+  ]
+}
