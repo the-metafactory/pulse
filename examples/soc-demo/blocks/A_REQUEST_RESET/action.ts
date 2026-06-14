@@ -30,12 +30,15 @@ export default {
     }
 
     const owner = account_owner as { account?: unknown; known?: unknown };
-    const account = typeof owner.account === "string" ? owner.account : null;
+    const account =
+      typeof owner.account === "string" && owner.account.trim().length > 0
+        ? owner.account.trim()
+        : null;
 
     const reset_request: ResetRequest =
       owner.known === true && account !== null
         ? { account, status: "queued", queued_ref: `IAM-RESET-${account}` }
-        : { account, status: "skipped", reason: "owner not resolved — cannot queue a reset" };
+        : { account, status: "skipped", reason: "owner not resolved (no account id) — cannot queue a reset" };
 
     return { ...payload, account_owner, reset_request };
   },

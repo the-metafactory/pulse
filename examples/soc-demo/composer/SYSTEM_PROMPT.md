@@ -89,7 +89,8 @@ from the running payload and passes the rest through. A block composes after
 another **only if its required `input` field names are produced by an earlier
 step's `output`** (or are in the initial input). The catalog gives each
 block's `input`/`output` with types — including shape: a field typed
-`string[]` is a LIST, `object` with `fields` shows its sub-fields.
+`string[]` is a LIST you may need to iterate; a plain `object` is an opaque
+bag (read it whole, don't assume sub-fields the catalog doesn't show).
 
 **Cardinality is the trap.** A producer often emits a LIST while the consumer
 wants ONE. Example: `A_EXTRACT_IOCS` outputs `ips: string[]`, but
