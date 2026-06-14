@@ -79,10 +79,10 @@ export function makeLocalLlmAgentProvider(llm: ComposerLLM): AgentProvider {
           tier: "smart",
         });
         // The provider returns the model's text under `AgentTaskResult.output`.
-        // The step-runner then stores the WHOLE result envelope under the
-        // agent's `collect` field (primitive-runner.ts) — so a downstream block
-        // reads `{ status, output, ... }`, with this text under `.output`, not
-        // a bare scalar. Stub-safe blocks tolerate the envelope.
+        // The step-runner stores that VALUE (result.output) under the agent's
+        // `collect` field (primitive-runner.ts, P-600) — so a downstream block
+        // reading a scalar (`collect: email` → A_FETCH_HIBP) gets the string
+        // directly, not an envelope.
         return {
           task_id: taskId,
           status: "completed",
@@ -100,6 +100,142 @@ export function makeLocalLlmAgentProvider(llm: ComposerLLM): AgentProvider {
       }
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Ollama agent provider — executes `agent:` steps on a LOCAL model
+// ---------------------------------------------------------------------------
+
+export interface OllamaProviderOpts {
+  /** Ollama model tag, e.g. "llama3.2:latest". Default: $PULSE_LOCAL_MODEL or "llama3.2:latest". */
+  model?: string;
+  /** Ollama base URL. Default: $OLLAMA_URL or "http://localhost:11434". */
+  url?: string;
+  /** Per-call deadline. Default 120_000ms — local models are slower than frontier. */
+  timeoutMs?: number;
+}
+
+/**
+ * Runs an `agent:` step's prompt against a LOCAL Ollama model — the data never
+ * leaves the host. This is the real backend for sovereignty-constrained steps
+ * (`model_class: local-only` / `frontier_ok: false`): confidential SOC triage
+ * runs here instead of a frontier model.
+ *
+ * Talks to Ollama's HTTP API directly (no SDK dependency). A failed/timed-out
+ * call surfaces as a failed task, never a throw that strands the pipeline.
+ */
+export function makeOllamaAgentProvider(opts: OllamaProviderOpts = {}): AgentProvider {
+  const model = opts.model ?? process.env.PULSE_LOCAL_MODEL ?? "llama3.2:latest";
+  const url = (opts.url ?? process.env.OLLAMA_URL ?? "http://localhost:11434").replace(/\/$/, "");
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  return {
+    async dispatch(spec: AgentTaskSpec, dispatchOpts): Promise<AgentTaskResult> {
+      const startedAt = Date.now();
+      const taskId = crypto.randomUUID();
+      dispatchOpts?.onDispatched?.({ task_id: taskId });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      // Cancel if the step-runner aborts the task (gate fail, parent abort).
+      dispatchOpts?.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+      try {
+        const res = await fetch(`${url}/api/generate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            model,
+            prompt: spec.prompt,
+            system:
+              "You are a SOC analyst agent executing one step of a security pipeline. " +
+              "Respond concisely with the requested assessment as plain text — no preamble.",
+            stream: false,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          return {
+            task_id: taskId,
+            status: "failed",
+            output: null,
+            error: `ollama ${model}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`,
+            duration_ms: Date.now() - startedAt,
+          };
+        }
+        const body = (await res.json()) as { response?: string };
+        return {
+          task_id: taskId,
+          status: "completed",
+          output: (body.response ?? "").trim(),
+          model,
+          duration_ms: Date.now() - startedAt,
+        };
+      } catch (err) {
+        return {
+          task_id: taskId,
+          status: "failed",
+          output: null,
+          error:
+            controller.signal.aborted && !(dispatchOpts?.signal?.aborted)
+              ? `ollama ${model}: timeout after ${timeoutMs}ms`
+              : err instanceof Error
+                ? err.message
+                : String(err),
+          duration_ms: Date.now() - startedAt,
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sovereign agent provider — route each task by its declared sovereignty
+// ---------------------------------------------------------------------------
+
+/**
+ * The honest version of fleet routing-by-sovereignty, in one box: a task whose
+ * sovereignty forbids the frontier (`model_class: "local-only"` or
+ * `frontier_ok: false`) goes to the `local` backend (Ollama); everything else
+ * goes to `frontier` (the composer LLM). This is what lets a flow the composer
+ * marked `local-only` actually EXECUTE — confidential steps on a local model,
+ * the rest on the frontier — instead of being refused.
+ *
+ * `frontier` keeps its own fail-closed guard (makeLocalLlmAgentProvider), so if
+ * a local-only task ever reached it by mistake it would refuse rather than
+ * leak — defense in depth, not the primary boundary.
+ */
+export function makeSovereignAgentProvider(backends: {
+  frontier: AgentProvider;
+  local: AgentProvider;
+}): AgentProvider {
+  return {
+    async dispatch(spec: AgentTaskSpec, dispatchOpts): Promise<AgentTaskResult> {
+      const sov = spec.sovereignty;
+      const mustStayLocal = sov?.model_class === "local-only" || sov?.frontier_ok === false;
+      const backend = mustStayLocal ? backends.local : backends.frontier;
+      return backend.dispatch(spec, dispatchOpts);
+    },
+  };
+}
+
+/**
+ * Resolve the agent provider from the environment — the one place the CLI and
+ * the Yarrow bot pack agree on routing:
+ *
+ *   PULSE_LOCAL_MODEL or OLLAMA_URL set → sovereign routing: `local-only`
+ *     steps run on Ollama, the rest on the frontier composer LLM, so a flow
+ *     the composer marked local-only EXECUTES end-to-end.
+ *   neither set → undefined; runScenario falls back to the frontier-only
+ *     provider, which fail-closes (refuses) local-only steps — the offline /
+ *     single-key default.
+ */
+export function resolveAgentProvider(llm: ComposerLLM): AgentProvider | undefined {
+  const localEnabled = Boolean(process.env.PULSE_LOCAL_MODEL || process.env.OLLAMA_URL);
+  if (!localEnabled) return undefined;
+  return makeSovereignAgentProvider({
+    frontier: makeLocalLlmAgentProvider(llm),
+    local: makeOllamaAgentProvider(),
+  });
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -286,7 +422,14 @@ if (import.meta.main) {
     ? (await createLocalCapabilities(["llm"])).llm!
     : (console.log("🤖 ANTHROPIC_API_KEY unset — stub composer LLM"), makeStubLLM());
 
-  const result = await runScenario(scenario, { llm, poster, gateProvider });
+  const agentProvider = resolveAgentProvider(llm);
+  if (agentProvider) console.log(`🧠 local model enabled (${process.env.PULSE_LOCAL_MODEL ?? "llama3.2:latest"}) — local-only steps route to Ollama`);
+  const result = await runScenario(scenario, {
+    llm,
+    poster,
+    gateProvider,
+    ...(agentProvider && { agentProvider }),
+  });
   console.log(`\n[run-demo] ${result.status}`);
   process.exit(result.status === "complete" || result.status === "no-match" ? 0 : 1);
 }

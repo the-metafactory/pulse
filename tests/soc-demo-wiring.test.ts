@@ -6,7 +6,16 @@
 
 import { describe, expect, test } from "bun:test";
 import type { ActionStepEvent, GateProvider } from "../src/types/pipeline";
-import { runScenario, stepLine, makeStubLLM, BLOCKS_DIR } from "../examples/soc-demo/run-demo";
+import {
+  runScenario,
+  stepLine,
+  makeStubLLM,
+  BLOCKS_DIR,
+  makeSovereignAgentProvider,
+  makeOllamaAgentProvider,
+  resolveAgentProvider,
+} from "../examples/soc-demo/run-demo";
+import type { AgentTaskSpec, AgentTaskResult } from "../src/types/agent";
 import { runPipeline } from "../src/lib/pipeline";
 import { validateSteps } from "../src/lib/step-runner";
 import { ConsolePoster, parseAckReply } from "../examples/soc-demo/lib/mm";
@@ -340,5 +349,95 @@ describe("runScenario — agent: step executes end-to-end (W-5)", () => {
     expect(collected).toBe("phishing");
     // per-step reply for the agent step posted
     expect(poster.posts.some((p) => p.includes("agent:classify") || p.includes("classify"))).toBe(true);
+  });
+});
+
+describe("makeSovereignAgentProvider — route by declared sovereignty (Option 1)", () => {
+  test("routes local-only tasks to the local backend, others to frontier", async () => {
+    const calls: string[] = [];
+    const mk = (label: string) => ({
+      async dispatch(spec: AgentTaskSpec): Promise<AgentTaskResult> {
+        calls.push(`${label}:${spec.capability}`);
+        return { task_id: "t", status: "completed" as const, output: label, duration_ms: 1 };
+      },
+    });
+    const provider = makeSovereignAgentProvider({ frontier: mk("frontier"), local: mk("local") });
+
+    await provider.dispatch({ capability: "a.localonly", prompt: "x", sovereignty: { model_class: "local-only" } });
+    await provider.dispatch({ capability: "b.nofrontier", prompt: "x", sovereignty: { frontier_ok: false } });
+    await provider.dispatch({ capability: "c.frontier", prompt: "x", sovereignty: { model_class: "frontier" } });
+    await provider.dispatch({ capability: "d.unset", prompt: "x" });
+
+    expect(calls).toEqual([
+      "local:a.localonly",
+      "local:b.nofrontier",
+      "frontier:c.frontier",
+      "frontier:d.unset",
+    ]);
+  });
+});
+
+describe("makeOllamaAgentProvider — local execution over Ollama HTTP", () => {
+  test("posts the prompt to /api/generate and returns the response text as output", async () => {
+    const realFetch = globalThis.fetch;
+    let seenUrl = "";
+    let seenBody: any = null;
+    globalThis.fetch = (async (url: string, init: any) => {
+      seenUrl = url;
+      seenBody = JSON.parse(init.body);
+      return new Response(JSON.stringify({ response: "  benign scanner  " }), { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      const provider = makeOllamaAgentProvider({ model: "llama3.2:latest", url: "http://localhost:11434" });
+      const r = await provider.dispatch({ capability: "soc.triage", prompt: "classify 1.2.3.4" });
+      expect(seenUrl).toBe("http://localhost:11434/api/generate");
+      expect(seenBody.model).toBe("llama3.2:latest");
+      expect(seenBody.prompt).toContain("1.2.3.4");
+      expect(seenBody.stream).toBe(false);
+      expect(r.status).toBe("completed");
+      expect(r.output).toBe("benign scanner"); // trimmed
+      expect(r.model).toBe("llama3.2:latest");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test("a non-OK response yields a failed task, not a throw", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("model not found", { status: 404 })) as unknown as typeof fetch;
+    try {
+      const provider = makeOllamaAgentProvider({ model: "absent:latest" });
+      const r = await provider.dispatch({ capability: "x", prompt: "y" });
+      expect(r.status).toBe("failed");
+      expect(r.error).toContain("404");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe("resolveAgentProvider — env-gated routing", () => {
+  test("returns undefined when no local model is configured (frontier-only default)", () => {
+    const prevModel = process.env.PULSE_LOCAL_MODEL;
+    const prevUrl = process.env.OLLAMA_URL;
+    delete process.env.PULSE_LOCAL_MODEL;
+    delete process.env.OLLAMA_URL;
+    try {
+      expect(resolveAgentProvider(makeStubLLM())).toBeUndefined();
+    } finally {
+      if (prevModel !== undefined) process.env.PULSE_LOCAL_MODEL = prevModel;
+      if (prevUrl !== undefined) process.env.OLLAMA_URL = prevUrl;
+    }
+  });
+
+  test("returns a sovereign provider when PULSE_LOCAL_MODEL is set", () => {
+    const prev = process.env.PULSE_LOCAL_MODEL;
+    process.env.PULSE_LOCAL_MODEL = "llama3.2:latest";
+    try {
+      expect(resolveAgentProvider(makeStubLLM())).toBeDefined();
+    } finally {
+      if (prev === undefined) delete process.env.PULSE_LOCAL_MODEL;
+      else process.env.PULSE_LOCAL_MODEL = prev;
+    }
   });
 });
