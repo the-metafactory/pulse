@@ -18,6 +18,7 @@
  */
 
 import type { ActionContext } from "../../../src/types/action";
+import { parseCollectedValue } from "../parse-collected";
 
 interface Finding {
   id?: string;
@@ -49,11 +50,8 @@ export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { review, ...payload } = input;
     // `review` is the agent step's RESULT VALUE (collect stores result.output,
-    // not the transport envelope). It's either the structured object or a JSON
-    // string the agent emitted — tolerate both.
-    const out = (typeof review === "string"
-      ? JSON.parse(review)
-      : review) as ReviewOutput | undefined;
+    // not the transport envelope) — structured object or JSON string.
+    const out = parseCollectedValue<ReviewOutput>(review);
 
     const verdict = out?.verdict ?? "approved";
     const findings = Array.isArray(out?.findings) ? out!.findings! : [];

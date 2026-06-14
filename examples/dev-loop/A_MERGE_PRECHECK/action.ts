@@ -19,6 +19,7 @@
  */
 
 import type { ActionContext } from "../../../src/types/action";
+import { parseCollectedValue } from "../parse-collected";
 
 interface ImplementOutput {
   pr?: number;
@@ -40,9 +41,7 @@ export default {
 
     // `implement` is the agent step's RESULT VALUE (collect stores result.output,
     // not the transport envelope) — structured object or JSON string.
-    const implOut = (typeof implement === "string"
-      ? JSON.parse(implement)
-      : implement) as ImplementOutput | undefined;
+    const implOut = parseCollectedValue<ImplementOutput>(implement);
     const pr = implOut?.pr;
 
     // Offline / dry-run default: no live GH read → assume clean.
