@@ -1,7 +1,7 @@
 {
   "name": "A_EXTRACT_IOCS",
   "version": "1.0.0",
-  "description": "Deterministic, defang-aware IOC extraction (design §4 D-only counterpart to agentic triage). Input: text. Refangs (hxxp→http, [.]/(.)/{.}→.) then pulls URLs, IPv4s (octets validated ≤255), domains, and MD5/SHA1/SHA256 hashes — deduped. Domains inside extracted URLs are also listed under domains. Fully offline, no network ever.",
+  "description": "Deterministic, defang-aware IOC extraction (design \u00a74 D-only counterpart to agentic triage). Input: text. Refangs (hxxp\u2192http, [.]/(.)/{.}\u2192.) then pulls URLs, IPv4s (octets validated \u2264255), domains, and MD5/SHA1/SHA256 hashes \u2014 deduped. Domains inside extracted URLs are also listed under domains. Fully offline, no network ever.",
   "input": {
     "text": {
       "type": "string",
@@ -10,13 +10,7 @@
   },
   "output": {
     "iocs": {
-      "type": "object",
-      "fields": {
-        "ips": "string[]",
-        "domains": "string[]",
-        "hashes": "string[]",
-        "urls": "string[]"
-      }
+      "type": "object"
     },
     "ips": {
       "type": "string[]"

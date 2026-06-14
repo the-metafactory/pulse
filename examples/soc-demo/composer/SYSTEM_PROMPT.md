@@ -65,7 +65,7 @@ Keep flows 3–7 steps. Prefer a `gate:` before any outward-facing action
 A plain block is a **bare string** (its name). `agent:` and `gate:` are
 **mapping objects** under `actions:`. There is **NO `block:`, `with:`,
 `uses:`, `id:`, `type:`, `step:`, or `input:` key** — emitting any of those
-is the #1 cause of a rejected flow. Copy these shapes verbatim:
+is a common cause of a rejected flow. Copy these shapes verbatim:
 
 ```yaml
 name: F_EXAMPLE
