@@ -133,10 +133,19 @@ export function makeOllamaAgentProvider(opts: OllamaProviderOpts = {}): AgentPro
       const startedAt = Date.now();
       const taskId = crypto.randomUUID();
       dispatchOpts?.onDispatched?.({ task_id: taskId });
+      const fail = (error: string): AgentTaskResult => ({
+        task_id: taskId,
+        status: "failed",
+        output: null,
+        error,
+        duration_ms: Date.now() - startedAt,
+      });
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      // Cancel if the step-runner aborts the task (gate fail, parent abort).
-      dispatchOpts?.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+      // Cancel if the step-runner aborts the task (gate fail, parent abort) —
+      // honour a signal that is ALREADY aborted before we subscribe, too.
+      if (dispatchOpts?.signal?.aborted) controller.abort();
+      else dispatchOpts?.signal?.addEventListener("abort", () => controller.abort(), { once: true });
       try {
         const res = await fetch(`${url}/api/generate`, {
           method: "POST",
@@ -152,13 +161,7 @@ export function makeOllamaAgentProvider(opts: OllamaProviderOpts = {}): AgentPro
           signal: controller.signal,
         });
         if (!res.ok) {
-          return {
-            task_id: taskId,
-            status: "failed",
-            output: null,
-            error: `ollama ${model}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`,
-            duration_ms: Date.now() - startedAt,
-          };
+          return fail(`ollama ${model}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
         }
         const body = (await res.json()) as { response?: string };
         return {
@@ -169,18 +172,13 @@ export function makeOllamaAgentProvider(opts: OllamaProviderOpts = {}): AgentPro
           duration_ms: Date.now() - startedAt,
         };
       } catch (err) {
-        return {
-          task_id: taskId,
-          status: "failed",
-          output: null,
-          error:
-            controller.signal.aborted && !(dispatchOpts?.signal?.aborted)
-              ? `ollama ${model}: timeout after ${timeoutMs}ms`
-              : err instanceof Error
-                ? err.message
-                : String(err),
-          duration_ms: Date.now() - startedAt,
-        };
+        return fail(
+          controller.signal.aborted && !dispatchOpts?.signal?.aborted
+            ? `ollama ${model}: timeout after ${timeoutMs}ms`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
       } finally {
         clearTimeout(timer);
       }
@@ -219,8 +217,9 @@ export function makeSovereignAgentProvider(backends: {
 }
 
 /**
- * Resolve the agent provider from the environment — the one place the CLI and
- * the Yarrow bot pack agree on routing:
+ * Resolve the agent provider from the environment. The CLI and the rehearsal
+ * harness both call this; the Yarrow bot pack is INTENDED to call it too once
+ * its handler is wired (follow-up — not in this change).
  *
  *   PULSE_LOCAL_MODEL or OLLAMA_URL set → sovereign routing: `local-only`
  *     steps run on Ollama, the rest on the frontier composer LLM, so a flow

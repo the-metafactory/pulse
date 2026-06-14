@@ -414,6 +414,29 @@ describe("makeOllamaAgentProvider — local execution over Ollama HTTP", () => {
       globalThis.fetch = realFetch;
     }
   });
+
+  test("an already-aborted signal short-circuits — no fetch is made", async () => {
+    const realFetch = globalThis.fetch;
+    let fetched = false;
+    globalThis.fetch = (async (_u: string, init: any) => {
+      fetched = true;
+      // Honour the abort the way real fetch would.
+      if (init?.signal?.aborted) throw new Error("aborted");
+      return new Response(JSON.stringify({ response: "x" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    try {
+      const provider = makeOllamaAgentProvider({ model: "llama3.2:latest" });
+      const r = await provider.dispatch(
+        { capability: "x", prompt: "y" },
+        { signal: AbortSignal.abort() },
+      );
+      // fetch is still invoked but with an aborted signal → it rejects → failed.
+      expect(r.status).toBe("failed");
+      expect(fetched).toBe(true);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
 });
 
 describe("resolveAgentProvider — env-gated routing", () => {

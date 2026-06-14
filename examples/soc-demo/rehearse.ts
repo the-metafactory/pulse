@@ -13,7 +13,7 @@
 
 import { createLocalCapabilities } from "../../src/lib/capabilities";
 import type { GateProvider } from "../../src/types/pipeline";
-import { runScenario, makeStubLLM } from "./run-demo";
+import { runScenario, makeStubLLM, resolveAgentProvider } from "./run-demo";
 import { ConsolePoster } from "./lib/mm";
 
 const SCENARIOS: Array<{ id: number; name: string; text: string }> = [
@@ -38,13 +38,24 @@ const useRealLlm = Boolean(process.env.ANTHROPIC_API_KEY);
 const llm = useRealLlm ? (await createLocalCapabilities(["llm"])).llm! : makeStubLLM();
 console.log(`Rehearsal: ${useRealLlm ? "REAL composer LLM" : "stub LLM (wiring smoke only — set ANTHROPIC_API_KEY for the true rehearsal)"}\n`);
 
+// Honor sovereign routing: with PULSE_LOCAL_MODEL/OLLAMA_URL set, local-only
+// agent steps run on Ollama instead of being refused (matches the CLI + Yarrow).
+const agentProvider = resolveAgentProvider(llm);
+if (agentProvider) console.log(`🧠 local model enabled (${process.env.PULSE_LOCAL_MODEL ?? "llama3.2:latest"}) — local-only steps route to Ollama\n`);
+
 const rows: string[] = [];
 for (const scenario of SCENARIOS) {
   console.log(`\n━━━ Scenario ${scenario.id}: ${scenario.name} ━━━`);
   const poster = new ConsolePoster();
   const started = Date.now();
   try {
-    const result = await runScenario(scenario.text, { llm, poster, gateProvider: autoAck, render: false });
+    const result = await runScenario(scenario.text, {
+      llm,
+      poster,
+      gateProvider: autoAck,
+      render: false,
+      ...(agentProvider && { agentProvider }),
+    });
     const secs = ((Date.now() - started) / 1000).toFixed(1);
     const steps = poster.posts.filter((p) => p.startsWith("✅")).length;
     rows.push(`| ${scenario.id} | ${scenario.name} | ${result.status} | ${steps} | ${secs}s |`);
