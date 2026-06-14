@@ -862,8 +862,15 @@ async function runAgent(
     durationMs: Date.now() - stepStart,
   });
 
+  // Store the agent's RESULT VALUE under the collect field — not the transport
+  // envelope. This matches map/filter/reduce collect (which store values) so a
+  // downstream block reading a scalar (`collect: email` → A_FETCH_HIBP) gets the
+  // value directly. Transport metadata (task_id, duration, error) is not lost —
+  // it travels on the onAgentEvent stream (agent.dispatched/completed/failed),
+  // and a failed task recordAndThrow()s above before reaching here, so on this
+  // path result.status is always "completed".
   const collectField = spec.collect ?? `agent_${spec.name}`;
-  return { ...payload, [collectField]: result };
+  return { ...payload, [collectField]: result.output };
 }
 
 // ---------------------------------------------------------------------------

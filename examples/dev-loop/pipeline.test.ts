@@ -94,13 +94,14 @@ describe("dev-loop pipeline.yaml — happy-path round-trip", () => {
 
     // Every stage left its mark on the accumulated payload.
     const out = result.output as Record<string, any>;
-    expect(out.implement.output.pr).toBe(542);
+    // collect now stores the agent's RESULT VALUE directly (not the envelope).
+    expect(out.implement.pr).toBe(542);
     expect(out.disposition.proceed).toBe(true);
     expect(out.disposition.counts.total).toBe(0);
     expect(out.precheck.ok).toBe(true);
-    expect(out.approve.output.merged).toBe(true);
+    expect(out.approve.merged).toBe(true);
     expect(out.release_decision.verdict).toBe("pass");
-    expect(out.release.output.version).toBe("v0.9.0");
+    expect(out.release.version).toBe("v0.9.0");
 
     // The fleet was asked for exactly the four capabilities, in order.
     expect(provider.dispatched.map((d) => d.capability)).toEqual([

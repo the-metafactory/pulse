@@ -1,7 +1,7 @@
 /**
  * A_DISPOSITION — deterministic triage of code-review findings.
  *
- * Reads the `code-review.*` agent step's verdict block (an AgentTaskResult)
+ * Reads the `code-review.*` agent step's collected result value (ReviewOutput)
  * and classifies each finding into:
  *   - fix-small  → cheap, in-cycle correction the dev agent re-implements
  *   - defer-big  → architectural / scope-expanding; file a follow-up issue
@@ -18,7 +18,6 @@
  */
 
 import type { ActionContext } from "../../../src/types/action";
-import type { AgentTaskResult } from "../../../src/types/agent";
 
 interface Finding {
   id?: string;
@@ -49,10 +48,12 @@ function isFixSmall(f: Finding): boolean {
 export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { review, ...payload } = input;
-    const result = review as AgentTaskResult;
-    const out = (typeof result?.output === "string"
-      ? JSON.parse(result.output)
-      : result?.output) as ReviewOutput | undefined;
+    // `review` is the agent step's RESULT VALUE (collect stores result.output,
+    // not the transport envelope). It's either the structured object or a JSON
+    // string the agent emitted — tolerate both.
+    const out = (typeof review === "string"
+      ? JSON.parse(review)
+      : review) as ReviewOutput | undefined;
 
     const verdict = out?.verdict ?? "approved";
     const findings = Array.isArray(out?.findings) ? out!.findings! : [];

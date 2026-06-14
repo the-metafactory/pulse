@@ -19,7 +19,6 @@
  */
 
 import type { ActionContext } from "../../../src/types/action";
-import type { AgentTaskResult } from "../../../src/types/agent";
 
 interface ImplementOutput {
   pr?: number;
@@ -39,10 +38,11 @@ export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { implement, merge_state, ...payload } = input;
 
-    const impl = implement as AgentTaskResult;
-    const implOut = (typeof impl?.output === "string"
-      ? JSON.parse(impl.output)
-      : impl?.output) as ImplementOutput | undefined;
+    // `implement` is the agent step's RESULT VALUE (collect stores result.output,
+    // not the transport envelope) — structured object or JSON string.
+    const implOut = (typeof implement === "string"
+      ? JSON.parse(implement)
+      : implement) as ImplementOutput | undefined;
     const pr = implOut?.pr;
 
     // Offline / dry-run default: no live GH read → assume clean.
