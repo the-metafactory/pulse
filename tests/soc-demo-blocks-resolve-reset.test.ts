@@ -7,11 +7,12 @@
 
 import { describe, expect, test } from "bun:test";
 import { ctxWith } from "./helpers/soc-demo-test-helpers";
+import resolveOwner from "../examples/soc-demo/blocks/A_RESOLVE_ACCOUNT_OWNER/action";
+import requestReset from "../examples/soc-demo/blocks/A_REQUEST_RESET/action";
 
 describe("A_RESOLVE_ACCOUNT_OWNER", () => {
   test("known email: resolves account/ou/contact, passthrough preserved", async () => {
-    const mod = await import("../examples/soc-demo/blocks/A_RESOLVE_ACCOUNT_OWNER/action");
-    const r = (await mod.default.execute({ email: "test@example.org", case_id: "c1" }, ctxWith())) as Record<string, any>;
+    const r = (await resolveOwner.execute({ email: "test@example.org", case_id: "c1" }, ctxWith())) as Record<string, any>;
     expect(r.account_owner.known).toBe(true);
     expect(r.account_owner.account).toBe("u-1041");
     expect(r.account_owner.ou).toContain("Member-University-A");
@@ -19,22 +20,19 @@ describe("A_RESOLVE_ACCOUNT_OWNER", () => {
   });
 
   test("unknown email: known false, account null, never throws", async () => {
-    const mod = await import("../examples/soc-demo/blocks/A_RESOLVE_ACCOUNT_OWNER/action");
-    const r = (await mod.default.execute({ email: "nobody@nowhere.example" }, ctxWith())) as Record<string, any>;
+    const r = (await resolveOwner.execute({ email: "nobody@nowhere.example" }, ctxWith())) as Record<string, any>;
     expect(r.account_owner.known).toBe(false);
     expect(r.account_owner.account).toBeNull();
   });
 
   test("missing email throws (required scalar)", async () => {
-    const mod = await import("../examples/soc-demo/blocks/A_RESOLVE_ACCOUNT_OWNER/action");
-    await expect(mod.default.execute({}, ctxWith())).rejects.toThrow(/email/);
+    await expect(resolveOwner.execute({}, ctxWith())).rejects.toThrow(/email/);
   });
 });
 
 describe("A_REQUEST_RESET", () => {
   test("resolved owner: queues a reset with a ref", async () => {
-    const mod = await import("../examples/soc-demo/blocks/A_REQUEST_RESET/action");
-    const r = (await mod.default.execute(
+    const r = (await requestReset.execute(
       { account_owner: { account: "u-1041", known: true }, case_id: "c2" },
       ctxWith(),
     )) as Record<string, any>;
@@ -44,8 +42,7 @@ describe("A_REQUEST_RESET", () => {
   });
 
   test("unresolved owner: skipped, never throws", async () => {
-    const mod = await import("../examples/soc-demo/blocks/A_REQUEST_RESET/action");
-    const r = (await mod.default.execute(
+    const r = (await requestReset.execute(
       { account_owner: { account: null, known: false } },
       ctxWith(),
     )) as Record<string, any>;
@@ -53,7 +50,6 @@ describe("A_REQUEST_RESET", () => {
   });
 
   test("missing account_owner throws (required object)", async () => {
-    const mod = await import("../examples/soc-demo/blocks/A_REQUEST_RESET/action");
-    await expect(mod.default.execute({}, ctxWith())).rejects.toThrow(/account_owner/);
+    await expect(requestReset.execute({}, ctxWith())).rejects.toThrow(/account_owner/);
   });
 });

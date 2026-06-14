@@ -39,14 +39,15 @@ interface AccountOwner {
 export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { email, ...payload } = input;
-    if (typeof email !== "string" || email.length === 0) {
+    const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+    if (normalizedEmail.length === 0) {
       throw new Error("A_RESOLVE_ACCOUNT_OWNER: email must be a non-empty string");
     }
 
-    const hit = DIRECTORY[email.trim().toLowerCase()];
+    const hit = DIRECTORY[normalizedEmail];
     const account_owner: AccountOwner = hit
-      ? { email, account: hit.account, ou: hit.ou, contact: hit.contact, known: true }
-      : { email, account: null, ou: "unknown", contact: null, known: false };
+      ? { email: normalizedEmail, account: hit.account, ou: hit.ou, contact: hit.contact, known: true }
+      : { email: normalizedEmail, account: null, ou: "unknown", contact: null, known: false };
 
     return { ...payload, account_owner };
   },
