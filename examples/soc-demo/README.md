@@ -13,7 +13,7 @@ artifact lands in-thread. Target: ~2 minutes ack → artifact.
 
 | Piece | File | Role |
 |---|---|---|
-| Block palette | `blocks/` (19 blocks) | Stub-safe building blocks — every external adapter returns canned fixtures when its env key is unset |
+| Block palette | `blocks/` (21 blocks) | Stub-safe building blocks — every external adapter returns canned fixtures when its env key is unset |
 | Validator | `lib/validate-pipeline.ts` + `blocks/A_VALIDATE_FLOW/` | Deterministic compose→execute gate: catalog-is-truth, required inputs, sovereignty annotations |
 | Catalog | `lib/catalog.ts` + `tools/catalog.ts` | `action.json` scan; the composer prompt's source of truth |
 | Composer | `composer/compose.ts` + `composer/SYSTEM_PROMPT.md` | scenario + catalog + LLM → `{ yaml, mermaid, summary }`; validator-retry loop (max 2) → closest-match fallback |
