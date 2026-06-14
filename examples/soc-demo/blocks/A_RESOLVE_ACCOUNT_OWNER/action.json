@@ -1,7 +1,7 @@
 {
   "name": "A_RESOLVE_ACCOUNT_OWNER",
   "version": "1.0.0",
-  "description": "Offline email \u2192 account owner (the IAM/directory adapter, design \u00a74). Input: email. Resolves against an embedded directory fixture mapping demo addresses to an account id, responsible OU, and contact. Unknown emails return { known: false } rather than throwing \u2014 fully offline, no network ever. Pairs with A_FETCH_HIBP (email in) and feeds A_REQUEST_RESET (and any downstream ticket/notification step).",
+  "description": "Offline email \u2192 account owner (the IAM/directory adapter; a stub-safe addition closing the credential-leak gap). Input: email. Resolves against an embedded directory fixture mapping demo addresses to an account id, responsible OU, and contact. Unknown emails return { known: false } rather than throwing \u2014 fully offline, no network ever. Pairs with A_FETCH_HIBP (email in) and feeds A_REQUEST_RESET (and any downstream ticket/notification step).",
   "input": {
     "email": {
       "type": "string",

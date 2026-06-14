@@ -1,12 +1,12 @@
 /**
  * A_RESOLVE_ACCOUNT_OWNER — offline email → account owner (IAM/directory adapter).
  *
- * D-class block (design/soc-demo-mm-composer.md §4): resolves an email address
+ * D-class block (a stub-safe addition closing the credential-leak catalog gap): resolves an email address
  * against an embedded directory fixture — the demo stand-in for a real
  * IAM/LDAP. No env, no network, no capabilities — pure and offline. An unknown
  * address is a documented result ({ known: false, account: null }), never an
  * error: not knowing who owns an address is a normal outcome the downstream
- * flow (a gate, then A_REQUEST_RESET) must handle, not a crash.
+ * pipeline (a gate, then A_REQUEST_RESET) must handle, not a crash.
  *
  * Closes the catalog gap the real-LLM composer flagged on credential-leak
  * scenarios ("no email→owner resolver"): A_FETCH_HIBP emits `email`; this
