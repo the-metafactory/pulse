@@ -7,6 +7,8 @@
 import { describe, expect, test } from "bun:test";
 import type { ActionStepEvent, GateProvider } from "../src/types/pipeline";
 import { runScenario, stepLine, makeStubLLM, BLOCKS_DIR } from "../examples/soc-demo/run-demo";
+import { runPipeline } from "../src/lib/pipeline";
+import { validateSteps } from "../src/lib/step-runner";
 import { ConsolePoster, parseAckReply } from "../examples/soc-demo/lib/mm";
 import type { StepAnnotation } from "../examples/soc-demo/lib/validate-pipeline";
 
@@ -194,6 +196,44 @@ describe("gate security (sage round 2)", () => {
         if (saved[k] === undefined) delete process.env[k];
         else process.env[k] = saved[k];
       }
+    }
+  });
+});
+
+describe("map bridge — collection→scalar enrichment (W-5 slice 1, cortex#1040 design)", () => {
+  test("A_EXTRACT_IOCS emits top-level ips[]; map binds `ip` per item into a scalar enricher", async () => {
+    // Deterministic RUNTIME proof (no LLM, no validator surrogate): the prompt
+    // teaches `map over: ips as: ip [A_LOOKUP_GEOIP_ASN]`. Execute exactly that
+    // and assert the enricher actually RAN once per extracted IP with the
+    // bound scalar — i.e. the as→scalar contract holds at runtime, which is
+    // where it's enforced (the static validator only declines to reject it).
+    const steps = validateSteps([
+      "A_EXTRACT_IOCS",
+      {
+        map: {
+          over: "ips",
+          as: "ip",
+          collect: "ip_enrichment",
+          actions: ["A_LOOKUP_GEOIP_ASN"],
+        },
+      },
+    ]);
+    const text = "logins from 198.51.100.7 and 203.0.113.9 looked off";
+    const result = await runPipeline(
+      { name: "F_MAP_PROOF", actions: steps },
+      { text },
+      { actionDirs: [BLOCKS_DIR] },
+    );
+    expect(result.success).toBe(true);
+    const out = result.output as { ips?: string[]; ip_enrichment?: unknown[] };
+    // Top-level typed array is present (the shape the prompt advertises).
+    expect(out.ips).toEqual(["198.51.100.7", "203.0.113.9"]);
+    // The enricher ran once per IP — proving `as: ip` fed each scalar run.
+    expect(Array.isArray(out.ip_enrichment)).toBe(true);
+    expect(out.ip_enrichment).toHaveLength(2);
+    // Each collected result carries the geoip the scalar enricher produces.
+    for (const entry of out.ip_enrichment as Array<Record<string, unknown>>) {
+      expect(entry.geoip).toBeDefined();
     }
   });
 });

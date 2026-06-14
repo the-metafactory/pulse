@@ -109,9 +109,10 @@ work in a **`map`** (the collection→scalar adapter):
 ```
 
 `over` must name a **top-level array field** (e.g. `ips`, `domains`, `hashes`),
-not a dotted path. Inside the `map`, the `as` name (`ip`) satisfies the
-enrichers' scalar input. Use `map` whenever a scalar-input block must run over
-a list; use a bare block when the field shapes already line up one-to-one.
+not a dotted path. At run time the `map` binds the `as` name (`ip`) into each
+sub-run's payload, so a scalar-input block inside it reads that one value per
+item. Use `map` whenever a scalar-input block must run over a list; use a bare
+block when the field shapes already line up one-to-one.
 
 ## Installed block catalog
 
