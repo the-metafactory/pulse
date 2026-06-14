@@ -333,14 +333,11 @@ describe("runScenario — agent: step executes end-to-end (W-5)", () => {
     });
     expect(result.status).toBe("complete");
     expect(agentRan).toBe(true); // the agent: step actually dispatched
-    // The collect field carries the FULL AgentTaskResult envelope (framework
-    // contract, primitive-runner.ts), not the bare output — a downstream reader
-    // sees `{ status, output, ... }`, with the model's text under `.output`.
-    const collected = (result as { output?: Record<string, unknown> }).output?.classification as
-      | { status?: string; output?: unknown }
-      | undefined;
-    expect(collected?.status).toBe("completed");
-    expect(collected?.output).toBe("phishing");
+    // collect stores the agent's RESULT VALUE (result.output), not the transport
+    // envelope — so a downstream block reading `classification` gets the model's
+    // text directly. This is what lets `collect: email` → A_FETCH_HIBP work.
+    const collected = (result as { output?: Record<string, unknown> }).output?.classification;
+    expect(collected).toBe("phishing");
     // per-step reply for the agent step posted
     expect(poster.posts.some((p) => p.includes("agent:classify") || p.includes("classify"))).toBe(true);
   });

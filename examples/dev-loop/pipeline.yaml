@@ -74,7 +74,7 @@ actions:
       name: review
       capability: code-review.typescript
       prompt: |
-        Review PR {implement.output.pr} for slice {slice.id}.
+        Review PR {implement.pr} for slice {slice.id}.
         Run the full multi-lens review. Post findings to GitHub as a PR review.
         Return a verdict: approved | changes-requested, with the findings list
         classified by severity.
@@ -88,7 +88,7 @@ actions:
 
   # 3. D — disposition. Deterministic classification of the review findings:
   #    fix-small (cheap, in-cycle) vs defer-big (file a follow-up issue). This is
-  #    a PURE-DATA classifier — it reads review.output and emits a plan; it does
+  #    a PURE-DATA classifier — it reads the `review` value and emits a plan; it does
   #    NOT itself branch the pipeline (the engine has no conditional — gap G2).
   - A_DISPOSITION
 
@@ -116,7 +116,7 @@ actions:
       name: approve
       capability: merge.approve
       prompt: |
-        Independent merge gate for PR {implement.output.pr}, slice {slice.id}.
+        Independent merge gate for PR {implement.pr}, slice {slice.id}.
         Run the five checks (CI green, MERGEABLE, reviewer-identity matches the
         review verdict, base-branch is main, head-SHA is fresh). If all pass,
         squash-merge. Return the merge result + merge SHA.
@@ -135,7 +135,7 @@ actions:
   - gate:
       name: release-decision
       prompt: >-
-        Slice {slice.id} merged (PR {implement.output.pr}). Iteration complete.
+        Slice {slice.id} merged (PR {implement.pr}). Iteration complete.
         Cut the release now? verdict=pass to release, verdict=fail to hold.
       collect: release_decision
 

@@ -94,13 +94,14 @@ describe("dev-loop pipeline.yaml — happy-path round-trip", () => {
 
     // Every stage left its mark on the accumulated payload.
     const out = result.output as Record<string, any>;
-    expect(out.implement.output.pr).toBe(542);
+    // collect now stores the agent's RESULT VALUE directly (not the envelope).
+    expect(out.implement.pr).toBe(542);
     expect(out.disposition.proceed).toBe(true);
     expect(out.disposition.counts.total).toBe(0);
     expect(out.precheck.ok).toBe(true);
-    expect(out.approve.output.merged).toBe(true);
+    expect(out.approve.merged).toBe(true);
     expect(out.release_decision.verdict).toBe("pass");
-    expect(out.release.output.version).toBe("v0.9.0");
+    expect(out.release.version).toBe("v0.9.0");
 
     // The fleet was asked for exactly the four capabilities, in order.
     expect(provider.dispatched.map((d) => d.capability)).toEqual([
@@ -172,6 +173,30 @@ describe("dev-loop pipeline.yaml — happy-path round-trip", () => {
     expect(d.counts.defer_big).toBe(2); // A (absent flag) + D (no severity)
     expect(d.fix_small.map((f: any) => f.id).sort()).toEqual(["B", "C"]);
     expect(d.defer_big.map((f: any) => f.id).sort()).toEqual(["A", "D"]);
+  });
+
+  test("A_DISPOSITION fails closed on a malformed/unparseable review (no auto-approve)", async () => {
+    // A review that doesn't parse to a structured verdict must NOT greenlight.
+    // Regression guard: collect now stores the raw agent value, so a bare
+    // string review parses to undefined — that must be "not cleared", never
+    // a defaulted "approved" (fail-open).
+    const provider = new MockAgentProvider({
+      "dev.implement": { pr: 548, head_sha: "ddd" },
+      "code-review.typescript": "looks fine to me", // bare string → unparseable
+      "merge.approve": { merged: true },
+      "release.cut": { version: "v0.9.6" },
+    });
+
+    const result = await runPipelineFromYaml(
+      YAML,
+      { slice: { id: "C-901.7", issue_ref: "x", design_ref: "y", branch: "b", gates: "g" } },
+      { agentProvider: provider, gateProvider: new AutoGateProvider() },
+    );
+
+    expect(result.success).toBe(true);
+    const d = (result.output as Record<string, any>).disposition;
+    expect(d.verdict).toBe("no-review"); // not "approved"
+    expect(d.proceed).toBe(false); // fail-closed: no explicit approval
   });
 
   test("A_MERGE_PRECHECK emits ok=false and reason on CI failure", async () => {

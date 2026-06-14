@@ -1,7 +1,7 @@
 /**
  * A_DISPOSITION — deterministic triage of code-review findings.
  *
- * Reads the `code-review.*` agent step's verdict block (an AgentTaskResult)
+ * Reads the `code-review.*` agent step's collected result value (ReviewOutput)
  * and classifies each finding into:
  *   - fix-small  → cheap, in-cycle correction the dev agent re-implements
  *   - defer-big  → architectural / scope-expanding; file a follow-up issue
@@ -18,7 +18,7 @@
  */
 
 import type { ActionContext } from "../../../src/types/action";
-import type { AgentTaskResult } from "../../../src/types/agent";
+import { parseCollectedValue } from "../parse-collected";
 
 interface Finding {
   id?: string;
@@ -49,12 +49,15 @@ function isFixSmall(f: Finding): boolean {
 export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { review, ...payload } = input;
-    const result = review as AgentTaskResult;
-    const out = (typeof result?.output === "string"
-      ? JSON.parse(result.output)
-      : result?.output) as ReviewOutput | undefined;
+    // `review` is the agent step's RESULT VALUE (collect stores result.output,
+    // not the agent task result record) — structured object or JSON string.
+    const out = parseCollectedValue<ReviewOutput>(review);
 
-    const verdict = out?.verdict ?? "approved";
+    // Fail-closed: only an EXPLICIT "approved" verdict greenlights. A missing
+    // or malformed review (out === undefined) is "no-review" and a present
+    // review with no verdict is treated as changes-requested — neither
+    // auto-advances. proceed is keyed on the explicit verdict, never a default.
+    const verdict = out?.verdict ?? (out === undefined ? "no-review" : "changes-requested");
     const findings = Array.isArray(out?.findings) ? out!.findings! : [];
 
     const fixSmall = findings.filter(isFixSmall);
@@ -62,10 +65,10 @@ export default {
 
     const disposition = {
       verdict,
-      // proceed=true means review cleared (or no actionable findings).
+      // proceed=true means review cleared (explicit "approved", no fix-small).
       // The driver uses this to decide fix-cycle vs advance — pulse cannot
       // branch on it (gap G2). proceed is advisory data, not control flow.
-      proceed: verdict === "approved" && fixSmall.length === 0,
+      proceed: out?.verdict === "approved" && fixSmall.length === 0,
       fix_small: fixSmall.map((f) => ({ id: f.id, severity: f.severity, summary: f.summary })),
       defer_big: deferBig.map((f) => ({ id: f.id, severity: f.severity, summary: f.summary })),
       counts: { fix_small: fixSmall.length, defer_big: deferBig.length, total: findings.length },

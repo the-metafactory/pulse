@@ -53,9 +53,10 @@ describe("agent step", () => {
     const result = await runSteps(steps, { email: "click here", keep: 1 }, options({ agentProvider: provider }));
 
     expect(provider.dispatched[0].prompt).toBe("Analyze: click here");
-    const collected = result.agent_triage as AgentTaskResult;
-    expect(collected.status).toBe("completed");
-    expect(collected.output).toEqual({ verdict: "phishing", confidence: 0.95 });
+    // collect stores the agent's RESULT VALUE (result.output), not the transport
+    // envelope — consistent with map/filter/reduce. Status/task_id/duration
+    // travel on the onAgentEvent stream, not the data payload.
+    expect(result.agent_triage).toEqual({ verdict: "phishing", confidence: 0.95 });
     expect(result.keep).toBe(1); // passthrough preserved
   });
 
@@ -65,7 +66,7 @@ describe("agent step", () => {
       { agent: { name: "triage", capability: "soc.triage.email", prompt: "x", collect: "triage" } },
     ];
     const result = await runSteps(steps, {}, options({ agentProvider: provider }));
-    expect((result.triage as AgentTaskResult).output).toBe("ok");
+    expect(result.triage).toBe("ok");
   });
 
   test("sovereignty constraints are forwarded to the provider", async () => {
@@ -131,7 +132,7 @@ describe("agent step", () => {
 
     const result = await runSteps(steps, {}, options({ agentProvider: flaky }));
     expect(calls).toBe(2);
-    expect((result.out as AgentTaskResult).output).toBe("recovered");
+    expect(result.out).toBe("recovered");
   });
 
   test("emits dispatched and completed lifecycle events", async () => {
