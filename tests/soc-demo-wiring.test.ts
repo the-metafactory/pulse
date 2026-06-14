@@ -237,3 +237,111 @@ describe("map bridge — collection→scalar enrichment (W-5 slice 1, cortex#104
     }
   });
 });
+
+describe("makeLocalLlmAgentProvider (W-5 agent execution)", () => {
+  test("dispatch runs the prompt against the llm and returns the text as output", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    let seenPrompt = "";
+    const llm = async (prompt: string) => {
+      seenPrompt = prompt;
+      return { text: "test@example.org" };
+    };
+    const provider = makeLocalLlmAgentProvider(llm);
+    const r = await provider.dispatch({ capability: "soc.triage.email", prompt: "Extract the email: foo test@example.org bar" });
+    expect(seenPrompt).toContain("test@example.org");
+    expect(r.status).toBe("completed");
+    // output is the model's raw text; the runner stores the whole result
+    // envelope under the agent's `collect` field (see the e2e test below).
+    expect(r.output).toBe("test@example.org");
+  });
+
+  test("a throwing llm yields a failed task, not a throw", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    const provider = makeLocalLlmAgentProvider(async () => { throw new Error("llm down"); });
+    const r = await provider.dispatch({ capability: "x", prompt: "y" });
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("llm down");
+  });
+
+  test("fail-closed: refuses local-only tasks instead of sending to frontier", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    let llmCalled = false;
+    const provider = makeLocalLlmAgentProvider(async () => { llmCalled = true; return { text: "leaked" }; });
+    const r = await provider.dispatch({
+      capability: "soc.classify.confidential",
+      prompt: "classify this confidential payload",
+      sovereignty: { model_class: "local-only" },
+    });
+    expect(llmCalled).toBe(false); // payload never reached the frontier LLM
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("local model");
+  });
+
+  test("fail-closed: refuses frontier_ok=false tasks", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    let llmCalled = false;
+    const provider = makeLocalLlmAgentProvider(async () => { llmCalled = true; return { text: "leaked" }; });
+    const r = await provider.dispatch({
+      capability: "soc.triage.email",
+      prompt: "triage",
+      sovereignty: { frontier_ok: false },
+    });
+    expect(llmCalled).toBe(false);
+    expect(r.status).toBe("failed");
+  });
+});
+
+describe("runScenario — agent: step executes end-to-end (W-5)", () => {
+  test("a composed flow with an agent: step runs through to complete via the agent provider", async () => {
+    // Stub composer returns a flow with an agent: step; an explicit agent
+    // provider (not the LLM) executes it. Proves SCENARIO-level execution of a
+    // judgment-step flow, not just provider.dispatch in isolation.
+    const flowLlm = async () => ({
+      text: [
+        "```yaml",
+        "name: F_AGENT_E2E",
+        "actions:",
+        "  - A_EXTRACT_IOCS  # sovereignty: D, residency: CH",
+        "  - agent:  # sovereignty: A, residency: CH",
+        "      name: classify",
+        "      capability: soc.triage.email",
+        "      prompt: \"Classify: {text}\"",
+        "      collect: classification",
+        "```",
+        "```mermaid",
+        "flowchart TD",
+        "  A --> B",
+        "```",
+        "IOCs extracted then an agent classifies; output collected.",
+      ].join("\n"),
+    });
+    let agentRan = false;
+    const agentProvider = {
+      async dispatch() {
+        agentRan = true;
+        return { task_id: "t", status: "completed" as const, output: "phishing", duration_ms: 1 };
+      },
+    };
+    const poster = new ConsolePoster();
+    const result = await runScenario("a suspicious mail with hxxp://evil[.]example", {
+      llm: flowLlm,
+      poster,
+      gateProvider: passGate,
+      agentProvider,
+      render: false,
+      blocksDir: BLOCKS_DIR,
+    });
+    expect(result.status).toBe("complete");
+    expect(agentRan).toBe(true); // the agent: step actually dispatched
+    // The collect field carries the FULL AgentTaskResult envelope (framework
+    // contract, primitive-runner.ts), not the bare output — a downstream reader
+    // sees `{ status, output, ... }`, with the model's text under `.output`.
+    const collected = (result as { output?: Record<string, unknown> }).output?.classification as
+      | { status?: string; output?: unknown }
+      | undefined;
+    expect(collected?.status).toBe("completed");
+    expect(collected?.output).toBe("phishing");
+    // per-step reply for the agent step posted
+    expect(poster.posts.some((p) => p.includes("agent:classify") || p.includes("classify"))).toBe(true);
+  });
+});

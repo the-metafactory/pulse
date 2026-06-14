@@ -27,6 +27,80 @@ import { validatePipeline, type StepAnnotation } from "./lib/validate-pipeline";
 import { compose, SELF_DISCLOSURE, type ComposerLLM } from "./composer/compose";
 import { renderMermaid } from "./composer/mermaid";
 import { ConsolePoster, MMAckGateProvider, MattermostThread, mmConfigFromEnv, type ThreadPoster } from "./lib/mm";
+import type { AgentProvider, AgentTaskSpec, AgentTaskResult } from "../../src/types/agent";
+
+// ---------------------------------------------------------------------------
+// Local LLM agent provider — executes `agent:` steps without the fleet
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs an `agent:` step's (already-rendered) prompt against the SAME injected
+ * LLM the composer uses, returning the model's text as the step output — the
+ * demo stand-in for fleet dispatch (`MyelinAgentProvider`), so judgment-step
+ * flows can run with just an `ANTHROPIC_API_KEY`, no NATS.
+ *
+ * SOVEREIGNTY (demo-only routing, fail-closed): this provider has only ONE
+ * backend — the injected frontier composer LLM. It is NOT the fleet, so it
+ * cannot route a task to a local model. Rather than silently exfiltrate, it
+ * REFUSES (fails the task) any spec whose sovereignty forbids the frontier —
+ * `model_class: "local-only"` or `frontier_ok: false`. Tasks with no such
+ * constraint run on the frontier LLM. Real routing-by-sovereignty (sending
+ * local-only work to a local model) is `MyelinAgentProvider` + the fleet;
+ * this provider is an offline/single-key convenience, not that boundary.
+ *
+ * A failed LLM call (or a refusal) surfaces as a failed task, never a throw
+ * that strands the pipeline.
+ */
+export function makeLocalLlmAgentProvider(llm: ComposerLLM): AgentProvider {
+  return {
+    async dispatch(spec: AgentTaskSpec): Promise<AgentTaskResult> {
+      const startedAt = Date.now();
+      const taskId = crypto.randomUUID();
+      // Fail closed: this provider only has a frontier backend. If the task
+      // forbids the frontier, refuse rather than leak the payload to it.
+      const sov = spec.sovereignty;
+      if (sov?.model_class === "local-only" || sov?.frontier_ok === false) {
+        return {
+          task_id: taskId,
+          status: "failed",
+          output: null,
+          error:
+            `refused: task '${spec.capability}' requires a local model ` +
+            `(model_class=${sov.model_class ?? "?"}, frontier_ok=${sov.frontier_ok ?? "?"}); ` +
+            `the demo local provider only has frontier access — route via the fleet (MyelinAgentProvider)`,
+          duration_ms: Date.now() - startedAt,
+        };
+      }
+      try {
+        const res = await llm(spec.prompt, {
+          system:
+            "You are a SOC analyst agent executing one step of a security pipeline. " +
+            "Respond concisely with the requested assessment as plain text — no preamble.",
+          tier: "smart",
+        });
+        // The provider returns the model's text under `AgentTaskResult.output`.
+        // The step-runner then stores the WHOLE result envelope under the
+        // agent's `collect` field (primitive-runner.ts) — so a downstream block
+        // reads `{ status, output, ... }`, with this text under `.output`, not
+        // a bare scalar. Stub-safe blocks tolerate the envelope.
+        return {
+          task_id: taskId,
+          status: "completed",
+          output: (res.text ?? "").trim(),
+          duration_ms: Date.now() - startedAt,
+        };
+      } catch (err) {
+        return {
+          task_id: taskId,
+          status: "failed",
+          output: null,
+          error: err instanceof Error ? err.message : String(err),
+          duration_ms: Date.now() - startedAt,
+        };
+      }
+    },
+  };
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const BLOCKS_DIR = join(here, "blocks");
@@ -85,6 +159,14 @@ export interface RunScenarioOptions {
   llm: ComposerLLM;
   poster: ThreadPoster;
   gateProvider: GateProvider;
+  /**
+   * Executes `agent:` steps. Default: a local LLM provider built from `llm`
+   * (lets judgment-step flows run with just the API key — see
+   * {@link makeLocalLlmAgentProvider} for its sovereignty limitation). Pass an
+   * explicit provider (the fleet `MyelinAgentProvider`, or a test double) to
+   * override; pass `null` to disable (agent steps then fail as before).
+   */
+  agentProvider?: AgentProvider | null;
   /** Initial payload fields available to the flow. Default: { scenario, text: scenario }. */
   initialInput?: Record<string, unknown>;
   /** Skip Mermaid PNG rendering (tests). */
@@ -152,12 +234,17 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
   // (6) Execute with per-step thread replies (ISC-37)
   const doc = parseYaml(composed.yaml) as { name?: string; actions: unknown[] };
   const steps = validateSteps(doc.actions);
+  // Default the agent provider to a local LLM one so judgment-step flows run
+  // end-to-end; `null` disables, an explicit provider overrides.
+  const agentProvider =
+    opts.agentProvider === undefined ? makeLocalLlmAgentProvider(opts.llm) : opts.agentProvider;
   const result = await runPipeline(
     { name: doc.name ?? "F_COMPOSED", actions: steps },
     initialInput,
     {
       actionDirs: [blocksDir],
       gateProvider: opts.gateProvider,
+      ...(agentProvider !== null && { agentProvider }),
       onActionStepEvent: (event) => {
         const line = stepLine(event, composed.annotations);
         if (line) void opts.poster.post(line);
