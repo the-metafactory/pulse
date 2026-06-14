@@ -27,6 +27,56 @@ import { validatePipeline, type StepAnnotation } from "./lib/validate-pipeline";
 import { compose, SELF_DISCLOSURE, type ComposerLLM } from "./composer/compose";
 import { renderMermaid } from "./composer/mermaid";
 import { ConsolePoster, MMAckGateProvider, MattermostThread, mmConfigFromEnv, type ThreadPoster } from "./lib/mm";
+import type { AgentProvider, AgentTaskSpec, AgentTaskResult } from "../../src/types/agent";
+
+// ---------------------------------------------------------------------------
+// Local LLM agent provider — executes `agent:` steps without the fleet
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs an `agent:` step's (already-rendered) prompt against the SAME injected
+ * LLM the composer uses, returning the model's text as the step output. The
+ * demo stand-in for fleet dispatch (MyelinAgentProvider) — so a composed flow
+ * with judgment steps (triage, enrichment, drafting) EXECUTES end-to-end with
+ * just an ANTHROPIC_API_KEY, no NATS. Sovereignty is honoured by the
+ * step-runner before this is called; a failed call surfaces as a failed task,
+ * never a throw that strands the pipeline.
+ */
+export function makeLocalLlmAgentProvider(llm: ComposerLLM): AgentProvider {
+  return {
+    async dispatch(spec: AgentTaskSpec): Promise<AgentTaskResult> {
+      const startedAt = Date.now();
+      const taskId = crypto.randomUUID();
+      try {
+        const res = await llm(spec.prompt, {
+          system:
+            "You are a SOC analyst agent executing one step of a security pipeline. " +
+            "Respond concisely with the requested assessment as plain text — no preamble.",
+          tier: "smart",
+        });
+        // Output is the model's text STRING (not a wrapper object): the
+        // step-runner writes it under the agent's `collect` field, so a
+        // downstream block reading a scalar (e.g. A_FETCH_HIBP needs `email`)
+        // gets the value directly when the step prompt asks for just the
+        // value; an object-consuming block (stub-safe) tolerates a string too.
+        return {
+          task_id: taskId,
+          status: "completed",
+          output: (res.text ?? "").trim(),
+          duration_ms: Date.now() - startedAt,
+        };
+      } catch (err) {
+        return {
+          task_id: taskId,
+          status: "failed",
+          output: null,
+          error: err instanceof Error ? err.message : String(err),
+          duration_ms: Date.now() - startedAt,
+        };
+      }
+    },
+  };
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const BLOCKS_DIR = join(here, "blocks");
@@ -85,6 +135,13 @@ export interface RunScenarioOptions {
   llm: ComposerLLM;
   poster: ThreadPoster;
   gateProvider: GateProvider;
+  /**
+   * Executes `agent:` steps. Default: a local LLM provider built from `llm`
+   * (so judgment-step flows run end-to-end with just the API key). Pass an
+   * explicit provider (fleet, or a test double) to override; pass `null` to
+   * disable (agent steps then fail as before).
+   */
+  agentProvider?: AgentProvider | null;
   /** Initial payload fields available to the flow. Default: { scenario, text: scenario }. */
   initialInput?: Record<string, unknown>;
   /** Skip Mermaid PNG rendering (tests). */
@@ -152,12 +209,17 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
   // (6) Execute with per-step thread replies (ISC-37)
   const doc = parseYaml(composed.yaml) as { name?: string; actions: unknown[] };
   const steps = validateSteps(doc.actions);
+  // Default the agent provider to a local LLM one so judgment-step flows run
+  // end-to-end; `null` disables, an explicit provider overrides.
+  const agentProvider =
+    opts.agentProvider === undefined ? makeLocalLlmAgentProvider(opts.llm) : opts.agentProvider;
   const result = await runPipeline(
     { name: doc.name ?? "F_COMPOSED", actions: steps },
     initialInput,
     {
       actionDirs: [blocksDir],
       gateProvider: opts.gateProvider,
+      ...(agentProvider !== null && { agentProvider }),
       onActionStepEvent: (event) => {
         const line = stepLine(event, composed.annotations);
         if (line) void opts.poster.post(line);

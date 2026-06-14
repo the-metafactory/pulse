@@ -237,3 +237,28 @@ describe("map bridge — collection→scalar enrichment (W-5 slice 1, cortex#104
     }
   });
 });
+
+describe("makeLocalLlmAgentProvider (W-5 agent execution)", () => {
+  test("dispatch runs the prompt against the llm and returns the text as output", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    let seenPrompt = "";
+    const llm = async (prompt: string) => {
+      seenPrompt = prompt;
+      return { text: "test@example.org" };
+    };
+    const provider = makeLocalLlmAgentProvider(llm);
+    const r = await provider.dispatch({ capability: "soc.triage.email", prompt: "Extract the email: foo test@example.org bar" });
+    expect(seenPrompt).toContain("test@example.org");
+    expect(r.status).toBe("completed");
+    // Output is the raw string, so collect writes a scalar a downstream block can read.
+    expect(r.output).toBe("test@example.org");
+  });
+
+  test("a throwing llm yields a failed task, not a throw", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    const provider = makeLocalLlmAgentProvider(async () => { throw new Error("llm down"); });
+    const r = await provider.dispatch({ capability: "x", prompt: "y" });
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("llm down");
+  });
+});
