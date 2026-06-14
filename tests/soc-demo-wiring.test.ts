@@ -250,7 +250,8 @@ describe("makeLocalLlmAgentProvider (W-5 agent execution)", () => {
     const r = await provider.dispatch({ capability: "soc.triage.email", prompt: "Extract the email: foo test@example.org bar" });
     expect(seenPrompt).toContain("test@example.org");
     expect(r.status).toBe("completed");
-    // Output is the raw string, so collect writes a scalar a downstream block can read.
+    // output is the model's raw text; the runner stores the whole result
+    // envelope under the agent's `collect` field (see the e2e test below).
     expect(r.output).toBe("test@example.org");
   });
 
@@ -260,6 +261,33 @@ describe("makeLocalLlmAgentProvider (W-5 agent execution)", () => {
     const r = await provider.dispatch({ capability: "x", prompt: "y" });
     expect(r.status).toBe("failed");
     expect(r.error).toContain("llm down");
+  });
+
+  test("fail-closed: refuses local-only tasks instead of sending to frontier", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    let llmCalled = false;
+    const provider = makeLocalLlmAgentProvider(async () => { llmCalled = true; return { text: "leaked" }; });
+    const r = await provider.dispatch({
+      capability: "soc.classify.confidential",
+      prompt: "classify this confidential payload",
+      sovereignty: { model_class: "local-only" },
+    });
+    expect(llmCalled).toBe(false); // payload never reached the frontier LLM
+    expect(r.status).toBe("failed");
+    expect(r.error).toContain("local model");
+  });
+
+  test("fail-closed: refuses frontier_ok=false tasks", async () => {
+    const { makeLocalLlmAgentProvider } = await import("../examples/soc-demo/run-demo");
+    let llmCalled = false;
+    const provider = makeLocalLlmAgentProvider(async () => { llmCalled = true; return { text: "leaked" }; });
+    const r = await provider.dispatch({
+      capability: "soc.triage.email",
+      prompt: "triage",
+      sovereignty: { frontier_ok: false },
+    });
+    expect(llmCalled).toBe(false);
+    expect(r.status).toBe("failed");
   });
 });
 

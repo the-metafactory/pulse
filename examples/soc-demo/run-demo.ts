@@ -39,20 +39,38 @@ import type { AgentProvider, AgentTaskSpec, AgentTaskResult } from "../../src/ty
  * demo stand-in for fleet dispatch (`MyelinAgentProvider`), so judgment-step
  * flows can run with just an `ANTHROPIC_API_KEY`, no NATS.
  *
- * SOVEREIGNTY LIMITATION (deliberate, demo-only): this provider forwards EVERY
- * agent step to the one injected (frontier) composer LLM — it does NOT honour
- * a step's declared `model_class`/residency. A step annotated `local-only` is
- * still sent to the frontier model here. Real routing-by-sovereignty is the
- * fleet's job (`MyelinAgentProvider` dispatches each capability to a consumer
- * of the right model class); this local provider is a convenience for offline
- * rehearsal + the single-key demo, not a policy boundary. A failed LLM call
- * surfaces as a failed task, never a throw that strands the pipeline.
+ * SOVEREIGNTY (demo-only routing, fail-closed): this provider has only ONE
+ * backend — the injected frontier composer LLM. It is NOT the fleet, so it
+ * cannot route a task to a local model. Rather than silently exfiltrate, it
+ * REFUSES (fails the task) any spec whose sovereignty forbids the frontier —
+ * `model_class: "local-only"` or `frontier_ok: false`. Tasks with no such
+ * constraint run on the frontier LLM. Real routing-by-sovereignty (sending
+ * local-only work to a local model) is `MyelinAgentProvider` + the fleet;
+ * this provider is an offline/single-key convenience, not that boundary.
+ *
+ * A failed LLM call (or a refusal) surfaces as a failed task, never a throw
+ * that strands the pipeline.
  */
 export function makeLocalLlmAgentProvider(llm: ComposerLLM): AgentProvider {
   return {
     async dispatch(spec: AgentTaskSpec): Promise<AgentTaskResult> {
       const startedAt = Date.now();
       const taskId = crypto.randomUUID();
+      // Fail closed: this provider only has a frontier backend. If the task
+      // forbids the frontier, refuse rather than leak the payload to it.
+      const sov = spec.sovereignty;
+      if (sov?.model_class === "local-only" || sov?.frontier_ok === false) {
+        return {
+          task_id: taskId,
+          status: "failed",
+          output: null,
+          error:
+            `refused: task '${spec.capability}' requires a local model ` +
+            `(model_class=${sov.model_class ?? "?"}, frontier_ok=${sov.frontier_ok ?? "?"}); ` +
+            `the demo local provider only has frontier access — route via the fleet (MyelinAgentProvider)`,
+          duration_ms: Date.now() - startedAt,
+        };
+      }
       try {
         const res = await llm(spec.prompt, {
           system:
@@ -60,11 +78,11 @@ export function makeLocalLlmAgentProvider(llm: ComposerLLM): AgentProvider {
             "Respond concisely with the requested assessment as plain text — no preamble.",
           tier: "smart",
         });
-        // Output is the model's text STRING (not a wrapper object): the
-        // step-runner writes it under the agent's `collect` field, so a
-        // downstream block reading a scalar (e.g. A_FETCH_HIBP needs `email`)
-        // gets the value directly when the step prompt asks for just the
-        // value; an object-consuming block (stub-safe) tolerates a string too.
+        // The provider returns the model's text under `AgentTaskResult.output`.
+        // The step-runner then stores the WHOLE result envelope under the
+        // agent's `collect` field (primitive-runner.ts) — so a downstream block
+        // reads `{ status, output, ... }`, with this text under `.output`, not
+        // a bare scalar. Stub-safe blocks tolerate the envelope.
         return {
           task_id: taskId,
           status: "completed",
