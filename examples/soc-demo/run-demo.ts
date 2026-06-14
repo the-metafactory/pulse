@@ -35,12 +35,18 @@ import type { AgentProvider, AgentTaskSpec, AgentTaskResult } from "../../src/ty
 
 /**
  * Runs an `agent:` step's (already-rendered) prompt against the SAME injected
- * LLM the composer uses, returning the model's text as the step output. The
- * demo stand-in for fleet dispatch (MyelinAgentProvider) — so a composed flow
- * with judgment steps (triage, enrichment, drafting) EXECUTES end-to-end with
- * just an ANTHROPIC_API_KEY, no NATS. Sovereignty is honoured by the
- * step-runner before this is called; a failed call surfaces as a failed task,
- * never a throw that strands the pipeline.
+ * LLM the composer uses, returning the model's text as the step output — the
+ * demo stand-in for fleet dispatch (`MyelinAgentProvider`), so judgment-step
+ * flows can run with just an `ANTHROPIC_API_KEY`, no NATS.
+ *
+ * SOVEREIGNTY LIMITATION (deliberate, demo-only): this provider forwards EVERY
+ * agent step to the one injected (frontier) composer LLM — it does NOT honour
+ * a step's declared `model_class`/residency. A step annotated `local-only` is
+ * still sent to the frontier model here. Real routing-by-sovereignty is the
+ * fleet's job (`MyelinAgentProvider` dispatches each capability to a consumer
+ * of the right model class); this local provider is a convenience for offline
+ * rehearsal + the single-key demo, not a policy boundary. A failed LLM call
+ * surfaces as a failed task, never a throw that strands the pipeline.
  */
 export function makeLocalLlmAgentProvider(llm: ComposerLLM): AgentProvider {
   return {
@@ -137,9 +143,10 @@ export interface RunScenarioOptions {
   gateProvider: GateProvider;
   /**
    * Executes `agent:` steps. Default: a local LLM provider built from `llm`
-   * (so judgment-step flows run end-to-end with just the API key). Pass an
-   * explicit provider (fleet, or a test double) to override; pass `null` to
-   * disable (agent steps then fail as before).
+   * (lets judgment-step flows run with just the API key — see
+   * {@link makeLocalLlmAgentProvider} for its sovereignty limitation). Pass an
+   * explicit provider (the fleet `MyelinAgentProvider`, or a test double) to
+   * override; pass `null` to disable (agent steps then fail as before).
    */
   agentProvider?: AgentProvider | null;
   /** Initial payload fields available to the flow. Default: { scenario, text: scenario }. */
