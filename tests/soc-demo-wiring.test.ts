@@ -418,10 +418,8 @@ describe("makeOllamaAgentProvider — local execution over Ollama HTTP", () => {
   test("an already-aborted signal short-circuits — no fetch is made", async () => {
     const realFetch = globalThis.fetch;
     let fetched = false;
-    globalThis.fetch = (async (_u: string, init: any) => {
+    globalThis.fetch = (async () => {
       fetched = true;
-      // Honour the abort the way real fetch would.
-      if (init?.signal?.aborted) throw new Error("aborted");
       return new Response(JSON.stringify({ response: "x" }), { status: 200 });
     }) as unknown as typeof fetch;
     try {
@@ -430,9 +428,9 @@ describe("makeOllamaAgentProvider — local execution over Ollama HTTP", () => {
         { capability: "x", prompt: "y" },
         { signal: AbortSignal.abort() },
       );
-      // fetch is still invoked but with an aborted signal → it rejects → failed.
       expect(r.status).toBe("failed");
-      expect(fetched).toBe(true);
+      expect(r.error).toContain("aborted before dispatch");
+      expect(fetched).toBe(false); // no network call for an already-cancelled task
     } finally {
       globalThis.fetch = realFetch;
     }

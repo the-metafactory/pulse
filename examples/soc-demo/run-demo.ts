@@ -140,12 +140,12 @@ export function makeOllamaAgentProvider(opts: OllamaProviderOpts = {}): AgentPro
         error,
         duration_ms: Date.now() - startedAt,
       });
+      // Already cancelled before we start → do no work, make no network call.
+      if (dispatchOpts?.signal?.aborted) return fail(`ollama ${model}: task aborted before dispatch`);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      // Cancel if the step-runner aborts the task (gate fail, parent abort) —
-      // honour a signal that is ALREADY aborted before we subscribe, too.
-      if (dispatchOpts?.signal?.aborted) controller.abort();
-      else dispatchOpts?.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+      // Cancel an in-flight call if the step-runner aborts (gate fail, parent abort).
+      dispatchOpts?.signal?.addEventListener("abort", () => controller.abort(), { once: true });
       try {
         const res = await fetch(`${url}/api/generate`, {
           method: "POST",
