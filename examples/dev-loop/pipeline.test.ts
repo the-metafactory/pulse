@@ -175,6 +175,30 @@ describe("dev-loop pipeline.yaml — happy-path round-trip", () => {
     expect(d.defer_big.map((f: any) => f.id).sort()).toEqual(["A", "D"]);
   });
 
+  test("A_DISPOSITION fails closed on a malformed/unparseable review (no auto-approve)", async () => {
+    // A review that doesn't parse to a structured verdict must NOT greenlight.
+    // Regression guard: collect now stores the raw agent value, so a bare
+    // string review parses to undefined — that must be "not cleared", never
+    // a defaulted "approved" (fail-open).
+    const provider = new MockAgentProvider({
+      "dev.implement": { pr: 548, head_sha: "ddd" },
+      "code-review.typescript": "looks fine to me", // bare string → unparseable
+      "merge.approve": { merged: true },
+      "release.cut": { version: "v0.9.6" },
+    });
+
+    const result = await runPipelineFromYaml(
+      YAML,
+      { slice: { id: "C-901.7", issue_ref: "x", design_ref: "y", branch: "b", gates: "g" } },
+      { agentProvider: provider, gateProvider: new AutoGateProvider() },
+    );
+
+    expect(result.success).toBe(true);
+    const d = (result.output as Record<string, any>).disposition;
+    expect(d.verdict).toBe("no-review"); // not "approved"
+    expect(d.proceed).toBe(false); // fail-closed: no explicit approval
+  });
+
   test("A_MERGE_PRECHECK emits ok=false and reason on CI failure", async () => {
     // The precheck only emits DATA — the engine cannot branch on ok=false
     // (gap G2), so merge.approve still runs and the pipeline still succeeds.

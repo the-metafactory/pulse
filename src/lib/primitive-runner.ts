@@ -862,13 +862,13 @@ async function runAgent(
     durationMs: Date.now() - stepStart,
   });
 
-  // Store the agent's RESULT VALUE under the collect field — not the transport
-  // envelope. This matches map/filter/reduce collect (which store values) so a
-  // downstream block reading a scalar (`collect: email` → A_FETCH_HIBP) gets the
-  // value directly.
+  // Store the agent's RESULT VALUE under the collect field — not the full
+  // agent task result record. This matches map/filter/reduce collect (which
+  // store values) so a downstream block reading a scalar (`collect: email` →
+  // A_FETCH_HIBP) gets the value directly.
   //
   // Deliberate trade-off: the collected payload now carries ONLY the value.
-  // Transport metadata (task_id, status, duration, error) is intentionally
+  // The agent task metadata (task_id, status, duration, error) is intentionally
   // moved OUT of the data plane — a later step can no longer read it off the
   // collected field. It is observable on the onAgentEvent stream instead
   // (agent.dispatched/completed/failed). A failed task recordAndThrow()s above

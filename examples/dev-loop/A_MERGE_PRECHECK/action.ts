@@ -40,7 +40,7 @@ export default {
     const { implement, merge_state, ...payload } = input;
 
     // `implement` is the agent step's RESULT VALUE (collect stores result.output,
-    // not the transport envelope) — structured object or JSON string.
+    // not the agent task result record) — structured object or JSON string.
     const implOut = parseCollectedValue<ImplementOutput>(implement);
     const pr = implOut?.pr;
 

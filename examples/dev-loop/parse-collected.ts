@@ -7,7 +7,9 @@
  * structured shape tolerates both: parse a string, pass an object through.
  *
  * Returns undefined for null/undefined or unparseable input rather than
- * throwing, so a partial flow degrades to "no data" instead of a crash.
+ * throwing. This is NOT itself a safe default — it just avoids a crash. Each
+ * caller decides what undefined means; a fail-closed consumer (e.g.
+ * A_DISPOSITION) must treat undefined as "not cleared", never as approval.
  */
 export function parseCollectedValue<T>(value: unknown): T | undefined {
   if (value === null || value === undefined) return undefined;
