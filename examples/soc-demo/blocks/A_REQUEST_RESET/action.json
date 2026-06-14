@@ -1,7 +1,7 @@
 {
   "name": "A_REQUEST_RESET",
   "version": "1.0.0",
-  "description": "Queue an IAM force-password-reset request for a resolved account (design §4). Input: account_owner (from A_RESOLVE_ACCOUNT_OWNER). Stub-safe: with no IAM creds it records a canned queued request (the demo stand-in for an IdP/IAM provisioning call) rather than performing a reset — the reset itself is a human/IAM action that belongs BEHIND a gate. Unknown owner ({ known: false }) yields { status: \"skipped\" }, never an error.",
+  "description": "Queue an IAM force-password-reset request for a resolved account (design \u00a74). Input: account_owner (from A_RESOLVE_ACCOUNT_OWNER). Stub-safe: with no IAM creds it records a canned queued request (the demo stand-in for an IdP/IAM provisioning call) \u2014 it does NOT perform a reset. It does not itself gate anything; placing a gate: before it (so a human approves the reset) is a flow-authoring convention the composer follows, not a precondition this block enforces. Unknown owner ({ known: false } or empty account) yields { status: \"skipped\" }, never an error.",
   "input": {
     "account_owner": {
       "type": "object",

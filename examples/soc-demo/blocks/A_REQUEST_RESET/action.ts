@@ -4,9 +4,11 @@
  * D-class block (design/soc-demo-mm-composer.md §4) closing the catalog gap the
  * real-LLM composer flagged on credential-leak scenarios ("no credential-reset
  * block"). Input: `account_owner` (from A_RESOLVE_ACCOUNT_OWNER). It does NOT
- * perform a reset — the reset is a human/IAM action that belongs behind a
- * `gate:`; this block records the QUEUED request (a ticket-shaped intent), the
- * offline stand-in for an IdP/IAM provisioning call. No env, no network.
+ * perform a reset — it records the QUEUED request (a ticket-shaped intent), the offline stand-in
+ * for an IdP/IAM provisioning call. No env, no network. It does NOT itself
+ * gate anything: putting a `gate:` before it (so a human approves the reset)
+ * is a flow-authoring convention the composer follows, not a precondition
+ * this block enforces.
  *
  * An unknown owner ({ known: false }) is a documented skip
  * ({ status: "skipped" }), never an error — you can't reset an account you
