@@ -114,6 +114,46 @@ sub-run's payload, so a scalar-input block inside it reads that one value per
 item. Use `map` whenever a scalar-input block must run over a list; use a bare
 block when the field shapes already line up one-to-one.
 
+### Producing a field a later block needs (`agent:` / `gate:` `collect:`)
+
+Some blocks require a field NO deterministic block emits — e.g.
+`A_SANITIZE_IOCS` needs `triage`, `A_FORMAT_ADVISORY` needs `triage`,
+`enrichment`, `iocs_sanitized`, and `approval`. Those are produced by a
+**judgment step**: an `agent:` (analysis) or a `gate:` (a human verdict).
+**Name the step's output with `collect:` set to EXACTLY the field the
+downstream block requires** — that is what makes it available on the pipe:
+
+```yaml
+  - agent:
+      name: triage
+      capability: soc.triage.email
+      prompt: "Triage: {text}"
+      collect: triage                # ← produces `triage` for A_SANITIZE_IOCS / A_FORMAT_ADVISORY
+      sovereignty: { model_class: local-only, frontier_ok: false, data_residency: CH }
+  - A_SANITIZE_IOCS  # sovereignty: D, residency: CH      (consumes `triage`)
+  - agent:
+      name: enrich
+      capability: soc.enrich
+      prompt: "Enrich the triage: {triage}"
+      collect: enrichment            # ← produces `enrichment`
+      sovereignty: { model_class: local-only, frontier_ok: false, data_residency: CH }
+  - gate:
+      name: approval
+      prompt: "Approve this advisory for sending?"
+      collect: approval              # ← produces `approval`
+  - A_FORMAT_ADVISORY  # sovereignty: A, residency: CH    (needs triage, enrichment, iocs_sanitized, approval)
+  - gate:
+      name: send
+      prompt: "Send the advisory?"
+  - A_SEND_MAIL  # sovereignty: D, residency: CH           (consumes advisory_doc)
+```
+
+So the rule for any block whose required input isn't produced upstream: insert
+an `agent:`/`gate:` step BEFORE it whose `collect:` is that field name. Without
+`collect:`, an `agent:` produces nothing trackable and a `gate:` writes
+`gate_<name>` (not the bare name) — so the downstream block's input stays
+unsatisfied.
+
 ## Installed block catalog
 
 (appended at call time — JSON array of { name, description, input, output })
