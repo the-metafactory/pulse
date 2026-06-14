@@ -10,7 +10,25 @@
   },
   "output": {
     "iocs": {
-      "type": "object"
+      "type": "object",
+      "fields": {
+        "ips": "string[]",
+        "domains": "string[]",
+        "hashes": "string[]",
+        "urls": "string[]"
+      }
+    },
+    "ips": {
+      "type": "string[]"
+    },
+    "domains": {
+      "type": "string[]"
+    },
+    "hashes": {
+      "type": "string[]"
+    },
+    "urls": {
+      "type": "string[]"
     }
   },
   "requires": [],

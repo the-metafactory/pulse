@@ -60,6 +60,59 @@ Reply with exactly three fenced sections, in order:
 Keep flows 3–7 steps. Prefer a `gate:` before any outward-facing action
 (mail, ticket, MISP push, Mattermost post outside the demo channel).
 
+## Step grammar — EXACT shapes (the validator rejects anything else)
+
+A plain block is a **bare string** (its name). `agent:` and `gate:` are
+**mapping objects** under `actions:`. There is **NO `block:`, `with:`,
+`uses:`, `id:`, `type:`, `step:`, or `input:` key** — emitting any of those
+is the #1 cause of a rejected flow. Copy these shapes verbatim:
+
+```yaml
+name: F_EXAMPLE
+actions:
+  - A_EXTRACT_IOCS  # sovereignty: D, residency: CH
+  - agent:
+      name: triage
+      capability: soc.triage.email
+      prompt: "Assess: {text}"
+      sovereignty: { model_class: local-only, frontier_ok: false, data_residency: CH }
+  - gate:
+      name: analyst-decision
+      prompt: "Block or accept?"
+  - A_OPEN_TICKET  # sovereignty: D, residency: CH
+```
+
+## Connecting blocks — fields, shapes, and adapting collections
+
+Blocks connect by the **pipe**: each step reads the fields it needs by NAME
+from the running payload and passes the rest through. A block composes after
+another **only if its required `input` field names are produced by an earlier
+step's `output`** (or are in the initial input). The catalog gives each
+block's `input`/`output` with types — including shape: a field typed
+`string[]` is a LIST, `object` with `fields` shows its sub-fields.
+
+**Cardinality is the trap.** A producer often emits a LIST while the consumer
+wants ONE. Example: `A_EXTRACT_IOCS` outputs `ips: string[]`, but
+`A_LOOKUP_GEOIP_ASN`/`A_LOOKUP_OWNER`/`A_FETCH_GREYNOISE` each require a single
+`ip: string`. You do NOT feed a list to a scalar input — wrap the per-item
+work in a **`map`** (the collection→scalar adapter):
+
+```yaml
+  - A_EXTRACT_IOCS                 # → ips: string[], domains: string[], …
+  - map:
+      over: ips                    # the LIST field to iterate
+      as: ip                       # binds a scalar `ip` inside each run
+      collect: ip_enrichment       # list of per-ip results written back
+      actions:
+        - A_LOOKUP_GEOIP_ASN  # sovereignty: D, residency: CH
+        - A_FETCH_GREYNOISE   # sovereignty: D, residency: frontier
+```
+
+`over` must name a **top-level array field** (e.g. `ips`, `domains`, `hashes`),
+not a dotted path. Inside the `map`, the `as` name (`ip`) satisfies the
+enrichers' scalar input. Use `map` whenever a scalar-input block must run over
+a list; use a bare block when the field shapes already line up one-to-one.
+
 ## Installed block catalog
 
 (appended at call time — JSON array of { name, description, input, output })

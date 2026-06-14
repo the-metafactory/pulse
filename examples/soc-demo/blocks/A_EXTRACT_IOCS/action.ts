@@ -91,7 +91,12 @@ export default {
     // Drop anything that is actually an IPv4 literal (the domain regex can catch them).
     const domains = dedupe([...rawDomains, ...urlHosts].filter((d) => !isValidIpv4(d)));
 
+    // Emit the indicator categories as TOP-LEVEL typed arrays so a downstream
+    // scalar-consuming enricher (e.g. A_LOOKUP_GEOIP_ASN needs `ip`) can be fed
+    // per-item via `map over: ips as: ip` — the pipe's collection→scalar
+    // coercion. `iocs` is kept as the grouped object for back-compat with
+    // consumers that read the whole bag (A_TAG_TLP, A_SANITIZE_IOCS).
     const iocs: Iocs = { urls, domains, ips, hashes };
-    return { ...payload, iocs };
+    return { ...payload, iocs, ips, domains, hashes, urls };
   },
 };
