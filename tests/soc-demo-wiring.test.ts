@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import type { ActionStepEvent, GateProvider } from "../src/types/pipeline";
 import {
   runScenario,
+  runSavedFlow,
   stepLine,
   makeStubLLM,
   BLOCKS_DIR,
@@ -459,6 +460,69 @@ describe("resolveAgentProvider — env-gated routing", () => {
     } finally {
       if (prev === undefined) delete process.env.PULSE_LOCAL_MODEL;
       else process.env.PULSE_LOCAL_MODEL = prev;
+    }
+  });
+});
+
+describe("runSavedFlow — re-run a saved playbook, no composition (saved flows)", () => {
+  const SAVED_YAML = [
+    "name: F_SAVED_TRIAGE",
+    "actions:",
+    "  - A_EXTRACT_IOCS  # sovereignty: D, residency: CH",
+    "  - A_TAG_TLP  # sovereignty: D, residency: CH",
+    "",
+  ].join("\n");
+
+  test("validates + gates + executes the saved YAML without calling the LLM", async () => {
+    let llmCalled = false;
+    const llm = async () => { llmCalled = true; return { text: "should not be called" }; };
+    const poster = new ConsolePoster();
+    const result = await runSavedFlow(SAVED_YAML, {
+      llm,
+      poster,
+      gateProvider: passGate,
+      agentProvider: null, // no agent steps in this flow
+      render: false,
+      blocksDir: BLOCKS_DIR,
+      initialInput: { scenario: "ip 8.8.8.8", text: "ip 8.8.8.8" },
+    });
+    expect(result.status).toBe("complete");
+    expect(llmCalled).toBe(false); // NO re-composition
+    if (result.status === "complete") expect(result.name).toBe("F_SAVED_TRIAGE");
+    // posted a "Running saved flow" line, not the frontier-A self-disclosure
+    expect(poster.posts.some((p) => p.includes("Running saved flow"))).toBe(true);
+    expect(poster.posts.some((p) => p.includes("frontier-A"))).toBe(false);
+  });
+
+  test("still operator-gates: a fail verdict aborts the saved flow", async () => {
+    const failGate: GateProvider = { async requestVerdict() { return { verdict: "fail", notes: "no" }; } };
+    const result = await runSavedFlow(SAVED_YAML, {
+      llm: makeStubLLM(),
+      poster: new ConsolePoster(),
+      gateProvider: failGate,
+      agentProvider: null,
+      render: false,
+      blocksDir: BLOCKS_DIR,
+    });
+    expect(result.status).toBe("aborted");
+  });
+});
+
+describe("runScenario — exposes the composed yaml for persistence (saved flows)", () => {
+  test("a complete run returns the composed yaml + name so a host can save it", async () => {
+    const result = await runScenario("triage", {
+      llm: makeStubLLM(), // canned F_STUB_TRIAGE
+      poster: new ConsolePoster(),
+      gateProvider: passGate,
+      agentProvider: null,
+      render: false,
+      blocksDir: BLOCKS_DIR,
+    });
+    expect(result.status).toBe("complete");
+    if (result.status === "complete") {
+      expect(typeof result.yaml).toBe("string");
+      expect(result.yaml).toContain("name: F_STUB_TRIAGE");
+      expect(result.name).toBe("F_STUB_TRIAGE");
     }
   });
 });
