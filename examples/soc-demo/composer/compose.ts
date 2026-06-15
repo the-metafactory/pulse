@@ -91,6 +91,20 @@ function extractSummary(text: string): string {
   return lines[lines.length - 1] ?? "";
 }
 
+/**
+ * Tier for the composer's frontier reasoning (text → pipeline YAML).
+ *
+ * Default "standard" (Sonnet): fast and reliable for structured composition
+ * over the catalog, and not prone to the long `claude -p` latencies tier
+ * "smart" (Opus) can hit — an Opus compose was observed timing out at the
+ * 180s claude-CLI ceiling, stalling the whole flow. Override with
+ * PULSE_COMPOSE_TIER=fast|standard|smart if a harder scenario needs Opus.
+ */
+export function composeTier(): "fast" | "standard" | "smart" {
+  const t = process.env.PULSE_COMPOSE_TIER;
+  return t === "fast" || t === "standard" || t === "smart" ? t : "standard";
+}
+
 export async function compose(
   scenario: string,
   catalog: CatalogEntry[],
@@ -109,7 +123,7 @@ export async function compose(
   // 1 initial attempt + maxRetries validator-driven re-prompts
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     attempts++;
-    const response = await llm(prompt, { system, tier: "smart" });
+    const response = await llm(prompt, { system, tier: composeTier() });
     const text = response.text ?? "";
 
     const yaml = extractFence(text, "yaml");
@@ -163,7 +177,7 @@ export async function compose(
         `Last validator findings:\n${lastFindings.map((f) => `- ${f.message}`).join("\n")}\n\n` +
         `Reply with ONLY the closest-match message per rule 2 of your instructions ` +
         `(no YAML).`,
-      { system, tier: "smart" },
+      { system, tier: composeTier() },
     );
   } catch (err) {
     console.error(`[compose] closest-match fallback call failed: ${err instanceof Error ? err.message : String(err)}`);

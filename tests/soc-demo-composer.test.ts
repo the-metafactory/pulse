@@ -9,11 +9,13 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   compose,
+  composeTier,
   extractFence,
   loadSystemPrompt,
   SELF_DISCLOSURE,
   type ComposerLLM,
 } from "../examples/soc-demo/composer/compose";
+import type { LLMOptions } from "../src/types/action";
 import { renderMermaid } from "../examples/soc-demo/composer/mermaid";
 import type { CatalogEntry } from "../examples/soc-demo/lib/validate-pipeline";
 
@@ -179,4 +181,43 @@ describe("renderMermaid (ISC-33/34)", () => {
     expect(png).not.toBeNull();
     expect(png!.byteLength).toBeGreaterThan(1000);
   }, 60_000);
+});
+
+describe("composeTier — env-tunable, defaults to standard (Sonnet)", () => {
+  const prev = process.env.PULSE_COMPOSE_TIER;
+  const restore = () => {
+    if (prev === undefined) delete process.env.PULSE_COMPOSE_TIER;
+    else process.env.PULSE_COMPOSE_TIER = prev;
+  };
+
+  test("defaults to standard when unset or invalid", () => {
+    delete process.env.PULSE_COMPOSE_TIER;
+    expect(composeTier()).toBe("standard");
+    process.env.PULSE_COMPOSE_TIER = "bogus";
+    expect(composeTier()).toBe("standard");
+    restore();
+  });
+
+  test("honours a valid override", () => {
+    process.env.PULSE_COMPOSE_TIER = "smart";
+    expect(composeTier()).toBe("smart");
+    process.env.PULSE_COMPOSE_TIER = "fast";
+    expect(composeTier()).toBe("fast");
+    restore();
+  });
+
+  test("compose calls the llm at the resolved tier (default standard)", async () => {
+    delete process.env.PULSE_COMPOSE_TIER;
+    const tiers: Array<LLMOptions["tier"]> = [];
+    const llm: ComposerLLM = async (_prompt, options) => {
+      tiers.push(options?.tier);
+      return { text: GOOD_RESPONSE };
+    };
+    await compose("credential leak", CATALOG, llm, {
+      initialFields: ["email", "scenario"],
+      systemPrompt: "test",
+    });
+    expect(tiers).toEqual(["standard"]); // not "smart" (Opus)
+    restore();
+  });
 });
