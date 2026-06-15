@@ -286,3 +286,17 @@ describe("A_INGEST_ATTACHMENT — passthrough and size limits", () => {
     expect(r.attachments_ingested.errors[0]).toContain("too large");
   });
 });
+
+describe("A_INGEST_ATTACHMENT — aggregate caps", () => {
+  test("caps the number of attachments fetched (overflow recorded, not fetched)", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_INGEST_ATTACHMENT/action");
+    let fetches = 0;
+    const ctx = ctxWith(async () => { fetches++; return new Response("x"); });
+    const many = Array.from({ length: 15 }, (_, i) => ({
+      name: `a${i}.txt`, contentType: "text/plain", url: `https://cdn/a${i}.txt`,
+    }));
+    const r = (await mod.default.execute({ text: "t", attachments: many }, ctx)) as Record<string, any>;
+    expect(fetches).toBeLessThanOrEqual(10); // capped
+    expect(r.attachments_ingested.skipped_detail.some((s: string) => s.includes("over 10"))).toBe(true);
+  });
+});

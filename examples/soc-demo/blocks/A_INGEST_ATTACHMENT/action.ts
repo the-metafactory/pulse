@@ -45,6 +45,11 @@ interface Attachment {
  */
 const MAX_DECODE_BYTES = 256 * 1024;
 
+/** Max number of attachments processed in one message (overflow recorded, not fetched). */
+const MAX_ATTACHMENTS = 10;
+/** Max TOTAL decoded content folded into `text` across all attachments. */
+const MAX_TOTAL_FOLDED_BYTES = 1024 * 1024;
+
 const TEXT_EXTENSIONS = [".eml", ".txt", ".csv", ".log", ".json", ".md", ".ics"];
 
 function isTextLike(att: Attachment): boolean {
@@ -66,7 +71,10 @@ async function decodeAttachment(att: Attachment, fetchFn: typeof globalThis.fetc
   try {
     const res = await fetchFn(att.url);
     if (!res.ok) return { kind: "error", label, error: `${label}: HTTP ${res.status}` };
-    // Byte cap via Content-Length BEFORE decoding — bound fetch/decode cost.
+    // Reject oversized BEFORE decoding when Content-Length is present (bounds
+    // fetch/decode cost in that case). When the header is absent, the body is
+    // read in full and then char-sliced — a best-effort string bound, not a
+    // fetch-cost bound.
     const declared = Number(res.headers.get("content-length") ?? "");
     if (Number.isFinite(declared) && declared > MAX_DECODE_BYTES) {
       return { kind: "error", label, error: `${label}: too large (${declared} bytes > ${MAX_DECODE_BYTES} cap)` };
@@ -97,26 +105,38 @@ export default {
       };
     }
 
-    // Fetch all text-like attachments CONCURRENTLY, preserving input order when
-    // assembling the folded text (Promise.all keeps array order).
-    const outcomes = await Promise.all(list.map((att) => decodeAttachment(att, fetchFn)));
+    // Cap how many attachments we fetch in one message (overflow recorded, not
+    // downloaded) so an unbounded array can't fan out unbounded fetches.
+    const capped = list.slice(0, MAX_ATTACHMENTS);
+    const skipped: string[] = list.length > MAX_ATTACHMENTS
+      ? [`+${list.length - MAX_ATTACHMENTS} more (over ${MAX_ATTACHMENTS}-attachment cap)`]
+      : [];
+
+    // Fetch the capped set CONCURRENTLY, preserving input order when assembling
+    // the folded text (Promise.all keeps array order).
+    const outcomes = await Promise.all(capped.map((att) => decodeAttachment(att, fetchFn)));
 
     const decodedParts: string[] = [];
     const decodedNames: string[] = [];
-    const skipped: string[] = [];
     const errors: string[] = [];
+    let foldedBytes = 0;
     for (const o of outcomes) {
-      if (o.kind === "decoded") {
+      if (o.kind === "skipped") {
+        skipped.push(o.label);
+      } else if (o.kind === "error") {
+        errors.push(o.error);
+      } else if (foldedBytes + o.part.length > MAX_TOTAL_FOLDED_BYTES) {
+        // Aggregate budget exhausted — record, don't fold (bounds total memory).
+        skipped.push(`${o.label} (over ${MAX_TOTAL_FOLDED_BYTES}-byte total-fold budget)`);
+      } else {
         decodedParts.push(o.part);
         decodedNames.push(o.label);
-      } else if (o.kind === "skipped") {
-        skipped.push(o.label);
-      } else {
-        errors.push(o.error);
+        foldedBytes += o.part.length;
       }
     }
 
-    // Append decoded content AFTER any pasted text, so both reach A_EXTRACT_IOCS.
+    // Append any decoded content AFTER the pasted text. If every decode failed
+    // or was skipped, `text` is just the original pasted text (baseText).
     const text = decodedParts.length > 0 ? [baseText, ...decodedParts].filter(Boolean).join("\n\n") : baseText;
 
     return {
