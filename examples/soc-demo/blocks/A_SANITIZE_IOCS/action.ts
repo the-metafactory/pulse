@@ -14,7 +14,6 @@
  */
 
 import type { ActionContext } from "../../../../src/types/action";
-import type { AgentTaskResult } from "../../../../src/types/agent";
 
 interface TriageOutput {
   verdict?: string;
@@ -57,8 +56,17 @@ function parseModelJson(raw: string): unknown {
 export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { triage, ...payload } = input;
-    const result = triage as AgentTaskResult;
-    const out = (typeof result.output === "string" ? parseModelJson(result.output) : result.output) as TriageOutput;
+    // `triage` is the agent step's RESULT VALUE (collect stores result.output,
+    // P-600) — a TriageOutput object, or a model JSON string. Parse a string,
+    // tolerate an object, and default to empty so a missing or unparseable
+    // triage degrades to "no IOCs" instead of crashing the block.
+    let out: TriageOutput = {};
+    try {
+      const parsed = typeof triage === "string" ? parseModelJson(triage) : triage;
+      if (parsed !== null && typeof parsed === "object") out = parsed as TriageOutput;
+    } catch (_err) {
+      // Triage wasn't parseable JSON — treat as empty (the block must not crash).
+    }
 
     const iocs = out.iocs ?? {};
     const sanitized = {
