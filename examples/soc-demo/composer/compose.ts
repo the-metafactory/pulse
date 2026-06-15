@@ -91,6 +91,21 @@ function extractSummary(text: string): string {
   return lines[lines.length - 1] ?? "";
 }
 
+/**
+ * Resolve the tier requested for the composer's reasoning (text → pipeline
+ * YAML) from PULSE_COMPOSE_TIER, defaulting to "standard". The tier→model
+ * mapping itself lives in the LLM layer (capabilities.ts / the claude CLI).
+ *
+ * Why default away from "smart": an Opus compose (tier "smart") was observed
+ * timing out at the 180s claude-CLI ceiling, stalling the flow right after the
+ * self-disclosure post. "standard" is chosen as the default to avoid that
+ * failure mode; set PULSE_COMPOSE_TIER=smart to opt back into Opus per run.
+ */
+export function composeTier(): "fast" | "standard" | "smart" {
+  const t = process.env.PULSE_COMPOSE_TIER;
+  return t === "fast" || t === "standard" || t === "smart" ? t : "standard";
+}
+
 export async function compose(
   scenario: string,
   catalog: CatalogEntry[],
@@ -109,7 +124,7 @@ export async function compose(
   // 1 initial attempt + maxRetries validator-driven re-prompts
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     attempts++;
-    const response = await llm(prompt, { system, tier: "smart" });
+    const response = await llm(prompt, { system, tier: composeTier() });
     const text = response.text ?? "";
 
     const yaml = extractFence(text, "yaml");
@@ -163,7 +178,7 @@ export async function compose(
         `Last validator findings:\n${lastFindings.map((f) => `- ${f.message}`).join("\n")}\n\n` +
         `Reply with ONLY the closest-match message per rule 2 of your instructions ` +
         `(no YAML).`,
-      { system, tier: "smart" },
+      { system, tier: composeTier() },
     );
   } catch (err) {
     console.error(`[compose] closest-match fallback call failed: ${err instanceof Error ? err.message : String(err)}`);
