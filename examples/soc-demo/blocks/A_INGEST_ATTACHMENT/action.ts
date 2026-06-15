@@ -19,10 +19,12 @@
  * Passthrough: the original `attachments` field is returned UNCHANGED alongside
  * the new `text` + `attachments_ingested` (payload grows monotonically).
  *
- * Stub-safe & fail-soft: no attachments, or no `fetch` capability → pass
- * through unchanged. A per-attachment fetch/decode error (incl. an
- * oversized file) is recorded in `attachments_ingested.errors`, never thrown —
- * one bad upload must not crash the flow.
+ * Requires the `fetch` capability (manifest `requires: ["fetch"]`). Fail-soft:
+ * no attachments → pass through unchanged; a per-attachment fetch/decode error
+ * (incl. an oversized file rejected by Content-Length) is recorded in
+ * `attachments_ingested.errors`, never thrown — one bad upload must not crash
+ * the flow. The `!fetchFn` branch below is defensive (a compliant host always
+ * injects the required capability), not an advertised no-fetch contract.
  */
 
 import type { ActionContext } from "../../../../src/types/action";

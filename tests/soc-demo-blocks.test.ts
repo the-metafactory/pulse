@@ -253,7 +253,7 @@ describe("A_INGEST_ATTACHMENT", () => {
   });
 });
 
-describe("A_INGEST_ATTACHMENT — passthrough + byte cap (sage round 1)", () => {
+describe("A_INGEST_ATTACHMENT — passthrough and size limits", () => {
   const load = () => import("../examples/soc-demo/blocks/A_INGEST_ATTACHMENT/action");
 
   test("preserves the original attachments field (monotonic payload)", async () => {
