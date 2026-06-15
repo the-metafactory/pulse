@@ -116,3 +116,73 @@ describe("A_NOTIFY_MATTERMOST token pairing", () => {
     expect(auth[0]).toBe("Bearer input-token");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A_SANITIZE_IOCS / A_FORMAT_ADVISORY — collect-value contract (P-600 migration)
+// These consume an AGENT step's collect field, which stores the result VALUE
+// (object or model JSON string), NOT the transport envelope.
+// ---------------------------------------------------------------------------
+
+describe("A_SANITIZE_IOCS — reads the collected value, not an envelope", () => {
+  const load = () => import("../examples/soc-demo/blocks/A_SANITIZE_IOCS/action");
+
+  test("triage as a VALUE OBJECT: drops internal hosts, keeps external", async () => {
+    const mod = await load();
+    const triage = {
+      verdict: "phishing",
+      confidence: 0.9,
+      iocs: {
+        urls: ["https://evil.example/login", "https://mail.switch.ch/x"],
+        domains: ["evil.example", "example-university.ch"],
+        senders: ["a@evil.example", "b@mail.switch.ch"],
+        hashes: ["abc"],
+      },
+    };
+    const r = (await mod.default.execute({ triage, scenario: "s" }, ctxWith())) as Record<string, unknown>;
+    const out = r.iocs_sanitized as Record<string, string[] | string | number>;
+    expect(out.verdict).toBe("phishing");
+    expect(out.urls).toEqual(["https://evil.example/login"]); // *.switch.ch dropped
+    expect(out.domains).toEqual(["evil.example"]); // example-university.ch dropped
+    expect(out.senders).toEqual(["a@evil.example"]); // @*.switch.ch dropped
+    expect(out.hashes).toEqual(["abc"]);
+    expect(r.scenario).toBe("s"); // passthrough
+  });
+
+  test("triage as a JSON STRING: parsed, not treated as an envelope", async () => {
+    const mod = await load();
+    const triage = JSON.stringify({ verdict: "benign", iocs: { domains: ["evil.example"] } });
+    const r = (await mod.default.execute({ triage }, ctxWith())) as Record<string, unknown>;
+    const out = r.iocs_sanitized as Record<string, unknown>;
+    expect(out.verdict).toBe("benign");
+    expect(out.domains).toEqual(["evil.example"]);
+  });
+
+  test("missing/garbled triage degrades to empty, does not crash", async () => {
+    const mod = await load();
+    for (const triage of [undefined, "not json", 42, null]) {
+      const r = (await mod.default.execute({ triage }, ctxWith())) as Record<string, unknown>;
+      const out = r.iocs_sanitized as Record<string, unknown>;
+      expect(out.urls).toEqual([]);
+      expect(out.domains).toEqual([]);
+    }
+  });
+});
+
+describe("A_FORMAT_ADVISORY — reads the collected enrichment value", () => {
+  test("enrichment as a VALUE OBJECT lands in the advisory (not silently empty)", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_FORMAT_ADVISORY/action");
+    const r = (await mod.default.execute(
+      {
+        triage: { verdict: "phishing" },
+        enrichment: { advisory: "Confirmed phishing campaign targeting members." },
+        iocs_sanitized: { urls: ["https://evil.example"] },
+        approval: { name: "approve", verdict: "pass", notes: "ok", opened_at: "", closed_at: "" },
+        scenario: "s",
+      },
+      ctxWith(),
+    )) as Record<string, unknown>;
+    const doc = r.advisory_doc as { markdown?: string };
+    expect(typeof doc.markdown).toBe("string");
+    expect(doc.markdown).toContain("Confirmed phishing campaign");
+  });
+});

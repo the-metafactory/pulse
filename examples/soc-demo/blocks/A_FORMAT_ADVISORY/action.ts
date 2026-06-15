@@ -12,7 +12,6 @@
  */
 
 import type { ActionContext } from "../../../../src/types/action";
-import type { AgentTaskResult } from "../../../../src/types/agent";
 import type { GateResult } from "../../../../src/types/pipeline";
 
 interface SanitizedIocs {
@@ -78,7 +77,10 @@ function renderValue(value: unknown, indent = 0): string[] {
 export default {
   async execute(input: Record<string, unknown>, _ctx: ActionContext) {
     const { triage, enrichment, iocs_sanitized, approval, ...payload } = input;
-    const enriched = parseAgentJson((enrichment as AgentTaskResult).output);
+    // `enrichment` is the agent step's RESULT VALUE (collect stores
+    // result.output, P-600), not an envelope — parseAgentJson tolerates either
+    // the structured object or a model JSON string.
+    const enriched = parseAgentJson(enrichment);
     const gate = approval as GateResult;
     const iocs = (iocs_sanitized ?? {}) as SanitizedIocs;
     const date = new Date().toISOString().slice(0, 10);
