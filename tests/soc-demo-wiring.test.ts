@@ -494,6 +494,30 @@ describe("runSavedFlow — re-run a saved playbook, no composition (saved flows)
     expect(poster.posts.some((p) => p.includes("frontier-A"))).toBe(false);
   });
 
+  test("sanitizes a hostile flow name before posting (no @everyone/markdown injection)", async () => {
+    const hostile = [
+      'name: "F_X @everyone `ping` [x](http://evil)"',
+      "actions:",
+      "  - A_EXTRACT_IOCS  # sovereignty: D, residency: CH",
+      "",
+    ].join("\n");
+    const poster = new ConsolePoster();
+    const result = await runSavedFlow(hostile, {
+      llm: makeStubLLM(),
+      poster,
+      gateProvider: passGate,
+      agentProvider: null,
+      render: false,
+      blocksDir: BLOCKS_DIR,
+      initialInput: { scenario: "x", text: "x" },
+    });
+    expect(result.status).toBe("complete");
+    const lead = poster.posts.find((p) => p.includes("Running saved flow"))!;
+    expect(lead).not.toContain("@everyone");
+    expect(lead).not.toContain("`");
+    expect(lead).not.toContain("](http"); // markdown link stripped
+  });
+
   test("a malformed saved YAML returns invalid, never throws", async () => {
     const result = await runSavedFlow("name: [unterminated\n  actions: : :", {
       llm: makeStubLLM(),

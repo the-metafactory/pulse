@@ -312,16 +312,30 @@ export type RunScenarioResult =
   | { status: "no-match"; message: string }
   | { status: "invalid"; findings: unknown[] }
   | { status: "aborted"; notes: string }
-  // On a successful compose+run the composed `yaml` + flow `name` are surfaced
-  // so a host (e.g. the Yarrow bot pack) can PERSIST the flow as a re-runnable
-  // playbook — see runSavedFlow for the no-compose re-run path.
+  // On BOTH a `complete` and a `failed` run the composed `yaml` + flow `name`
+  // are surfaced so a host (e.g. the Yarrow bot pack) can PERSIST the flow as a
+  // re-runnable playbook — see runSavedFlow for the no-compose re-run path.
   | { status: "complete" | "failed"; output?: Record<string, unknown>; error?: string; yaml?: string; name?: string };
 
 /**
- * Validate → post → operator-ack → execute → artifact. The shared tail of both
- * runScenario (composed YAML) and runSavedFlow (loaded YAML). The wiring is the
- * enforcement point: it re-validates independently and REFUSES to run a flow
- * whose validation isn't clean, and never executes without an operator pass.
+ * Sanitize a YAML-controlled flow name for safe display in a chat channel.
+ * Whitelist to a flow-id charset so a hostile/odd `name:` cannot inject
+ * markdown, links, or mass mentions (e.g. `@everyone`) into the operator
+ * channel. Used wherever the name appears OUTSIDE a code fence.
+ */
+function sanitizeFlowName(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9 ._-]/g, "").trim().slice(0, 64);
+  return cleaned.length > 0 ? cleaned : "flow";
+}
+
+/**
+ * Validate → (lead) → post → operator-ack → execute → artifact. The shared tail
+ * of both runScenario (composed YAML) and runSavedFlow (loaded YAML). The
+ * wiring is the enforcement point: it re-validates independently and REFUSES to
+ * run a flow whose validation isn't clean, and never executes without an
+ * operator pass. `leadPost` (if given) is posted only AFTER validation passes —
+ * callers use it for a header line whose text derives from untrusted YAML, so
+ * nothing YAML-controlled reaches the channel before the validator clears it.
  */
 async function executeValidatedFlow(
   opts: RunScenarioOptions,
@@ -329,6 +343,7 @@ async function executeValidatedFlow(
   catalog: Awaited<ReturnType<typeof buildCatalog>>,
   initialInput: Record<string, unknown>,
   blocksDir: string,
+  leadPost?: string,
 ): Promise<RunScenarioResult> {
   // Independent re-validation FIRST — the wiring is the enforcement point. A
   // malformed/invalid saved YAML must surface as `invalid` here, never throw
@@ -338,6 +353,9 @@ async function executeValidatedFlow(
     await opts.poster.post(`🛑 Validator refused the flow:\n${validation.findings.map((f) => `- ${f.message}`).join("\n")}`);
     return { status: "invalid", findings: validation.findings };
   }
+  // Only now (validation clean) post any caller-supplied lead — keeps
+  // YAML-derived text out of the channel until the validator vouches for it.
+  if (leadPost !== undefined) await opts.poster.post(leadPost);
 
   // Safe to parse now (validatePipeline parsed it cleanly); guard anyway.
   let doc: { name?: string; actions: unknown[] };
@@ -440,15 +458,25 @@ export async function runSavedFlow(yaml: string, opts: RunScenarioOptions): Prom
   const blocksDir = opts.blocksDir ?? BLOCKS_DIR;
   const catalog = await buildCatalog(blocksDir);
   const initialInput = opts.initialInput ?? { scenario: "", text: "" };
-  const name = ((): string => {
+  const rawName = ((): string => {
     try {
       return (parseYaml(yaml) as { name?: string }).name ?? "saved flow";
     } catch (_err) {
       return "saved flow";
     }
   })();
-  await opts.poster.post(`▶️ Running saved flow **${name}** (no re-composition).`);
-  return executeValidatedFlow(opts, { yaml, mermaid: null, summary: `Saved flow — ${name}` }, catalog, initialInput, blocksDir);
+  // SANITIZE the YAML-controlled name before it ever reaches the channel, and
+  // post it only AFTER validation (via leadPost) — a saved flow named
+  // "@everyone" or with markdown/links can't inject into the operator channel.
+  const name = sanitizeFlowName(rawName);
+  return executeValidatedFlow(
+    opts,
+    { yaml, mermaid: null, summary: `Saved flow — ${name}` },
+    catalog,
+    initialInput,
+    blocksDir,
+    `▶️ Running saved flow **${name}** (no re-composition).`,
+  );
 }
 
 // ---------------------------------------------------------------------------
