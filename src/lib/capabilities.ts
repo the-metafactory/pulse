@@ -200,12 +200,13 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
   // Clean env to avoid session interference.
   const cleanEnv = { ...process.env };
   delete cleanEnv.CLAUDECODE;
-  // Use the Claude Code SUBSCRIPTION (OAuth) for `claude -p`, never an inherited
-  // ANTHROPIC_API_KEY. A key present in the env takes precedence inside the CLI,
-  // and a stale/invalid one makes claude -p fail with "Invalid API key" — which
-  // would then force the costly (and, with a bad key, also-failing) API
-  // fallback. Stripping it keeps this a zero-marginal-cost subscription call,
-  // the whole reason stage 1 prefers claude -p over the stage-3 API path.
+  // Remove ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN from the subprocess env. The
+  // CLI prefers an env key over its own login state, so a stale/invalid key here
+  // makes `claude -p` fail with "Invalid API key" and forces the (costly, and
+  // with a bad key also-failing) API fallback. Stripping these lets the CLI use
+  // whatever non-key auth it already has — the logged-in CC subscription on a
+  // normal install. (This does not itself verify a login exists; if none does,
+  // `claude -p` fails and stage 1 simply misses.)
   delete cleanEnv.ANTHROPIC_API_KEY;
   delete cleanEnv.ANTHROPIC_AUTH_TOKEN;
 
@@ -242,22 +243,16 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
       return null;
     }
 
+    // Extract from CC JSON wrapper: {"type":"result","result":"<content>"}.
     // A CC result with is_error (invalid key, usage limit, refusal) exits 0 but
-    // its `result` is an error string, not a model answer. Treat it as a stage-1
-    // miss so the caller falls back — never surface "Invalid API key" as LLM
-    // output (which would poison the composer).
-    try {
-      const wrapper = JSON.parse(rawStdout) as { is_error?: boolean; result?: unknown };
-      if (wrapper?.is_error === true) {
-        log(`stage1 is_error: ${String(wrapper.result).slice(0, 200)}`);
-        return null;
-      }
-    } catch (_err) {
-      // Not a JSON wrapper (older CC plain-text output) — fall through to extract.
+    // its `result` is an error string, not a model answer — treat it as a
+    // stage-1 miss so the caller falls back, never surfacing "Invalid API key"
+    // as LLM output (which would poison the composer).
+    const { text, isError } = extractClaudeOutput(rawStdout);
+    if (isError) {
+      log(`stage1 is_error: ${text.slice(0, 200)}`);
+      return null;
     }
-
-    // Extract from CC JSON wrapper: {"type":"result","result":"<content>"}
-    const text = extractClaudeOutput(rawStdout);
 
     let json: unknown;
     if (options?.json) {
@@ -277,17 +272,23 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
   }
 }
 
-/** Extract text content from claude --output-format json wrapper */
-function extractClaudeOutput(raw: string): string {
+/**
+ * Extract content from a `claude --output-format json` wrapper in ONE parse,
+ * returning both the text and whether the CLI flagged an error result
+ * (`is_error: true` — invalid key, usage limit, refusal). Older plain-text CC
+ * output (non-JSON) is returned as-is with isError=false.
+ */
+function extractClaudeOutput(raw: string): { text: string; isError: boolean } {
   try {
-    const wrapper = JSON.parse(raw);
-    if (wrapper.type === "result" && typeof wrapper.result === "string") {
-      return wrapper.result;
+    const wrapper = JSON.parse(raw) as { type?: string; result?: unknown; is_error?: boolean };
+    const isError = wrapper?.is_error === true;
+    if (wrapper?.type === "result" && typeof wrapper.result === "string") {
+      return { text: wrapper.result, isError };
     }
-    return raw;
+    return { text: raw, isError };
   } catch (_err) {
     // Not a JSON wrapper — return raw text (e.g., plain text from older CC versions)
-    return raw.trim();
+    return { text: raw.trim(), isError: false };
   }
 }
 
