@@ -1,0 +1,26 @@
+{
+  "name": "A_INGEST_ATTACHMENT",
+  "version": "1.0.0",
+  "description": "Fetch chat attachments (Discord/Mattermost file uploads) and fold their TEXT content into the `text` field so downstream blocks (A_EXTRACT_IOCS, triage) see a dropped .eml / .txt / .csv the same as pasted text. Reads `attachments` (array of { name, contentType, url }). Only text-like types are decoded (text/*, message/rfc822, .eml/.txt/.csv/.log/.json); binary/image attachments are recorded as metadata, not decoded. Stub-safe: no attachments, or no `fetch` capability, → pass through unchanged. Fetch/decoder errors per attachment are recorded, never crash the flow.",
+  "input": {
+    "attachments": {
+      "type": "array"
+    }
+  },
+  "output": {
+    "text": {
+      "type": "string"
+    },
+    "attachments_ingested": {
+      "type": "object"
+    }
+  },
+  "requires": [
+    "fetch"
+  ],
+  "tags": [
+    "soc",
+    "ingest",
+    "attachment"
+  ]
+}

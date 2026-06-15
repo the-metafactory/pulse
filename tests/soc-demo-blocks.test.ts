@@ -186,3 +186,69 @@ describe("A_FORMAT_ADVISORY — reads the collected enrichment value", () => {
     expect(doc.markdown).toContain("Confirmed phishing campaign");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A_INGEST_ATTACHMENT — fold chat file uploads into `text`
+// ---------------------------------------------------------------------------
+
+describe("A_INGEST_ATTACHMENT", () => {
+  const load = () => import("../examples/soc-demo/blocks/A_INGEST_ATTACHMENT/action");
+
+  test("fetches a text-like (.eml) attachment and folds it into text", async () => {
+    const mod = await load();
+    let fetched = "";
+    const ctx = ctxWith(async (url) => {
+      fetched = url;
+      return new Response("From: evil@bad.example\nSubject: invoice\nClick hxxp://evil[.]example/x");
+    });
+    const r = (await mod.default.execute(
+      {
+        text: "please triage this mail",
+        attachments: [{ name: "phish.eml", contentType: "message/rfc822", url: "https://cdn.example/phish.eml" }],
+        scenario: "s",
+      },
+      ctx,
+    )) as Record<string, any>;
+    expect(fetched).toBe("https://cdn.example/phish.eml");
+    expect(r.text).toContain("please triage this mail"); // pasted text preserved
+    expect(r.text).toContain("evil@bad.example"); // attachment body folded in
+    expect(r.text).toContain("hxxp://evil[.]example/x"); // IOCs now reach A_EXTRACT_IOCS
+    expect(r.attachments_ingested.decoded).toBe(1);
+    expect(r.scenario).toBe("s"); // passthrough
+  });
+
+  test("no attachments → passes text through unchanged", async () => {
+    const mod = await load();
+    let called = false;
+    const ctx = ctxWith(async () => { called = true; return new Response("x"); });
+    const r = (await mod.default.execute({ text: "just text" }, ctx)) as Record<string, any>;
+    expect(r.text).toBe("just text");
+    expect(called).toBe(false);
+    expect(r.attachments_ingested.decoded).toBe(0);
+  });
+
+  test("binary/image attachments are skipped, not decoded (no OCR)", async () => {
+    const mod = await load();
+    let called = false;
+    const ctx = ctxWith(async () => { called = true; return new Response("PNGDATA"); });
+    const r = (await mod.default.execute(
+      { text: "look", attachments: [{ name: "shot.png", contentType: "image/png", url: "https://cdn/x.png" }] },
+      ctx,
+    )) as Record<string, any>;
+    expect(called).toBe(false); // not fetched
+    expect(r.text).toBe("look");
+    expect(r.attachments_ingested.decoded).toBe(0);
+    expect(r.attachments_ingested.skipped).toBe(1);
+  });
+
+  test("a fetch error is recorded, never thrown", async () => {
+    const mod = await load();
+    const ctx = ctxWith(async () => new Response("nope", { status: 404 }));
+    const r = (await mod.default.execute(
+      { text: "t", attachments: [{ name: "a.txt", contentType: "text/plain", url: "https://cdn/a.txt" }] },
+      ctx,
+    )) as Record<string, any>;
+    expect(r.text).toBe("t"); // unchanged (decode failed)
+    expect(r.attachments_ingested.errors[0]).toContain("404");
+  });
+});
