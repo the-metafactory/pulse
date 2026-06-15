@@ -186,3 +186,117 @@ describe("A_FORMAT_ADVISORY — reads the collected enrichment value", () => {
     expect(doc.markdown).toContain("Confirmed phishing campaign");
   });
 });
+
+// ---------------------------------------------------------------------------
+// A_INGEST_ATTACHMENT — fold chat file uploads into `text`
+// ---------------------------------------------------------------------------
+
+describe("A_INGEST_ATTACHMENT", () => {
+  const load = () => import("../examples/soc-demo/blocks/A_INGEST_ATTACHMENT/action");
+
+  test("fetches a text-like (.eml) attachment and folds it into text", async () => {
+    const mod = await load();
+    let fetched = "";
+    const ctx = ctxWith(async (url) => {
+      fetched = url;
+      return new Response("From: evil@bad.example\nSubject: invoice\nClick hxxp://evil[.]example/x");
+    });
+    const r = (await mod.default.execute(
+      {
+        text: "please triage this mail",
+        attachments: [{ name: "phish.eml", contentType: "message/rfc822", url: "https://cdn.example/phish.eml" }],
+        scenario: "s",
+      },
+      ctx,
+    )) as Record<string, any>;
+    expect(fetched).toBe("https://cdn.example/phish.eml");
+    expect(r.text).toContain("please triage this mail"); // pasted text preserved
+    expect(r.text).toContain("evil@bad.example"); // attachment body folded in
+    expect(r.text).toContain("hxxp://evil[.]example/x"); // IOCs now reach A_EXTRACT_IOCS
+    expect(r.attachments_ingested.decoded).toBe(1);
+    expect(r.scenario).toBe("s"); // passthrough
+  });
+
+  test("no attachments → passes text through unchanged", async () => {
+    const mod = await load();
+    let called = false;
+    const ctx = ctxWith(async () => { called = true; return new Response("x"); });
+    const r = (await mod.default.execute({ text: "just text" }, ctx)) as Record<string, any>;
+    expect(r.text).toBe("just text");
+    expect(called).toBe(false);
+    expect(r.attachments_ingested.decoded).toBe(0);
+  });
+
+  test("binary/image attachments are skipped, not decoded (no OCR)", async () => {
+    const mod = await load();
+    let called = false;
+    const ctx = ctxWith(async () => { called = true; return new Response("PNGDATA"); });
+    const r = (await mod.default.execute(
+      { text: "look", attachments: [{ name: "shot.png", contentType: "image/png", url: "https://cdn/x.png" }] },
+      ctx,
+    )) as Record<string, any>;
+    expect(called).toBe(false); // not fetched
+    expect(r.text).toBe("look");
+    expect(r.attachments_ingested.decoded).toBe(0);
+    expect(r.attachments_ingested.skipped).toBe(1);
+  });
+
+  test("a fetch error is recorded, never thrown", async () => {
+    const mod = await load();
+    const ctx = ctxWith(async () => new Response("nope", { status: 404 }));
+    const r = (await mod.default.execute(
+      { text: "t", attachments: [{ name: "a.txt", contentType: "text/plain", url: "https://cdn/a.txt" }] },
+      ctx,
+    )) as Record<string, any>;
+    expect(r.text).toBe("t"); // unchanged (decode failed)
+    expect(r.attachments_ingested.errors[0]).toContain("404");
+  });
+});
+
+describe("A_INGEST_ATTACHMENT — passthrough and size limits", () => {
+  const load = () => import("../examples/soc-demo/blocks/A_INGEST_ATTACHMENT/action");
+
+  test("preserves the original attachments field (monotonic payload)", async () => {
+    const mod = await load();
+    const atts = [{ name: "a.txt", contentType: "text/plain", url: "https://cdn/a.txt" }];
+    const ctx = ctxWith(async () => new Response("hello"));
+    const r = (await mod.default.execute({ text: "t", attachments: atts }, ctx)) as Record<string, any>;
+    expect(r.attachments).toEqual(atts); // passed through unchanged
+    expect(r.text).toContain("hello");
+  });
+
+  test("no fetch capability → attachments preserved, not dropped", async () => {
+    const mod = await load();
+    const atts = [{ name: "a.txt", contentType: "text/plain", url: "https://cdn/a.txt" }];
+    const r = (await mod.default.execute({ text: "t", attachments: atts }, ctxWith(undefined))) as Record<string, any>;
+    expect(r.attachments).toEqual(atts);
+    expect(r.attachments_ingested.decoded).toBe(0);
+  });
+
+  test("rejects an oversized attachment by Content-Length (error, not folded)", async () => {
+    const mod = await load();
+    const ctx = ctxWith(async () =>
+      new Response("x", { headers: { "content-length": String(999 * 1024) } }),
+    );
+    const r = (await mod.default.execute(
+      { text: "t", attachments: [{ name: "big.txt", contentType: "text/plain", url: "https://cdn/big.txt" }] },
+      ctx,
+    )) as Record<string, any>;
+    expect(r.text).toBe("t"); // not folded
+    expect(r.attachments_ingested.errors[0]).toContain("too large");
+  });
+});
+
+describe("A_INGEST_ATTACHMENT — aggregate caps", () => {
+  test("caps the number of attachments fetched (overflow recorded, not fetched)", async () => {
+    const mod = await import("../examples/soc-demo/blocks/A_INGEST_ATTACHMENT/action");
+    let fetches = 0;
+    const ctx = ctxWith(async () => { fetches++; return new Response("x"); });
+    const many = Array.from({ length: 15 }, (_, i) => ({
+      name: `a${i}.txt`, contentType: "text/plain", url: `https://cdn/a${i}.txt`,
+    }));
+    const r = (await mod.default.execute({ text: "t", attachments: many }, ctx)) as Record<string, any>;
+    expect(fetches).toBeLessThanOrEqual(10); // capped
+    expect(r.attachments_ingested.skipped_detail.some((s: string) => s.includes("over 10"))).toBe(true);
+  });
+});
