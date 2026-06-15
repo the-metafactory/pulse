@@ -92,13 +92,14 @@ function extractSummary(text: string): string {
 }
 
 /**
- * Tier for the composer's frontier reasoning (text → pipeline YAML).
+ * Resolve the tier requested for the composer's reasoning (text → pipeline
+ * YAML) from PULSE_COMPOSE_TIER, defaulting to "standard". The tier→model
+ * mapping itself lives in the LLM layer (capabilities.ts / the claude CLI).
  *
- * Default "standard" (Sonnet): fast and reliable for structured composition
- * over the catalog, and not prone to the long `claude -p` latencies tier
- * "smart" (Opus) can hit — an Opus compose was observed timing out at the
- * 180s claude-CLI ceiling, stalling the whole flow. Override with
- * PULSE_COMPOSE_TIER=fast|standard|smart if a harder scenario needs Opus.
+ * Why default away from "smart": an Opus compose (tier "smart") was observed
+ * timing out at the 180s claude-CLI ceiling, stalling the flow right after the
+ * self-disclosure post. "standard" is chosen as the default to avoid that
+ * failure mode; set PULSE_COMPOSE_TIER=smart to opt back into Opus per run.
  */
 export function composeTier(): "fast" | "standard" | "smart" {
   const t = process.env.PULSE_COMPOSE_TIER;

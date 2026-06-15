@@ -3,7 +3,7 @@
  * ISC-28..34 of the SOC demo plan (ISA.md, slug 2026-06-11-pulse-soc-demo-composer).
  */
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -183,19 +183,20 @@ describe("renderMermaid (ISC-33/34)", () => {
   }, 60_000);
 });
 
-describe("composeTier — env-tunable, defaults to standard (Sonnet)", () => {
+describe("composeTier — env-tunable, defaults to standard", () => {
   const prev = process.env.PULSE_COMPOSE_TIER;
-  const restore = () => {
+  // Restore after EACH test, even if an assertion throws mid-test, so a
+  // mutated PULSE_COMPOSE_TIER never leaks into a sibling test.
+  afterEach(() => {
     if (prev === undefined) delete process.env.PULSE_COMPOSE_TIER;
     else process.env.PULSE_COMPOSE_TIER = prev;
-  };
+  });
 
   test("defaults to standard when unset or invalid", () => {
     delete process.env.PULSE_COMPOSE_TIER;
     expect(composeTier()).toBe("standard");
     process.env.PULSE_COMPOSE_TIER = "bogus";
     expect(composeTier()).toBe("standard");
-    restore();
   });
 
   test("honours a valid override", () => {
@@ -203,7 +204,6 @@ describe("composeTier — env-tunable, defaults to standard (Sonnet)", () => {
     expect(composeTier()).toBe("smart");
     process.env.PULSE_COMPOSE_TIER = "fast";
     expect(composeTier()).toBe("fast");
-    restore();
   });
 
   test("compose calls the llm at the resolved tier (default standard)", async () => {
@@ -218,6 +218,5 @@ describe("composeTier — env-tunable, defaults to standard (Sonnet)", () => {
       systemPrompt: "test",
     });
     expect(tiers).toEqual(["standard"]); // not "smart" (Opus)
-    restore();
   });
 });
