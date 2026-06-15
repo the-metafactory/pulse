@@ -252,3 +252,37 @@ describe("A_INGEST_ATTACHMENT", () => {
     expect(r.attachments_ingested.errors[0]).toContain("404");
   });
 });
+
+describe("A_INGEST_ATTACHMENT — passthrough + byte cap (sage round 1)", () => {
+  const load = () => import("../examples/soc-demo/blocks/A_INGEST_ATTACHMENT/action");
+
+  test("preserves the original attachments field (monotonic payload)", async () => {
+    const mod = await load();
+    const atts = [{ name: "a.txt", contentType: "text/plain", url: "https://cdn/a.txt" }];
+    const ctx = ctxWith(async () => new Response("hello"));
+    const r = (await mod.default.execute({ text: "t", attachments: atts }, ctx)) as Record<string, any>;
+    expect(r.attachments).toEqual(atts); // passed through unchanged
+    expect(r.text).toContain("hello");
+  });
+
+  test("no fetch capability → attachments preserved, not dropped", async () => {
+    const mod = await load();
+    const atts = [{ name: "a.txt", contentType: "text/plain", url: "https://cdn/a.txt" }];
+    const r = (await mod.default.execute({ text: "t", attachments: atts }, ctxWith(undefined))) as Record<string, any>;
+    expect(r.attachments).toEqual(atts);
+    expect(r.attachments_ingested.decoded).toBe(0);
+  });
+
+  test("rejects an oversized attachment by Content-Length (error, not folded)", async () => {
+    const mod = await load();
+    const ctx = ctxWith(async () =>
+      new Response("x", { headers: { "content-length": String(999 * 1024) } }),
+    );
+    const r = (await mod.default.execute(
+      { text: "t", attachments: [{ name: "big.txt", contentType: "text/plain", url: "https://cdn/big.txt" }] },
+      ctx,
+    )) as Record<string, any>;
+    expect(r.text).toBe("t"); // not folded
+    expect(r.attachments_ingested.errors[0]).toContain("too large");
+  });
+});
