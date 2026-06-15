@@ -170,15 +170,21 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
   const debug = process.env.PULSE_LLM_DEBUG === "1";
   const log = (msg: string) => { if (debug) console.error(`[pulse:llm] ${msg}`); };
 
-  // Resolve claude to an absolute path. PULSE_CLAUDE_BIN wins — it lets a host
-  // with a minimal PATH (e.g. a launchd daemon) point at the binary explicitly
-  // instead of relying on `which`. Otherwise fall back to `which claude`.
-  let claudePath = process.env.PULSE_CLAUDE_BIN?.trim();
-  if (!claudePath) {
+  // Resolve claude to an ABSOLUTE path (no PATH-dependent invocation). An
+  // operator may override via PULSE_CLAUDE_BIN — useful on a host with a minimal
+  // PATH (e.g. a launchd daemon) — but it must itself be absolute; a relative
+  // value would reintroduce the PATH dependency, so it's ignored with a warning
+  // and we fall back to `which claude`.
+  const override = process.env.PULSE_CLAUDE_BIN?.trim();
+  let claudePath: string;
+  if (override && override.startsWith("/")) {
+    claudePath = override;
+  } else {
+    if (override) log(`stage1: ignoring non-absolute PULSE_CLAUDE_BIN="${override}" — falling back to \`which\``);
     const whichProc = Bun.spawnSync(["which", "claude"], { stdout: "pipe" });
     claudePath = whichProc.stdout.toString().trim();
     if (!claudePath || whichProc.exitCode !== 0) {
-      log(`stage1 skipped: PULSE_CLAUDE_BIN unset and \`which claude\` failed (exit=${whichProc.exitCode})`);
+      log(`stage1 skipped: no absolute PULSE_CLAUDE_BIN and \`which claude\` failed (exit=${whichProc.exitCode})`);
       return null;
     }
   }
