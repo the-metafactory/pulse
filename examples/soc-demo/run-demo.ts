@@ -330,15 +330,24 @@ async function executeValidatedFlow(
   initialInput: Record<string, unknown>,
   blocksDir: string,
 ): Promise<RunScenarioResult> {
-  const doc = parseYaml(flow.yaml) as { name?: string; actions: unknown[] };
-  const name = doc.name ?? "F_COMPOSED";
-
-  // Independent re-validation — the wiring is the enforcement point.
+  // Independent re-validation FIRST — the wiring is the enforcement point. A
+  // malformed/invalid saved YAML must surface as `invalid` here, never throw
+  // out of a later parse (sage), so validation precedes parseYaml.
   const validation = validatePipeline(flow.yaml, catalog, { initialFields: Object.keys(initialInput) });
   if (!validation.valid) {
     await opts.poster.post(`🛑 Validator refused the flow:\n${validation.findings.map((f) => `- ${f.message}`).join("\n")}`);
     return { status: "invalid", findings: validation.findings };
   }
+
+  // Safe to parse now (validatePipeline parsed it cleanly); guard anyway.
+  let doc: { name?: string; actions: unknown[] };
+  try {
+    doc = parseYaml(flow.yaml) as { name?: string; actions: unknown[] };
+  } catch (err) {
+    await opts.poster.post(`🛑 Validator refused the flow: unparseable YAML — ${err instanceof Error ? err.message : String(err)}`);
+    return { status: "invalid", findings: [{ message: "unparseable YAML" }] };
+  }
+  const name = doc.name ?? "F_COMPOSED";
 
   // Post YAML + diagram + summary. Render failure → fenced source (§8.5).
   const png = opts.render === false ? null : await renderMermaid(flow.mermaid ?? "");
@@ -416,11 +425,16 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
 }
 
 /**
- * Re-run a SAVED flow with fresh input — NO composition, NO LLM. The
- * authoring-vs-operation split: runScenario composes a playbook once (slow,
- * frontier, human-gated); runSavedFlow operates a known-good playbook on a new
- * artifact (deterministic). Still re-validates and still operator-gates every
- * execution — a saved remediation flow must be approved each time it runs.
+ * Re-run a SAVED flow with fresh input — skips COMPOSITION (no LLM authoring
+ * call, no frontier-A reasoning that picks the blocks). The authoring-vs-
+ * operation split: runScenario composes a playbook once (slow, frontier,
+ * human-gated); runSavedFlow operates that known-good playbook on a new
+ * artifact — the flow STRUCTURE is fixed, not re-decided by a model.
+ *
+ * NOT "no LLM" overall: the saved flow's own `agent:` steps still execute via
+ * the configured agentProvider (local-only → Ollama, etc.) — that is the flow
+ * doing its work, not re-authoring. Still re-validates and still operator-gates
+ * every execution — a saved remediation flow must be approved each time it runs.
  */
 export async function runSavedFlow(yaml: string, opts: RunScenarioOptions): Promise<RunScenarioResult> {
   const blocksDir = opts.blocksDir ?? BLOCKS_DIR;

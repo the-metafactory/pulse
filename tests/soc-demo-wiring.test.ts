@@ -494,6 +494,18 @@ describe("runSavedFlow — re-run a saved playbook, no composition (saved flows)
     expect(poster.posts.some((p) => p.includes("frontier-A"))).toBe(false);
   });
 
+  test("a malformed saved YAML returns invalid, never throws", async () => {
+    const result = await runSavedFlow("name: [unterminated\n  actions: : :", {
+      llm: makeStubLLM(),
+      poster: new ConsolePoster(),
+      gateProvider: passGate,
+      agentProvider: null,
+      render: false,
+      blocksDir: BLOCKS_DIR,
+    });
+    expect(result.status).toBe("invalid");
+  });
+
   test("still operator-gates: a fail verdict aborts the saved flow", async () => {
     const failGate: GateProvider = { async requestVerdict() { return { verdict: "fail", notes: "no" }; } };
     const result = await runSavedFlow(SAVED_YAML, {
