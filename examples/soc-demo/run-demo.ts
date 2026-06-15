@@ -312,7 +312,129 @@ export type RunScenarioResult =
   | { status: "no-match"; message: string }
   | { status: "invalid"; findings: unknown[] }
   | { status: "aborted"; notes: string }
-  | { status: "complete" | "failed"; output?: Record<string, unknown>; error?: string };
+  // On BOTH a `complete` and a `failed` run the composed `yaml` + flow `name`
+  // are surfaced so a host (e.g. the Yarrow bot pack) can PERSIST the flow as a
+  // re-runnable playbook — see runSavedFlow for the no-compose re-run path.
+  | { status: "complete" | "failed"; output?: Record<string, unknown>; error?: string; yaml?: string; name?: string };
+
+/**
+ * Sanitize a YAML-controlled flow name for safe display in a chat channel.
+ * Whitelist to a flow-id charset so a hostile/odd `name:` cannot inject
+ * markdown, links, or mass mentions (e.g. `@everyone`) into the operator
+ * channel. Used wherever the name appears OUTSIDE a code fence.
+ */
+function sanitizeFlowName(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9 ._-]/g, "").trim().slice(0, 64);
+  return cleaned.length > 0 ? cleaned : "flow";
+}
+
+/**
+ * Neutralize code-fence delimiters in untrusted text posted INSIDE a ```fence.
+ * A ``` in the body would close the fence early and let following text render
+ * as channel markdown (mentions/links). A zero-width space keeps it visible but
+ * no longer a delimiter.
+ */
+export function fenceSafe(s: string): string {
+  return s.replace(/```/g, "`\u200b``");
+}
+
+/**
+ * Neutralize mass-mentions + fence delimiters in untrusted text posted OUTSIDE
+ * a fence (e.g. the bolded summary line). Breaks `@everyone`/`@here` and ``` so
+ * a hostile composer summary or saved-flow summary can't ping the channel.
+ */
+export function channelSafe(s: string): string {
+  return fenceSafe(s).replace(/@(everyone|here)/gi, "@\u200b$1");
+}
+
+/**
+ * Validate → (lead) → post → operator-ack → execute → artifact. The shared tail
+ * of both runScenario (composed YAML) and runSavedFlow (loaded YAML). The
+ * wiring is the enforcement point: it re-validates independently and REFUSES to
+ * run a flow whose validation isn't clean, and never executes without an
+ * operator pass. `leadPost` (if given) is posted only AFTER validation passes —
+ * callers use it for a header line whose text derives from untrusted YAML, so
+ * nothing YAML-controlled reaches the channel before the validator clears it.
+ */
+interface ExecuteFlowArgs {
+  opts: RunScenarioOptions;
+  flow: { yaml: string; mermaid: string | null; summary: string };
+  catalog: Awaited<ReturnType<typeof buildCatalog>>;
+  initialInput: Record<string, unknown>;
+  blocksDir: string;
+  /** Header line posted only AFTER validation (callers pass sanitized text). */
+  leadPost?: string;
+}
+
+async function executeValidatedFlow(args: ExecuteFlowArgs): Promise<RunScenarioResult> {
+  const { opts, flow, catalog, initialInput, blocksDir, leadPost } = args;
+  // Independent re-validation FIRST — the wiring is the enforcement point. A
+  // malformed/invalid saved YAML must surface as `invalid` here, never throw
+  // out of a later parse (sage), so validation precedes parseYaml.
+  const validation = validatePipeline(flow.yaml, catalog, { initialFields: Object.keys(initialInput) });
+  if (!validation.valid) {
+    await opts.poster.post(`🛑 Validator refused the flow:\n${validation.findings.map((f) => `- ${f.message}`).join("\n")}`);
+    return { status: "invalid", findings: validation.findings };
+  }
+  // Post the caller's lead only after validation. The lead is already
+  // sanitized by the caller (sanitizeFlowName) — sanitization is the primary
+  // guard; posting post-validation is a secondary belt.
+  if (leadPost !== undefined) await opts.poster.post(leadPost);
+
+  // Safe to parse now (validatePipeline parsed it cleanly); guard anyway.
+  let doc: { name?: string; actions: unknown[] };
+  try {
+    doc = parseYaml(flow.yaml) as { name?: string; actions: unknown[] };
+  } catch (err) {
+    await opts.poster.post(`🛑 Validator refused the flow: unparseable YAML — ${err instanceof Error ? err.message : String(err)}`);
+    return { status: "invalid", findings: [{ message: "unparseable YAML" }] };
+  }
+  const name = doc.name ?? "F_COMPOSED";
+
+  // Post YAML + diagram + summary. fenceSafe() neutralizes any ``` inside the
+  // (untrusted) yaml/mermaid so a crafted body can't close the code fence early
+  // and inject channel markdown / mentions after it (sage). channelSafe()
+  // neutralizes mass-mentions in the bolded summary (posted OUTSIDE a fence).
+  const png = opts.render === false ? null : await renderMermaid(flow.mermaid ?? "");
+  const diagramPart = png ? undefined : flow.mermaid ? `\n\`\`\`mermaid\n${fenceSafe(flow.mermaid)}\`\`\`` : "";
+  await opts.poster.post(
+    `**${channelSafe(flow.summary)}**\n\`\`\`yaml\n${fenceSafe(flow.yaml)}\`\`\`${diagramPart ?? ""}`,
+    png ? { bytes: png, filename: "flow.png" } : undefined,
+  );
+
+  // Operator ack — nothing runs without it
+  const ack = await opts.gateProvider.requestVerdict({ name: "operator-ack", prompt: "Run this flow?" });
+  if (ack.verdict !== "pass") {
+    await opts.poster.post(`🛑 Aborted by operator: ${ack.notes}`);
+    return { status: "aborted", notes: ack.notes };
+  }
+
+  // Execute with per-step thread replies (ISC-37). agentProvider default: a
+  // local LLM one so judgment-step flows run; `null` disables, explicit overrides.
+  const steps = validateSteps(doc.actions);
+  const agentProvider =
+    opts.agentProvider === undefined ? makeLocalLlmAgentProvider(opts.llm) : opts.agentProvider;
+  const result = await runPipeline({ name, actions: steps }, initialInput, {
+    actionDirs: [blocksDir],
+    gateProvider: opts.gateProvider,
+    ...(agentProvider !== null && { agentProvider }),
+    onActionStepEvent: (event) => {
+      const line = stepLine(event, validation.annotations);
+      if (line) void opts.poster.post(line);
+    },
+  });
+
+  if (result.success) {
+    const advisory = (result.output as { advisory_doc?: { subject?: string; markdown?: string } } | undefined)?.advisory_doc;
+    const finalMessage = advisory?.markdown
+      ? `🏁 **Final artifact** — ${advisory.subject ?? "advisory"}\n\n${advisory.markdown}`
+      : `🏁 **Flow complete** (${result.durationMs}ms) — output fields: ${Object.keys(result.output ?? {}).map((k) => `\`${k}\``).join(", ")}`;
+    await opts.poster.post(finalMessage);
+    return { status: "complete", output: result.output, yaml: flow.yaml, name };
+  }
+  await opts.poster.post(`❌ Flow failed: ${result.error}`);
+  return { status: "failed", error: result.error, yaml: flow.yaml, name };
+}
 
 export async function runScenario(scenario: string, opts: RunScenarioOptions): Promise<RunScenarioResult> {
   const blocksDir = opts.blocksDir ?? BLOCKS_DIR;
@@ -337,67 +459,51 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
     return { status: "invalid", findings: composed.findings };
   }
 
-  // (3) Independent re-validation — the wiring is the enforcement point.
-  const validation = validatePipeline(composed.yaml, catalog, { initialFields: Object.keys(initialInput) });
-  if (!validation.valid) {
-    await opts.poster.post(`🛑 Validator refused the flow:\n${validation.findings.map((f) => `- ${f.message}`).join("\n")}`);
-    return { status: "invalid", findings: validation.findings };
-  }
-
-  // (4) Post YAML + diagram + summary. Render failure → fenced source (§8.5).
-  const png = opts.render === false ? null : await renderMermaid(composed.mermaid ?? "");
-  const diagramPart = png
-    ? undefined
-    : composed.mermaid
-      ? `\n\`\`\`mermaid\n${composed.mermaid}\`\`\``
-      : "";
-  await opts.poster.post(
-    `**Composed flow** — ${composed.summary}\n\`\`\`yaml\n${composed.yaml}\`\`\`${diagramPart ?? ""}`,
-    png ? { bytes: png, filename: "flow.png" } : undefined,
-  );
-
-  // (5) Operator ack — nothing runs without it
-  const ack = await opts.gateProvider.requestVerdict({
-    name: "operator-ack",
-    prompt: "Run this flow?",
-  });
-  if (ack.verdict !== "pass") {
-    await opts.poster.post(`🛑 Aborted by operator: ${ack.notes}`);
-    return { status: "aborted", notes: ack.notes };
-  }
-
-  // (6) Execute with per-step thread replies (ISC-37)
-  const doc = parseYaml(composed.yaml) as { name?: string; actions: unknown[] };
-  const steps = validateSteps(doc.actions);
-  // Default the agent provider to a local LLM one so judgment-step flows run
-  // end-to-end; `null` disables, an explicit provider overrides.
-  const agentProvider =
-    opts.agentProvider === undefined ? makeLocalLlmAgentProvider(opts.llm) : opts.agentProvider;
-  const result = await runPipeline(
-    { name: doc.name ?? "F_COMPOSED", actions: steps },
+  // (3-7) shared validate→ack→execute→artifact tail.
+  return executeValidatedFlow({
+    opts,
+    flow: { yaml: composed.yaml, mermaid: composed.mermaid, summary: `Composed flow — ${composed.summary}` },
+    catalog,
     initialInput,
-    {
-      actionDirs: [blocksDir],
-      gateProvider: opts.gateProvider,
-      ...(agentProvider !== null && { agentProvider }),
-      onActionStepEvent: (event) => {
-        const line = stepLine(event, composed.annotations);
-        if (line) void opts.poster.post(line);
-      },
-    },
-  );
+    blocksDir,
+  });
+}
 
-  // (7) Final artifact (ISC-37 tail)
-  if (result.success) {
-    const advisory = (result.output as { advisory_doc?: { subject?: string; markdown?: string } } | undefined)?.advisory_doc;
-    const finalMessage = advisory?.markdown
-      ? `🏁 **Final artifact** — ${advisory.subject ?? "advisory"}\n\n${advisory.markdown}`
-      : `🏁 **Flow complete** (${result.durationMs}ms) — output fields: ${Object.keys(result.output ?? {}).map((k) => `\`${k}\``).join(", ")}`;
-    await opts.poster.post(finalMessage);
-    return { status: "complete", output: result.output };
-  }
-  await opts.poster.post(`❌ Flow failed: ${result.error}`);
-  return { status: "failed", error: result.error };
+/**
+ * Re-run a SAVED flow with fresh input — skips COMPOSITION (no LLM authoring
+ * call, no frontier-A reasoning that picks the blocks). The authoring-vs-
+ * operation split: runScenario composes a playbook once (slow, frontier,
+ * human-gated); runSavedFlow operates that known-good playbook on a new
+ * artifact — the flow STRUCTURE is fixed, not re-decided by a model.
+ *
+ * NOT "no LLM" overall: the saved flow's own `agent:` steps still execute via
+ * the configured agentProvider (local-only → Ollama, etc.) — that is the flow
+ * doing its work, not re-authoring. Still re-validates and still operator-gates
+ * every execution — a saved remediation flow must be approved each time it runs.
+ */
+export async function runSavedFlow(yaml: string, opts: RunScenarioOptions): Promise<RunScenarioResult> {
+  const blocksDir = opts.blocksDir ?? BLOCKS_DIR;
+  const catalog = await buildCatalog(blocksDir);
+  const initialInput = opts.initialInput ?? { scenario: "", text: "" };
+  const rawName = ((): string => {
+    try {
+      return (parseYaml(yaml) as { name?: string }).name ?? "saved flow";
+    } catch (_err) {
+      return "saved flow";
+    }
+  })();
+  // SANITIZE the YAML-controlled name before it ever reaches the channel, and
+  // post it only AFTER validation (via leadPost) — a saved flow named
+  // "@everyone" or with markdown/links can't inject into the operator channel.
+  const name = sanitizeFlowName(rawName);
+  return executeValidatedFlow({
+    opts,
+    flow: { yaml, mermaid: null, summary: `Saved flow — ${name}` },
+    catalog,
+    initialInput,
+    blocksDir,
+    leadPost: `▶️ Running saved flow **${name}** (no re-composition).`,
+  });
 }
 
 // ---------------------------------------------------------------------------
