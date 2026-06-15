@@ -170,12 +170,17 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
   const debug = process.env.PULSE_LLM_DEBUG === "1";
   const log = (msg: string) => { if (debug) console.error(`[pulse:llm] ${msg}`); };
 
-  // Resolve claude to absolute path to prevent PATH injection
-  const whichProc = Bun.spawnSync(["which", "claude"], { stdout: "pipe" });
-  const claudePath = whichProc.stdout.toString().trim();
-  if (!claudePath || whichProc.exitCode !== 0) {
-    log(`stage1 skipped: \`which claude\` failed (exit=${whichProc.exitCode})`);
-    return null;
+  // Resolve claude to an absolute path. PULSE_CLAUDE_BIN wins — it lets a host
+  // with a minimal PATH (e.g. a launchd daemon) point at the binary explicitly
+  // instead of relying on `which`. Otherwise fall back to `which claude`.
+  let claudePath = process.env.PULSE_CLAUDE_BIN?.trim();
+  if (!claudePath) {
+    const whichProc = Bun.spawnSync(["which", "claude"], { stdout: "pipe" });
+    claudePath = whichProc.stdout.toString().trim();
+    if (!claudePath || whichProc.exitCode !== 0) {
+      log(`stage1 skipped: PULSE_CLAUDE_BIN unset and \`which claude\` failed (exit=${whichProc.exitCode})`);
+      return null;
+    }
   }
 
   const args = [
@@ -192,9 +197,17 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
   }
   args.push(prompt);
 
-  // Clean env to avoid session interference
+  // Clean env to avoid session interference.
   const cleanEnv = { ...process.env };
   delete cleanEnv.CLAUDECODE;
+  // Use the Claude Code SUBSCRIPTION (OAuth) for `claude -p`, never an inherited
+  // ANTHROPIC_API_KEY. A key present in the env takes precedence inside the CLI,
+  // and a stale/invalid one makes claude -p fail with "Invalid API key" — which
+  // would then force the costly (and, with a bad key, also-failing) API
+  // fallback. Stripping it keeps this a zero-marginal-cost subscription call,
+  // the whole reason stage 1 prefers claude -p over the stage-3 API path.
+  delete cleanEnv.ANTHROPIC_API_KEY;
+  delete cleanEnv.ANTHROPIC_AUTH_TOKEN;
 
   const startedAt = Date.now();
   let timedOut = false;
@@ -227,6 +240,20 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
       const stderrTail = rawStderr.slice(-1000).trim();
       log(`stage1 failed (${reason}, elapsed=${elapsed}ms, tier=${options?.tier || "fast"}, model=${modelMap[options?.tier || "fast"]})${stderrTail ? `\n  stderr: ${stderrTail}` : ""}`);
       return null;
+    }
+
+    // A CC result with is_error (invalid key, usage limit, refusal) exits 0 but
+    // its `result` is an error string, not a model answer. Treat it as a stage-1
+    // miss so the caller falls back — never surface "Invalid API key" as LLM
+    // output (which would poison the composer).
+    try {
+      const wrapper = JSON.parse(rawStdout) as { is_error?: boolean; result?: unknown };
+      if (wrapper?.is_error === true) {
+        log(`stage1 is_error: ${String(wrapper.result).slice(0, 200)}`);
+        return null;
+      }
+    } catch (_err) {
+      // Not a JSON wrapper (older CC plain-text output) — fall through to extract.
     }
 
     // Extract from CC JSON wrapper: {"type":"result","result":"<content>"}
