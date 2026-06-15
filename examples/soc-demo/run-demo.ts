@@ -329,6 +329,25 @@ function sanitizeFlowName(name: string): string {
 }
 
 /**
+ * Neutralize code-fence delimiters in untrusted text posted INSIDE a ```fence.
+ * A ``` in the body would close the fence early and let following text render
+ * as channel markdown (mentions/links). A zero-width space keeps it visible but
+ * no longer a delimiter.
+ */
+export function fenceSafe(s: string): string {
+  return s.replace(/```/g, "`\u200b``");
+}
+
+/**
+ * Neutralize mass-mentions + fence delimiters in untrusted text posted OUTSIDE
+ * a fence (e.g. the bolded summary line). Breaks `@everyone`/`@here` and ``` so
+ * a hostile composer summary or saved-flow summary can't ping the channel.
+ */
+export function channelSafe(s: string): string {
+  return fenceSafe(s).replace(/@(everyone|here)/gi, "@\u200b$1");
+}
+
+/**
  * Validate → (lead) → post → operator-ack → execute → artifact. The shared tail
  * of both runScenario (composed YAML) and runSavedFlow (loaded YAML). The
  * wiring is the enforcement point: it re-validates independently and REFUSES to
@@ -337,14 +356,18 @@ function sanitizeFlowName(name: string): string {
  * callers use it for a header line whose text derives from untrusted YAML, so
  * nothing YAML-controlled reaches the channel before the validator clears it.
  */
-async function executeValidatedFlow(
-  opts: RunScenarioOptions,
-  flow: { yaml: string; mermaid: string | null; summary: string },
-  catalog: Awaited<ReturnType<typeof buildCatalog>>,
-  initialInput: Record<string, unknown>,
-  blocksDir: string,
-  leadPost?: string,
-): Promise<RunScenarioResult> {
+interface ExecuteFlowArgs {
+  opts: RunScenarioOptions;
+  flow: { yaml: string; mermaid: string | null; summary: string };
+  catalog: Awaited<ReturnType<typeof buildCatalog>>;
+  initialInput: Record<string, unknown>;
+  blocksDir: string;
+  /** Header line posted only AFTER validation (callers pass sanitized text). */
+  leadPost?: string;
+}
+
+async function executeValidatedFlow(args: ExecuteFlowArgs): Promise<RunScenarioResult> {
+  const { opts, flow, catalog, initialInput, blocksDir, leadPost } = args;
   // Independent re-validation FIRST — the wiring is the enforcement point. A
   // malformed/invalid saved YAML must surface as `invalid` here, never throw
   // out of a later parse (sage), so validation precedes parseYaml.
@@ -353,8 +376,9 @@ async function executeValidatedFlow(
     await opts.poster.post(`🛑 Validator refused the flow:\n${validation.findings.map((f) => `- ${f.message}`).join("\n")}`);
     return { status: "invalid", findings: validation.findings };
   }
-  // Only now (validation clean) post any caller-supplied lead — keeps
-  // YAML-derived text out of the channel until the validator vouches for it.
+  // Post the caller's lead only after validation. The lead is already
+  // sanitized by the caller (sanitizeFlowName) — sanitization is the primary
+  // guard; posting post-validation is a secondary belt.
   if (leadPost !== undefined) await opts.poster.post(leadPost);
 
   // Safe to parse now (validatePipeline parsed it cleanly); guard anyway.
@@ -367,11 +391,14 @@ async function executeValidatedFlow(
   }
   const name = doc.name ?? "F_COMPOSED";
 
-  // Post YAML + diagram + summary. Render failure → fenced source (§8.5).
+  // Post YAML + diagram + summary. fenceSafe() neutralizes any ``` inside the
+  // (untrusted) yaml/mermaid so a crafted body can't close the code fence early
+  // and inject channel markdown / mentions after it (sage). channelSafe()
+  // neutralizes mass-mentions in the bolded summary (posted OUTSIDE a fence).
   const png = opts.render === false ? null : await renderMermaid(flow.mermaid ?? "");
-  const diagramPart = png ? undefined : flow.mermaid ? `\n\`\`\`mermaid\n${flow.mermaid}\`\`\`` : "";
+  const diagramPart = png ? undefined : flow.mermaid ? `\n\`\`\`mermaid\n${fenceSafe(flow.mermaid)}\`\`\`` : "";
   await opts.poster.post(
-    `**${flow.summary}**\n\`\`\`yaml\n${flow.yaml}\`\`\`${diagramPart ?? ""}`,
+    `**${channelSafe(flow.summary)}**\n\`\`\`yaml\n${fenceSafe(flow.yaml)}\`\`\`${diagramPart ?? ""}`,
     png ? { bytes: png, filename: "flow.png" } : undefined,
   );
 
@@ -433,13 +460,13 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
   }
 
   // (3-7) shared validate→ack→execute→artifact tail.
-  return executeValidatedFlow(
+  return executeValidatedFlow({
     opts,
-    { yaml: composed.yaml, mermaid: composed.mermaid, summary: `Composed flow — ${composed.summary}` },
+    flow: { yaml: composed.yaml, mermaid: composed.mermaid, summary: `Composed flow — ${composed.summary}` },
     catalog,
     initialInput,
     blocksDir,
-  );
+  });
 }
 
 /**
@@ -469,14 +496,14 @@ export async function runSavedFlow(yaml: string, opts: RunScenarioOptions): Prom
   // post it only AFTER validation (via leadPost) — a saved flow named
   // "@everyone" or with markdown/links can't inject into the operator channel.
   const name = sanitizeFlowName(rawName);
-  return executeValidatedFlow(
+  return executeValidatedFlow({
     opts,
-    { yaml, mermaid: null, summary: `Saved flow — ${name}` },
+    flow: { yaml, mermaid: null, summary: `Saved flow — ${name}` },
     catalog,
     initialInput,
     blocksDir,
-    `▶️ Running saved flow **${name}** (no re-composition).`,
-  );
+    leadPost: `▶️ Running saved flow **${name}** (no re-composition).`,
+  });
 }
 
 // ---------------------------------------------------------------------------

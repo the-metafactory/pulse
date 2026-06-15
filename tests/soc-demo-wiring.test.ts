@@ -9,6 +9,8 @@ import type { ActionStepEvent, GateProvider } from "../src/types/pipeline";
 import {
   runScenario,
   runSavedFlow,
+  fenceSafe,
+  channelSafe,
   stepLine,
   makeStubLLM,
   BLOCKS_DIR,
@@ -560,5 +562,21 @@ describe("runScenario — exposes the composed yaml for persistence (saved flows
       expect(result.yaml).toContain("name: F_STUB_TRIAGE");
       expect(result.name).toBe("F_STUB_TRIAGE");
     }
+  });
+});
+
+describe("fenceSafe / channelSafe — chat-injection guards (saved flows)", () => {
+  test("fenceSafe breaks ``` so an embedded fence can't escape the code block", () => {
+    const hostile = "name: F_X\n# ```\n@everyone pwned\n```yaml";
+    const safe = fenceSafe(hostile);
+    expect(safe).not.toContain("```"); // no intact triple-backtick remains
+    expect(safe).toContain("@everyone"); // content still visible, just inert
+  });
+
+  test("channelSafe neutralizes mass-mentions and fences in out-of-fence text", () => {
+    const safe = channelSafe("Saved flow — @everyone @here ``` ping");
+    expect(safe).not.toContain("@everyone");
+    expect(safe).not.toContain("@here");
+    expect(safe).not.toContain("```");
   });
 });
