@@ -483,6 +483,34 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
 }
 
 /**
+ * Compose + validate a flow WITHOUT executing it — the authoring half of
+ * runScenario, used to EDIT a saved playbook. The caller (Yarrow's `update`
+ * verb) seeds the scenario with the existing YAML + the requested change,
+ * gets back the recomposed, catalog-valid YAML, and persists it. No
+ * self-disclosure post, no ack gate, no execution — editing a definition is
+ * not running it (and an edit instruction carries no IOC to run on anyway).
+ */
+export async function composeFlow(
+  scenario: string,
+  opts: { llm: ComposerLLM; blocksDir?: string; initialFields?: string[] },
+): Promise<
+  | { status: "complete"; yaml: string; summary: string; mermaid: string | null }
+  | { status: "no-match"; message: string }
+  | { status: "invalid"; findings: { message: string }[] }
+> {
+  const blocksDir = opts.blocksDir ?? BLOCKS_DIR;
+  const catalog = await buildCatalog(blocksDir);
+  const composed = await compose(scenario, catalog, opts.llm, {
+    initialFields: opts.initialFields ?? ["scenario", "text"],
+  });
+  if (!composed.ok) {
+    if (composed.kind === "no-match") return { status: "no-match", message: composed.message };
+    return { status: "invalid", findings: composed.findings };
+  }
+  return { status: "complete", yaml: composed.yaml, summary: composed.summary, mermaid: composed.mermaid };
+}
+
+/**
  * Re-run a SAVED flow with fresh input — skips COMPOSITION (no LLM authoring
  * call, no frontier-A reasoning that picks the blocks). The authoring-vs-
  * operation split: runScenario composes a playbook once (slow, frontier,
