@@ -366,13 +366,11 @@ interface ExecuteFlowArgs {
   leadPost?: string;
   /**
    * Skip the flow-YAML re-display AND the outer "Run this flow?" operator-ack,
-   * executing directly. This does NOT itself verify the YAML — it trusts the
-   * CALLER to supply an authorized playbook and treats the call as pre-approved.
-   * The trust boundary is the caller: e.g. the Yarrow handler only sets this for
-   * a `run <NAME>` whose YAML it loaded from its own no-overwrite flows store
-   * (populated solely by operator-approved composes), with the `run` command as
-   * the operator's intent. The flow's OWN internal `gate:` steps (e.g. an
-   * analyst-approve before a reset fires) STILL prompt regardless — those are
+   * executing directly. This path does NOT verify the YAML or its provenance —
+   * it treats the call itself as pre-approved, so the CALLER is the trust
+   * boundary and is responsible for only setting it when both the YAML source
+   * and the invocation are trusted. The flow's OWN internal `gate:` steps (e.g.
+   * an analyst-approve before a reset fires) STILL prompt regardless — those are
    * the flow's designed in-run checkpoints, independent of this outer ack.
    */
   autoApprove?: boolean;
@@ -492,8 +490,8 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
  * artifact — the flow STRUCTURE is fixed, not re-decided by a model.
  *
  * Runs DIRECTLY (autoApprove): no flow re-display, no outer "Run this flow?"
- * ack — the caller's `run <NAME>` invocation IS the approval (the caller is the
- * trust boundary; it does not re-verify the YAML here). It STILL re-validates
+ * ack — the call is treated as pre-approved, so the CALLER is the trust boundary
+ * (this function does not verify the YAML's provenance). It STILL re-validates
  * before executing, and the flow's OWN internal `gate:` steps still prompt — so
  * a remediation action behind an analyst-approve gate is still human-checked.
  *
