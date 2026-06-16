@@ -34,6 +34,69 @@ interface Attachment {
   contentType?: string;
   url?: string;
   size?: number;
+  /** Base64 file bytes, inlined by the surface adapter (Mattermost needs auth
+   *  to download, so the brain can't fetch the URL). When present it is decoded
+   *  directly — no network fetch. */
+  content?: string;
+}
+
+/** Decode quoted-printable (RFC 2045): =XX hex octets + soft line breaks (=\n). */
+function decodeQuotedPrintable(s: string): string {
+  return s
+    .replace(/=\r?\n/g, "") // soft line break
+    .replace(/=([0-9A-Fa-f]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
+}
+
+/** True for an .eml / RFC822 message by content-type or extension. */
+function isEml(att: Attachment): boolean {
+  const ct = (att.contentType ?? "").toLowerCase();
+  return ct === "message/rfc822" || (att.name ?? "").toLowerCase().endsWith(".eml");
+}
+
+/**
+ * Parse a raw RFC822 .eml into IOC-rich plaintext: the key headers (sender /
+ * routing / subject — where the attacker's domains live in the clear) plus each
+ * text part DECODED from its Content-Transfer-Encoding (base64 / quoted-
+ * printable), so URLs in the body survive for A_EXTRACT_IOCS. Best-effort and
+ * tolerant: a part it can't parse is passed through raw rather than dropped.
+ */
+function decodeByCte(body: string, cte: string): string {
+  try {
+    if (cte === "base64") return Buffer.from(body.replace(/\s+/g, ""), "base64").toString("utf8");
+    if (cte === "quoted-printable") return decodeQuotedPrintable(body);
+  } catch {
+    // decode failure must not drop the part — fall through to raw
+  }
+  return body;
+}
+
+function parseEml(raw: string): string {
+  const sep = raw.search(/\r?\n\r?\n/);
+  // No header/body separator → no MIME structure to decode; scan as-is so a
+  // simple/odd .eml still yields its IOCs (lossless).
+  if (sep === -1) return raw;
+
+  // Keep ALL headers (unfolded) — losing any risks dropping an IOC-bearing one
+  // (List-Unsubscribe, X-Originating-IP, DKIM d=, Received relays).
+  const headers = raw.slice(0, sep).replace(/\r?\n[ \t]+/g, " ");
+  const boundaryMatch = raw.match(/boundary="?([^";\r\n]+)"?/i);
+  const bodies: string[] = [];
+
+  if (boundaryMatch) {
+    // Multipart: decode each part by its OWN Content-Transfer-Encoding.
+    for (const part of raw.split(`--${boundaryMatch[1]}`).slice(1)) {
+      if (/^--/.test(part.trim())) continue; // closing delimiter
+      const cte = (part.match(/Content-Transfer-Encoding:\s*([^\r\n;]+)/i)?.[1] ?? "").trim().toLowerCase();
+      const bsep = part.search(/\r?\n\r?\n/);
+      bodies.push(decodeByCte(bsep === -1 ? part : part.slice(bsep), cte));
+    }
+  } else {
+    // Single-part: CTE lives in the top headers; body is everything after sep.
+    const cte = (headers.match(/Content-Transfer-Encoding:\s*([^\r\n;]+)/i)?.[1] ?? "").trim().toLowerCase();
+    bodies.push(decodeByCte(raw.slice(sep), cte));
+  }
+
+  return [headers, ...bodies].filter((s) => s.trim().length > 0).join("\n\n");
 }
 
 /**
@@ -64,27 +127,41 @@ type DecodeOutcome =
   | { kind: "skipped"; label: string }
   | { kind: "error"; label: string; error: string };
 
-async function decodeAttachment(att: Attachment, fetchFn: typeof globalThis.fetch): Promise<DecodeOutcome> {
+async function decodeAttachment(att: Attachment, fetchFn?: typeof globalThis.fetch): Promise<DecodeOutcome> {
   const label = att.name ?? att.url ?? "attachment";
-  if (!att.url) return { kind: "skipped", label: `${label} (no url)` };
   if (!isTextLike(att)) return { kind: "skipped", label: `${label} (${att.contentType ?? "binary"})` };
-  try {
-    const res = await fetchFn(att.url);
-    if (!res.ok) return { kind: "error", label, error: `${label}: HTTP ${res.status}` };
-    // Reject oversized BEFORE decoding when Content-Length is present (bounds
-    // fetch/decode cost in that case). When the header is absent, the body is
-    // read in full and then char-sliced — a best-effort string bound, not a
-    // fetch-cost bound.
-    const declared = Number(res.headers.get("content-length") ?? "");
-    if (Number.isFinite(declared) && declared > MAX_DECODE_BYTES) {
-      return { kind: "error", label, error: `${label}: too large (${declared} bytes > ${MAX_DECODE_BYTES} cap)` };
+
+  let raw: string;
+  if (typeof att.content === "string" && att.content.length > 0) {
+    // Inline bytes (Mattermost, auth-fetched by the adapter) — decode, no fetch.
+    try {
+      raw = Buffer.from(att.content, "base64").toString("utf8");
+    } catch (err) {
+      return { kind: "error", label, error: `${label}: base64 decode failed — ${err instanceof Error ? err.message : String(err)}` };
     }
-    let body = await res.text();
-    if (body.length > MAX_DECODE_BYTES) body = body.slice(0, MAX_DECODE_BYTES); // fallback bound (no header)
-    return { kind: "decoded", label, part: `--- attachment: ${label} ---\n${body}` };
-  } catch (err) {
-    return { kind: "error", label, error: `${label}: ${err instanceof Error ? err.message : String(err)}` };
+    if (raw.length > MAX_DECODE_BYTES) raw = raw.slice(0, MAX_DECODE_BYTES);
+  } else if (att.url && fetchFn) {
+    // Public-CDN URL (Discord) — fetch.
+    try {
+      const res = await fetchFn(att.url);
+      if (!res.ok) return { kind: "error", label, error: `${label}: HTTP ${res.status}` };
+      const declared = Number(res.headers.get("content-length") ?? "");
+      if (Number.isFinite(declared) && declared > MAX_DECODE_BYTES) {
+        return { kind: "error", label, error: `${label}: too large (${declared} bytes > ${MAX_DECODE_BYTES} cap)` };
+      }
+      raw = await res.text();
+      if (raw.length > MAX_DECODE_BYTES) raw = raw.slice(0, MAX_DECODE_BYTES);
+    } catch (err) {
+      return { kind: "error", label, error: `${label}: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  } else {
+    return { kind: "skipped", label: `${label} (no inline content or fetchable url)` };
   }
+
+  // A .eml is MIME — decode its parts so body URLs survive (raw base64/QP bodies
+  // would otherwise extract nothing). Other text files fold verbatim.
+  const part = isEml(att) ? parseEml(raw) : raw;
+  return { kind: "decoded", label, part: `--- attachment: ${label} ---\n${part}` };
 }
 
 export default {
@@ -95,15 +172,17 @@ export default {
     const baseText = typeof input.text === "string" ? input.text : "";
 
     const fetchFn = ctx.capabilities.fetch;
-    if (list.length === 0 || !fetchFn) {
-      // Nothing to ingest (or no fetch capability) — pass everything through,
-      // ensuring a `text` field exists for downstream readers.
+    if (list.length === 0) {
+      // Nothing to ingest — pass everything through, ensuring a `text` field
+      // exists for downstream readers.
       return {
         ...input,
         text: baseText,
-        attachments_ingested: { decoded: 0, skipped: list.length, errors: [] as string[] },
+        attachments_ingested: { decoded: 0, skipped: 0, errors: [] as string[] },
       };
     }
+    // NB: fetchFn may be undefined — inline-content attachments (Mattermost)
+    // decode without it; only URL attachments (Discord) need it.
 
     // Cap how many attachments we fetch in one message (overflow recorded, not
     // downloaded) so an unbounded array can't fan out unbounded fetches.
