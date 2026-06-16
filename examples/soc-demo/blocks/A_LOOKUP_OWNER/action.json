@@ -1,7 +1,7 @@
 {
   "name": "A_LOOKUP_OWNER",
-  "version": "1.0.0",
-  "description": "Offline IP → responsible OU + contact (the NREN CMDB/NetDB adapter, design §4). Input: ip. Resolves against an embedded fixture table mapping demo IPs to organizational units and NOC contacts. Unknown IPs return { known: false } rather than throwing — fully offline, no network ever.",
+  "version": "2.0.0",
+  "description": "IP → responsible org (OU) + abuse contact. Input: ip. Fixture-first (embedded NREN CMDB table: SWITCH, ETH, UniBE NOC contacts), then a LIVE keyless RDAP lookup via rdap.org (IANA bootstrap → owning RIR) for any other IP — org from the registrant/network name, abuse email from the abuse-role entity. Unknown / offline / lookup-failure returns { known: false, ou: unknown, contact: null } rather than throwing.",
   "input": {
     "ip": {
       "type": "string",
@@ -13,13 +13,14 @@
       "type": "object"
     }
   },
-  "requires": [],
+  "requires": [
+    "fetch"
+  ],
   "tags": [
     "soc",
     "demo",
     "enrich",
     "cmdb",
-    "nren",
-    "offline"
+    "nren"
   ]
 }
