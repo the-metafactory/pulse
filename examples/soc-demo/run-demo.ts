@@ -492,8 +492,9 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
  * Runs DIRECTLY (autoApprove): no flow re-display, no outer "Run this flow?"
  * ack — the call is treated as pre-approved, so the CALLER is the trust boundary
  * (this function does not verify the YAML's provenance). It STILL re-validates
- * before executing, and the flow's OWN internal `gate:` steps still prompt — so
- * a remediation action behind an analyst-approve gate is still human-checked.
+ * before executing, and any internal `gate:` steps the flow DOES define still
+ * prompt; a flow with no internal gate runs unattended (skipping the outer ack
+ * removes the only human checkpoint such a flow had).
  *
  * NOT "no LLM" overall: the saved flow's own `agent:` steps still execute via
  * the configured agentProvider (local-only → Ollama, etc.) — the flow doing its
