@@ -1,0 +1,17 @@
+{
+  "name": "A_REQUIRE_IOCS",
+  "version": "1.0.0",
+  "description": "Deterministic guard: fail the pipeline loudly when IOC extraction produced NO indicators (no ips/domains/urls/hashes). Placed after A_EXTRACT_IOCS so a downstream triage agent can never be handed an empty payload and hallucinate example indicators into an advisory. Pure, offline; passthrough when at least one IOC is present",
+  "input": {
+    "ips": { "type": "array" },
+    "domains": { "type": "array" },
+    "urls": { "type": "array" },
+    "hashes": { "type": "array" }
+  },
+  "output": {},
+  "tags": [
+    "soc",
+    "guard",
+    "ioc"
+  ]
+}
