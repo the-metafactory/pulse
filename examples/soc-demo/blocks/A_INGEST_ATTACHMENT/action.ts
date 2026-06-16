@@ -113,6 +113,11 @@ const MAX_ATTACHMENTS = 10;
 /** Max TOTAL decoded content folded into `text` across all attachments. */
 const MAX_TOTAL_FOLDED_BYTES = 1024 * 1024;
 
+/** Per-attachment fetch deadline. A URL that never responds must NOT hang the
+ *  step (and, with a single-concurrency brain, the whole agent) — time out and
+ *  record an error instead. */
+const FETCH_TIMEOUT_MS = 15_000;
+
 const TEXT_EXTENSIONS = [".eml", ".txt", ".csv", ".log", ".json", ".md", ".ics"];
 
 function isTextLike(att: Attachment): boolean {
@@ -141,9 +146,10 @@ async function decodeAttachment(att: Attachment, fetchFn?: typeof globalThis.fet
     }
     if (raw.length > MAX_DECODE_BYTES) raw = raw.slice(0, MAX_DECODE_BYTES);
   } else if (att.url && fetchFn) {
-    // Public-CDN URL (Discord) — fetch.
+    // Public-CDN URL (Discord) — fetch with a hard deadline (a stalled
+    // connection must not hang the step / wedge the single-slot brain).
     try {
-      const res = await fetchFn(att.url);
+      const res = await fetchFn(att.url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       if (!res.ok) return { kind: "error", label, error: `${label}: HTTP ${res.status}` };
       const declared = Number(res.headers.get("content-length") ?? "");
       if (Number.isFinite(declared) && declared > MAX_DECODE_BYTES) {
