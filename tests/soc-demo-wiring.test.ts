@@ -475,14 +475,18 @@ describe("runSavedFlow — re-run a saved playbook, no composition (saved flows)
     "",
   ].join("\n");
 
-  test("validates + gates + executes the saved YAML without calling the LLM", async () => {
+  test("executes DIRECTLY — no re-composition, no flow re-display, no outer operator-ack", async () => {
     let llmCalled = false;
     const llm = async () => { llmCalled = true; return { text: "should not be called" }; };
+    const gateCalls: string[] = [];
+    const recordingGate: GateProvider = {
+      async requestVerdict(spec) { gateCalls.push(spec.name); return { verdict: "pass", notes: "x" }; },
+    };
     const poster = new ConsolePoster();
     const result = await runSavedFlow(SAVED_YAML, {
       llm,
       poster,
-      gateProvider: passGate,
+      gateProvider: recordingGate,
       agentProvider: null, // no agent steps in this flow
       render: false,
       blocksDir: BLOCKS_DIR,
@@ -491,9 +495,11 @@ describe("runSavedFlow — re-run a saved playbook, no composition (saved flows)
     expect(result.status).toBe("complete");
     expect(llmCalled).toBe(false); // NO re-composition
     if (result.status === "complete") expect(result.name).toBe("F_SAVED_TRIAGE");
-    // posted a "Running saved flow" line, not the frontier-A self-disclosure
     expect(poster.posts.some((p) => p.includes("Running saved flow"))).toBe(true);
     expect(poster.posts.some((p) => p.includes("frontier-A"))).toBe(false);
+    // Direct run: NO flow YAML re-display, and the outer operator-ack is NOT asked.
+    expect(poster.posts.some((p) => p.includes("```yaml"))).toBe(false);
+    expect(gateCalls).not.toContain("operator-ack");
   });
 
   test("sanitizes a hostile flow name before posting (no @everyone/markdown injection)", async () => {
@@ -532,7 +538,9 @@ describe("runSavedFlow — re-run a saved playbook, no composition (saved flows)
     expect(result.status).toBe("invalid");
   });
 
-  test("still operator-gates: a fail verdict aborts the saved flow", async () => {
+  test("a gate-less saved flow runs even with a fail gate (outer operator-ack skipped)", async () => {
+    // The outer 'Run this flow?' ack is skipped for a saved run; F_SAVED_TRIAGE
+    // has no internal gate: step, so a fail-verdict gate is never consulted.
     const failGate: GateProvider = { async requestVerdict() { return { verdict: "fail", notes: "no" }; } };
     const result = await runSavedFlow(SAVED_YAML, {
       llm: makeStubLLM(),
@@ -542,7 +550,35 @@ describe("runSavedFlow — re-run a saved playbook, no composition (saved flows)
       render: false,
       blocksDir: BLOCKS_DIR,
     });
-    expect(result.status).toBe("aborted");
+    expect(result.status).toBe("complete"); // outer ack skipped; no internal gate to fail
+  });
+
+  test("internal gate: steps STILL prompt on a saved run (only the outer ack is skipped)", async () => {
+    const gatedYaml = [
+      "name: F_SAVED_GATED",
+      "actions:",
+      "  - A_EXTRACT_IOCS  # sovereignty: D, residency: CH",
+      "  - gate:  # sovereignty: H, residency: CH",
+      "      name: analyst-approve",
+      '      prompt: "Approve?"',
+      "",
+    ].join("\n");
+    const seen: string[] = [];
+    const failInternal: GateProvider = {
+      async requestVerdict(spec) { seen.push(spec.name); return { verdict: "fail", notes: "denied" }; },
+    };
+    const result = await runSavedFlow(gatedYaml, {
+      llm: makeStubLLM(),
+      poster: new ConsolePoster(),
+      gateProvider: failInternal,
+      agentProvider: null,
+      render: false,
+      blocksDir: BLOCKS_DIR,
+      initialInput: { scenario: "ip 1.2.3.4", text: "ip 1.2.3.4" },
+    });
+    expect(seen).toContain("analyst-approve"); // the flow's OWN gate was consulted
+    expect(seen).not.toContain("operator-ack"); // but NOT the outer ack
+    expect(result.status).toBe("failed"); // internal gate denied → step fails
   });
 });
 
