@@ -9,8 +9,65 @@ import { ctxWith, setEnv, restoreEnv } from "./helpers/soc-demo-test-helpers";
 
 const geoip = () => import("../examples/soc-demo/blocks/A_LOOKUP_GEOIP_ASN/action");
 const vt = () => import("../examples/soc-demo/blocks/A_FETCH_VIRUSTOTAL/action");
+const owner = () => import("../examples/soc-demo/blocks/A_LOOKUP_OWNER/action");
 
 afterEach(() => restoreEnv());
+
+// Minimal RDAP shape: a registrant entity with a nested abuse entity.
+const RDAP_DIGITALOCEAN = {
+  name: "DIGITALOCEAN-ASN-BLK",
+  entities: [
+    {
+      roles: ["registrant"],
+      vcardArray: ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", "DigitalOcean, LLC"]]],
+      entities: [
+        {
+          roles: ["abuse"],
+          vcardArray: ["vcard", [["fn", {}, "text", "DigitalOcean Abuse"], ["email", {}, "text", "abuse@digitalocean.com"]]],
+        },
+      ],
+    },
+  ],
+};
+
+describe("A_LOOKUP_OWNER — fixture-first, live RDAP fallback", () => {
+  test("fixture IP resolves offline without calling fetch", async () => {
+    const m = await owner();
+    let fetched = false;
+    const ctx = ctxWith(async () => { fetched = true; return new Response("{}"); });
+    const out = (await m.default.execute({ ip: "130.59.1.1" }, ctx)) as Record<string, unknown>;
+    const o = out.owner as Record<string, unknown>;
+    expect(o.known).toBe(true);
+    expect(o.ou).toContain("SWITCH");
+    expect(o.source).toBe("fixture");
+    expect(fetched).toBe(false);
+  });
+
+  test("non-fixture IP → live RDAP: org + abuse contact (nested abuse entity)", async () => {
+    const m = await owner();
+    const ctx = ctxWith(async (url) => {
+      expect(url).toContain("rdap.org/ip/167.71.70.184");
+      return new Response(JSON.stringify(RDAP_DIGITALOCEAN));
+    });
+    const out = (await m.default.execute({ ip: "167.71.70.184" }, ctx)) as Record<string, unknown>;
+    expect(out.owner).toMatchObject({
+      ou: "DigitalOcean, LLC",
+      contact: "abuse@digitalocean.com",
+      known: true,
+      source: "rdap",
+    });
+  });
+
+  test("RDAP 404 / network error / no capability → unknown, never throws", async () => {
+    const m = await owner();
+    const e404 = (await m.default.execute({ ip: "192.0.2.9" }, ctxWith(async () => new Response("", { status: 404 })))) as Record<string, unknown>;
+    expect((e404.owner as Record<string, unknown>).known).toBe(false);
+    const eErr = (await m.default.execute({ ip: "192.0.2.9" }, ctxWith(async () => { throw new Error("offline"); }))) as Record<string, unknown>;
+    expect((eErr.owner as Record<string, unknown>).known).toBe(false);
+    const eNoCap = (await m.default.execute({ ip: "192.0.2.9" }, ctxWith())) as Record<string, unknown>;
+    expect((eNoCap.owner as Record<string, unknown>).known).toBe(false);
+  });
+});
 
 describe("A_LOOKUP_GEOIP_ASN — fixture-first, live ipwho.is fallback", () => {
   test("fixture IP resolves offline without ever calling fetch", async () => {
