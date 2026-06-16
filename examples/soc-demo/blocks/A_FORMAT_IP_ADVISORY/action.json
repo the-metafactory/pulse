@@ -1,0 +1,31 @@
+{
+  "name": "A_FORMAT_IP_ADVISORY",
+  "version": "1.0.0",
+  "description": "Render an IP investigation (triage verdict + per-IP GeoIP/ASN/owner/GreyNoise enrichment + gate verdict) into one advisory document (markdown + subject + plain text) for Mattermost / stdout / mail. The IP-investigation counterpart to A_FORMAT_ADVISORY (which is phishing-shaped). Pure, offline, shape-tolerant; renders ONLY what the pipeline produced — never invents indicators",
+  "input": {
+    "triage": {
+      "type": "object",
+      "required": true
+    },
+    "ip_enrichment": {
+      "type": "array"
+    },
+    "approval": {
+      "type": "object"
+    },
+    "ips": {
+      "type": "array"
+    }
+  },
+  "output": {
+    "advisory_doc": {
+      "type": "object"
+    }
+  },
+  "tags": [
+    "soc",
+    "advisory",
+    "ip",
+    "format"
+  ]
+}
