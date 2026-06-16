@@ -127,7 +127,11 @@ export interface OllamaProviderOpts {
 export function makeOllamaAgentProvider(opts: OllamaProviderOpts = {}): AgentProvider {
   const model = opts.model ?? process.env.PULSE_LOCAL_MODEL ?? "llama3.2:latest";
   const url = (opts.url ?? process.env.OLLAMA_URL ?? "http://localhost:11434").replace(/\/$/, "");
-  const timeoutMs = opts.timeoutMs ?? 120_000;
+  // A big model (e.g. gemma4, 9.6 GB) on a large prompt (per-IP enrichment for
+  // many IOCs) legitimately needs more than 120s. Env-overridable so an operator
+  // can match the model + prompt size without a code change.
+  const envTimeout = Number(process.env.PULSE_LOCAL_TIMEOUT_MS);
+  const timeoutMs = opts.timeoutMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 120_000);
   return {
     async dispatch(spec: AgentTaskSpec, dispatchOpts): Promise<AgentTaskResult> {
       const startedAt = Date.now();
