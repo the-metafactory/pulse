@@ -1,11 +1,13 @@
 {
   "name": "A_FETCH_VIRUSTOTAL",
-  "version": "1.0.0",
-  "description": "URL or file-hash reputation via VirusTotal v3. Input: ioc (URL, domain, or hash) - auto-detects the IOC type. Stub-safe: when VT_API_KEY is unset, prints intent and returns a canned 3/70-vendors-flagged verdict so demo flows run offline.",
+  "version": "2.0.0",
+  "description": "URL / domain / IP / file-hash reputation via VirusTotal v3. Input: ioc (URL, domain, hash, or IP) OR ip (for a per-IP enrichment map) - auto-detects the IOC type and uses the matching v3 endpoint (IPv4 -> /ip_addresses/). Stub-safe: when VT_API_KEY is unset, prints intent and returns a canned 3/70-vendors-flagged verdict so demo flows run offline.",
   "input": {
     "ioc": {
-      "type": "string",
-      "required": true
+      "type": "string"
+    },
+    "ip": {
+      "type": "string"
     }
   },
   "output": {

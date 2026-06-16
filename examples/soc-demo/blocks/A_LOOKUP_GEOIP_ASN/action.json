@@ -1,7 +1,7 @@
 {
   "name": "A_LOOKUP_GEOIP_ASN",
-  "version": "1.0.0",
-  "description": "Offline IP → country + ASN enrichment (MaxMind-lite). Input: ip. Resolves against a small embedded table of demo IPs (SWITCH, Hetzner, OVH, Cloudflare, residential CH, scanners). Unknown IPs return { known: false } rather than throwing — fully offline, no network ever.",
+  "version": "2.0.0",
+  "description": "IP → country + ASN enrichment. Input: ip. Fixture-first (small embedded table of demo IPs: SWITCH, Hetzner, OVH, Cloudflare, scanners), then a LIVE keyless lookup via ipwho.is (HTTPS, no API key) for any other IP. Unknown / offline / lookup-failure returns { known: false } rather than throwing.",
   "input": {
     "ip": {
       "type": "string",
@@ -13,12 +13,13 @@
       "type": "object"
     }
   },
-  "requires": [],
+  "requires": [
+    "fetch"
+  ],
   "tags": [
     "soc",
     "demo",
     "enrich",
-    "geoip",
-    "offline"
+    "geoip"
   ]
 }
