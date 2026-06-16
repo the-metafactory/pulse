@@ -187,6 +187,123 @@ export function makeOllamaAgentProvider(opts: OllamaProviderOpts = {}): AgentPro
 }
 
 // ---------------------------------------------------------------------------
+// Apertus (Infomaniak AI) agent provider — a Swiss-sovereign frontier backend
+// ---------------------------------------------------------------------------
+
+export interface ApertusProviderOpts {
+  /** Infomaniak API bearer token (manager → API token). */
+  apiToken: string;
+  /** AI Tools product id — the `{product_id}` path segment of the AI endpoint. */
+  productId: string;
+  /** Model id (e.g. "apertus"). */
+  model?: string;
+  /** API base; default https://api.infomaniak.com. */
+  baseUrl?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Dispatch agent tasks to Apertus via Infomaniak's AI Tools API — an
+ * OpenAI-compatible chat-completions endpoint
+ * (`POST {base}/1/ai/{product_id}/openai/chat/completions`, Bearer auth).
+ * Apertus is Swiss-hosted, so this is a SOVEREIGN frontier alternative to a US
+ * model: data stays in Switzerland. It is still CLOUD, so it must NOT serve a
+ * `model_class: "local-only"` task (data must not leave the box) — the
+ * sovereign router keeps those on Ollama; Apertus only takes the frontier path.
+ */
+export function makeApertusAgentProvider(opts: ApertusProviderOpts): AgentProvider {
+  const model = opts.model ?? process.env.APERTUS_MODEL ?? "apertus";
+  const base = (opts.baseUrl ?? "https://api.infomaniak.com").replace(/\/$/, "");
+  const endpoint = `${base}/1/ai/${opts.productId}/openai/chat/completions`;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  return {
+    async dispatch(spec: AgentTaskSpec, dispatchOpts): Promise<AgentTaskResult> {
+      const startedAt = Date.now();
+      const taskId = crypto.randomUUID();
+      dispatchOpts?.onDispatched?.({ task_id: taskId });
+      const fail = (error: string): AgentTaskResult => ({
+        task_id: taskId,
+        status: "failed",
+        output: null,
+        error,
+        duration_ms: Date.now() - startedAt,
+      });
+      if (dispatchOpts?.signal?.aborted) return fail(`apertus ${model}: task aborted before dispatch`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      dispatchOpts?.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${opts.apiToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a SOC analyst agent executing one step of a security pipeline. " +
+                  "Respond concisely with the requested assessment as plain text — no preamble.",
+              },
+              { role: "user", content: spec.prompt },
+            ],
+            stream: false,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          return fail(`apertus ${model}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+        }
+        // Infomaniak's AI endpoint is OpenAI-compatible (choices[].message.content).
+        // Tolerate a result/data envelope just in case (the generic API shape).
+        const body = (await res.json()) as {
+          choices?: { message?: { content?: string } }[];
+          data?: { choices?: { message?: { content?: string } }[] };
+        };
+        const choices = body.choices ?? body.data?.choices;
+        const output = choices?.[0]?.message?.content;
+        if (typeof output !== "string") {
+          return fail(`apertus ${model}: no choices[0].message.content in response`);
+        }
+        return {
+          task_id: taskId,
+          status: "completed",
+          output: output.trim(),
+          model,
+          duration_ms: Date.now() - startedAt,
+        };
+      } catch (err) {
+        return fail(
+          controller.signal.aborted && !dispatchOpts?.signal?.aborted
+            ? `apertus ${model}: timeout after ${timeoutMs}ms`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+/** Build the Apertus provider from env, or null when not configured. */
+export function makeApertusAgentProviderFromEnv(): AgentProvider | null {
+  const apiToken = process.env.APERTUS_API_TOKEN ?? process.env.INFOMANIAK_API_TOKEN;
+  const productId = process.env.APERTUS_PRODUCT_ID ?? process.env.INFOMANIAK_AI_PRODUCT_ID;
+  if (!apiToken || !productId) return null;
+  return makeApertusAgentProvider({
+    apiToken,
+    productId,
+    ...(process.env.APERTUS_MODEL !== undefined && { model: process.env.APERTUS_MODEL }),
+    ...(process.env.APERTUS_URL !== undefined && { baseUrl: process.env.APERTUS_URL }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sovereign agent provider — route each task by its declared sovereignty
 // ---------------------------------------------------------------------------
 
@@ -222,18 +339,27 @@ export function makeSovereignAgentProvider(backends: {
  * its handler is wired (follow-up — not in this change).
  *
  *   PULSE_LOCAL_MODEL or OLLAMA_URL set → sovereign routing: `local-only`
- *     steps run on Ollama, the rest on the frontier composer LLM, so a flow
- *     the composer marked local-only EXECUTES end-to-end.
- *   neither set → undefined; runScenario falls back to the frontier-only
+ *     steps run on Ollama, the rest on the frontier backend, so a flow the
+ *     composer marked local-only EXECUTES end-to-end.
+ *   APERTUS_API_TOKEN + APERTUS_PRODUCT_ID set → the FRONTIER backend is Apertus
+ *     (Infomaniak AI, Swiss-hosted) instead of the US composer LLM — a sovereign
+ *     frontier. `local-only` steps still run on-box (Ollama); Apertus, being
+ *     cloud, never serves them. A flow that wants Apertus for triage marks that
+ *     step `frontier_ok: true` (not `local-only`).
+ *   nothing set → undefined; runScenario falls back to the frontier-only
  *     provider, which fail-closes (refuses) local-only steps — the offline /
  *     single-key default.
  */
 export function resolveAgentProvider(llm: ComposerLLM): AgentProvider | undefined {
   const localEnabled = Boolean(process.env.PULSE_LOCAL_MODEL || process.env.OLLAMA_URL);
-  if (!localEnabled) return undefined;
+  const apertus = makeApertusAgentProviderFromEnv();
+  if (!localEnabled && apertus === null) return undefined;
   return makeSovereignAgentProvider({
-    frontier: makeLocalLlmAgentProvider(llm),
-    local: makeOllamaAgentProvider(),
+    // Frontier = Apertus (Swiss-sovereign) when configured, else the composer LLM.
+    frontier: apertus ?? makeLocalLlmAgentProvider(llm),
+    // local-only stays on-box (Ollama); if Ollama isn't set, the frontier-only
+    // provider fail-closes those (never routes confidential data to cloud).
+    local: localEnabled ? makeOllamaAgentProvider() : makeLocalLlmAgentProvider(llm),
   });
 }
 
