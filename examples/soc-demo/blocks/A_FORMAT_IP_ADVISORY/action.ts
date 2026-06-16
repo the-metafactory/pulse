@@ -30,11 +30,19 @@ interface GreyNoise {
   classification?: string;
 }
 
+interface VtVerdict {
+  verdict?: string;
+  malicious?: number;
+  total_vendors?: number;
+  source?: string;
+}
+
 interface IpEnrichment {
   ip?: string;
   geoip?: GeoIp;
   owner?: Record<string, unknown>;
   greynoise?: GreyNoise;
+  vt_verdict?: VtVerdict;
 }
 
 /** Parse agent output: object as-is; JSON string parsed (edge fences stripped); a ```json block embedded in prose extracted; prose kept raw under `advisory`. */
@@ -101,6 +109,14 @@ function summariseEnrichment(e: IpEnrichment): string {
     const gn = e.greynoise;
     const flags = [gn.noise ? "noise" : null, gn.riot ? "RIOT" : null].filter(Boolean).join("/");
     parts.push(`GreyNoise: ${gn.classification ?? "unknown"}${flags ? ` (${flags})` : ""}`);
+  }
+  if (e.vt_verdict) {
+    const vt = e.vt_verdict;
+    const counts =
+      typeof vt.malicious === "number" && typeof vt.total_vendors === "number"
+        ? ` ${vt.malicious}/${vt.total_vendors}`
+        : "";
+    parts.push(`VirusTotal: ${vt.verdict ?? "unknown"}${counts}${vt.source === "stub" ? " (stub)" : ""}`);
   }
   return parts.filter((p) => p.length > 0).join(" · ") || "no enrichment data";
 }
