@@ -364,10 +364,19 @@ interface ExecuteFlowArgs {
   blocksDir: string;
   /** Header line posted only AFTER validation (callers pass sanitized text). */
   leadPost?: string;
+  /**
+   * Skip the flow-YAML re-display AND the outer "Run this flow?" operator-ack,
+   * executing directly. Used by runSavedFlow: invoking `run <NAME>` IS the
+   * operator's approval of a known-good, already-vetted playbook, so re-showing
+   * + re-asking is redundant friction. The flow's OWN internal `gate:` steps
+   * (e.g. an analyst-approve before a reset fires) still prompt — those are the
+   * flow's designed human checkpoints, not this outer ack.
+   */
+  autoApprove?: boolean;
 }
 
 async function executeValidatedFlow(args: ExecuteFlowArgs): Promise<RunScenarioResult> {
-  const { opts, flow, catalog, initialInput, blocksDir, leadPost } = args;
+  const { opts, flow, catalog, initialInput, blocksDir, leadPost, autoApprove } = args;
   // Independent re-validation FIRST — the wiring is the enforcement point. A
   // malformed/invalid saved YAML must surface as `invalid` here, never throw
   // out of a later parse (sage), so validation precedes parseYaml.
@@ -391,22 +400,25 @@ async function executeValidatedFlow(args: ExecuteFlowArgs): Promise<RunScenarioR
   }
   const name = doc.name ?? "F_COMPOSED";
 
-  // Post YAML + diagram + summary. fenceSafe() neutralizes any ``` inside the
-  // (untrusted) yaml/mermaid so a crafted body can't close the code fence early
-  // and inject channel markdown / mentions after it (sage). channelSafe()
-  // neutralizes mass-mentions in the bolded summary (posted OUTSIDE a fence).
-  const png = opts.render === false ? null : await renderMermaid(flow.mermaid ?? "");
-  const diagramPart = png ? undefined : flow.mermaid ? `\n\`\`\`mermaid\n${fenceSafe(flow.mermaid)}\`\`\`` : "";
-  await opts.poster.post(
-    `**${channelSafe(flow.summary)}**\n\`\`\`yaml\n${fenceSafe(flow.yaml)}\`\`\`${diagramPart ?? ""}`,
-    png ? { bytes: png, filename: "flow.png" } : undefined,
-  );
+  // Post YAML + diagram + summary + operator-ack — UNLESS autoApprove (a saved
+  // flow re-run, where the `run <NAME>` command was the approval). fenceSafe()
+  // neutralizes any ``` inside the (untrusted) yaml/mermaid so a crafted body
+  // can't close the code fence early and inject channel markdown/mentions after
+  // it (sage); channelSafe() neutralizes mass-mentions in the bolded summary.
+  if (!autoApprove) {
+    const png = opts.render === false ? null : await renderMermaid(flow.mermaid ?? "");
+    const diagramPart = png ? undefined : flow.mermaid ? `\n\`\`\`mermaid\n${fenceSafe(flow.mermaid)}\`\`\`` : "";
+    await opts.poster.post(
+      `**${channelSafe(flow.summary)}**\n\`\`\`yaml\n${fenceSafe(flow.yaml)}\`\`\`${diagramPart ?? ""}`,
+      png ? { bytes: png, filename: "flow.png" } : undefined,
+    );
 
-  // Operator ack — nothing runs without it
-  const ack = await opts.gateProvider.requestVerdict({ name: "operator-ack", prompt: "Run this flow?" });
-  if (ack.verdict !== "pass") {
-    await opts.poster.post(`🛑 Aborted by operator: ${ack.notes}`);
-    return { status: "aborted", notes: ack.notes };
+    // Operator ack — nothing runs without it (skipped when autoApprove).
+    const ack = await opts.gateProvider.requestVerdict({ name: "operator-ack", prompt: "Run this flow?" });
+    if (ack.verdict !== "pass") {
+      await opts.poster.post(`🛑 Aborted by operator: ${ack.notes}`);
+      return { status: "aborted", notes: ack.notes };
+    }
   }
 
   // Execute with per-step thread replies (ISC-37). agentProvider default: a
@@ -502,7 +514,10 @@ export async function runSavedFlow(yaml: string, opts: RunScenarioOptions): Prom
     catalog,
     initialInput,
     blocksDir,
-    leadPost: `▶️ Running saved flow **${name}** (no re-composition).`,
+    leadPost: `▶️ Running saved flow **${name}** (no re-composition, no re-ack).`,
+    // `run <NAME>` IS the approval — execute directly, no flow re-display, no
+    // outer operator-ack. The flow's own internal gate: steps still prompt.
+    autoApprove: true,
   });
 }
 
