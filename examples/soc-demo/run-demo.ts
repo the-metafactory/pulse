@@ -366,11 +366,14 @@ interface ExecuteFlowArgs {
   leadPost?: string;
   /**
    * Skip the flow-YAML re-display AND the outer "Run this flow?" operator-ack,
-   * executing directly. Used by runSavedFlow: invoking `run <NAME>` IS the
-   * operator's approval of a known-good, already-vetted playbook, so re-showing
-   * + re-asking is redundant friction. The flow's OWN internal `gate:` steps
-   * (e.g. an analyst-approve before a reset fires) still prompt — those are the
-   * flow's designed human checkpoints, not this outer ack.
+   * executing directly. This does NOT itself verify the YAML — it trusts the
+   * CALLER to supply an authorized playbook and treats the call as pre-approved.
+   * The trust boundary is the caller: e.g. the Yarrow handler only sets this for
+   * a `run <NAME>` whose YAML it loaded from its own no-overwrite flows store
+   * (populated solely by operator-approved composes), with the `run` command as
+   * the operator's intent. The flow's OWN internal `gate:` steps (e.g. an
+   * analyst-approve before a reset fires) STILL prompt regardless — those are
+   * the flow's designed in-run checkpoints, independent of this outer ack.
    */
   autoApprove?: boolean;
 }
@@ -485,13 +488,18 @@ export async function runScenario(scenario: string, opts: RunScenarioOptions): P
  * Re-run a SAVED flow with fresh input — skips COMPOSITION (no LLM authoring
  * call, no frontier-A reasoning that picks the blocks). The authoring-vs-
  * operation split: runScenario composes a playbook once (slow, frontier,
- * human-gated); runSavedFlow operates that known-good playbook on a new
+ * human-gated); runSavedFlow operates the caller's saved playbook on a new
  * artifact — the flow STRUCTURE is fixed, not re-decided by a model.
  *
+ * Runs DIRECTLY (autoApprove): no flow re-display, no outer "Run this flow?"
+ * ack — the caller's `run <NAME>` invocation IS the approval (the caller is the
+ * trust boundary; it does not re-verify the YAML here). It STILL re-validates
+ * before executing, and the flow's OWN internal `gate:` steps still prompt — so
+ * a remediation action behind an analyst-approve gate is still human-checked.
+ *
  * NOT "no LLM" overall: the saved flow's own `agent:` steps still execute via
- * the configured agentProvider (local-only → Ollama, etc.) — that is the flow
- * doing its work, not re-authoring. Still re-validates and still operator-gates
- * every execution — a saved remediation flow must be approved each time it runs.
+ * the configured agentProvider (local-only → Ollama, etc.) — the flow doing its
+ * work, not re-authoring.
  */
 export async function runSavedFlow(yaml: string, opts: RunScenarioOptions): Promise<RunScenarioResult> {
   const blocksDir = opts.blocksDir ?? BLOCKS_DIR;
