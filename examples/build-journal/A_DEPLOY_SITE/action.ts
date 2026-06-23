@@ -4,7 +4,10 @@
  * Three steps, each surfaced honestly:
  *   1. commit  — stage build-log/ in the site repo; skip the commit when
  *                nothing changed (re-deploys of already-committed content)
- *   2. push    — keep GitHub the source of truth (deploys never outrun main)
+ *   2. push    — keep GitHub the source of truth (deploys never outrun main).
+ *                Fast-forwards because A_WRITE_BUILDLOG already synced the site
+ *                repo to origin/main before writing the entry; an unattended run
+ *                on a drifted checkout would otherwise fail non-fast-forward.
  *   3. deploy  — `bun run deploy` (wrangler pages deploy → Cloudflare Pages)
  *
  * Opt-in via site_deploy (--deploy on the runner): publishing is an explicit

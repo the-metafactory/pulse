@@ -191,6 +191,27 @@ export default {
 
     const siteDir = (site_dir as string | undefined) ?? `${process.env.HOME}/work/mf/myelin-cortex-site`;
     const dir = `${siteDir}/build-log`;
+
+    // When deploying, sync the site repo to origin/main BEFORE reading the
+    // manifest — so the entry is written on top of the latest published state.
+    // A stale checkout otherwise regenerates an index/manifest missing recent
+    // entries AND makes A_DEPLOY_SITE's push fail non-fast-forward. Guarded to a
+    // real repo ROOT with an origin remote, so it never resets the in-pulse
+    // preview-site dir (whose git toplevel is the pulse repo, not itself).
+    if (payload.site_deploy) {
+      const top = (await shell(`git -C '${siteDir}' rev-parse --show-toplevel 2>/dev/null`)).stdout.trim();
+      const real = (await shell(`realpath '${siteDir}' 2>/dev/null`)).stdout.trim();
+      const hasOrigin = (await shell(`git -C '${siteDir}' remote get-url origin 2>/dev/null`)).code === 0;
+      if (top.length > 0 && real.length > 0 && top === real && hasOrigin) {
+        await shell(`git -C '${siteDir}' fetch origin --quiet`);
+        const reset = await shell(`git -C '${siteDir}' reset --hard origin/main`);
+        if (reset.code !== 0) {
+          throw new Error(`A_WRITE_BUILDLOG: site sync to origin/main failed: ${(reset.stderr || reset.stdout).slice(0, 200)}`);
+        }
+        console.log(`🔄 [A_WRITE_BUILDLOG] synced ${siteDir} to origin/main before writing`);
+      }
+    }
+
     await shell(`mkdir -p '${dir}'`);
 
     // Manifest: append-or-replace this entry, newest first
