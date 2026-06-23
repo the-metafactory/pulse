@@ -1,11 +1,11 @@
 {
   "name": "A_GATHER_FACTS",
   "version": "1.0.0",
-  "description": "Collect commit activity across metafactory ecosystem repos for the journal period (default: last 7 days)",
+  "description": "Auto-discover active metafactory org repos (minus a private exclude list) and collect commit activity + external contributions for the journal period (default: last 7 days)",
   "input": {
     "repos": { "type": "array" },
     "days": { "type": "number" },
-    "work_dir": { "type": "string" }
+    "exclude": { "type": "array" }
   },
   "output": {
     "facts": { "type": "object" }
