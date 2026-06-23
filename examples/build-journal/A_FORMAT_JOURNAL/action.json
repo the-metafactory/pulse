@@ -3,8 +3,10 @@
   "version": "1.0.0",
   "description": "Merge the two agents' contributions and the gate verdict into the final journal entry with per-section provenance",
   "input": {
+    "humanized": { "type": "object", "required": true },
+    "revised2": { "type": "object", "required": true },
     "draft": { "type": "object", "required": true },
-    "perspective": { "type": "object", "required": true },
+    "second_review": { "type": "object", "required": true },
     "approval": { "type": "object", "required": true },
     "facts": { "type": "object", "required": true }
   },

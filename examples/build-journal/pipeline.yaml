@@ -1,37 +1,85 @@
 # P_BUILD_JOURNAL — federated build journal: "metafactory builds metafactory, in public".
 #
-# Two principals' agents co-author one public artifact:
-#   D  A_GATHER_FACTS     — commits/activity across ecosystem repos (deterministic)
-#   A  draft              — jc's agent turns facts into a narrative   (local.jc.default)
-#   A  perspective        — andreas' agent adds his view + sign-off   (federated.andreas.meta-factory)
-#   H  editor-approval    — a human approves before anything goes public
-#   D  A_FORMAT_JOURNAL   — merge draft + perspective into the journal entry
-#   D  A_POST_DISCORD     — post to the public Discord (dry-run unless enabled)
-#   D  A_WRITE_BUILDLOG   — write the entry into the stack.meta-factory.ai build log
+# Two principals' agents co-author one public artifact through a review loop:
+#   D  A_GATHER_FACTS  — commits + external PRs/issues across the ecosystem (deterministic)
+#   A  draft           — jc's agent turns facts into a themed narrative      (local.jc.default)
+#   A  review          — andreas' agent reviews the draft, returns findings  (federated.andreas.meta-factory)
+#   A  revise          — jc's agent folds the findings INTO the text         (local.jc.default)
+#   A  second-review   — andreas' agent reviews the revised text             (federated.andreas.meta-factory)
+#   A  revise2         — jc's agent folds the second review IN too           (local.jc.default)
+#   A  humanize        — strip AI-writing tells (both reviews already in)    (local.jc.default)
+#   H  editor-approval — a human approves before anything goes public
+#   D  A_FORMAT_JOURNAL / A_POST_DISCORD / A_WRITE_BUILDLOG / A_DEPLOY_SITE
 #
-# The federation moment is the `perspective` step: the envelope crosses the
-# principal boundary on federated.andreas.meta-factory.tasks.* and the answer
-# comes back on federated.jc.default.dispatch.task.* — visible on the bus.
+# The federation moments are the `review` and `second-review` steps: the
+# envelope crosses the principal boundary on federated.andreas.meta-factory.tasks.*
+# and the answer returns on federated.jc.default.dispatch.task.* — visible on the bus.
+#
+# External PR/issue links are rendered DETERMINISTICALLY from the facts (real
+# gh URLs) — the agents describe contributors qualitatively and never cite
+# numbers, so a transposed digit can't reach the published entry.
 
 name: P_BUILD_JOURNAL
-description: Cross-principal build journal — jc's agent drafts, andreas' agent reviews and extends, humans gate, then publish to Discord and the public build log.
+description: Cross-principal build journal — jc's agent drafts themed narrative, andreas' agent reviews, jc revises, andreas reviews again, the text is de-AI'd, a human gates, then publish to Discord and the public build log.
 
 actions:
-  # D — facts only: commit activity across the ecosystem (public data)
+  # D — facts only: commits + external contributions across the ecosystem (public data)
   - A_GATHER_FACTS
 
-  # A — jc's agent drafts the narrative from the facts
+  # A — jc's agent drafts the themed narrative from the facts
   - agent:
       name: draft
       capability: ecosystem.narrative
       prompt: |
         You are the build narrator for the metafactory ecosystem — an open,
         federated agentic-OS project built by two people and their agent fleets.
-        Turn this week's raw repo activity into a short, honest build-journal
+        Turn this period's raw repo activity into a short, honest build-journal
         draft for outsiders. No hype; concrete shipped things; plain language.
-        Respond as JSON: { "headline", "narrative", "highlights": [3-6 bullets] }
 
-        Repo activity:
+        Lead with THEMES, not a commit dump:
+        1. Per repo, identify the ONE dominant theme of the period and the 2-4
+           concrete highlights under it. Skip repos with only trivial churn.
+           Think "pulse: SOC enrichment chain — GeoIP, RDAP, VirusTotal".
+           COVER THE BREADTH: the facts list every active repo (often 15-25 of
+           them). Produce a repo_theme for each repo that did real work — do NOT
+           collapse the journal into one or two repos' stories. The narrative
+           may foreground the biggest theme, but repo_themes must survey the
+           whole active ecosystem, not just pulse.
+        2. Then name the SINGLE most important thing for the ecosystem as a
+           whole — the cross-cutting topic that mattered most this period.
+        3. Describe EXTERNAL contributions (the facts carry `external_contributions`
+           and `external_contributors` — merged PRs / closed issues by people
+           outside jcfischer/mellanon) QUALITATIVELY: who showed up and what kind
+           of work they did. Do NOT cite PR or issue numbers in your prose — the
+           published entry appends an authoritative linked list automatically.
+           If the external list is empty, say so plainly; never invent people.
+
+        WEIGHT BY IMPORTANCE, NOT BY VOLUME. The busiest repo is not automatically
+        the most important. A high commit/PR count (e.g. a feature shipped in many
+        small PRs) should not crowd out structurally significant work that landed
+        in few commits (a dashboard, a governance decision, a security fix). Give
+        each theme space proportional to what it MEANS for the ecosystem and a
+        reader, not to how many commits it took. If two things matter equally, give
+        them equal room — don't let one drown the other in detail.
+
+        BE BRIEF. The lede (ecosystem_theme + first lines of narrative) is
+        high-level: name the theme and why it matters. Do NOT list features,
+        APIs, or tool names in the opening — those belong in repo_themes and
+        highlights. The narrative is 2-3 short paragraphs, tight. Cut anything a
+        reader doesn't need.
+
+        Only use repos and names present in the facts below — never fabricate.
+
+        Respond as JSON:
+        {
+          "headline": "one short line naming the ecosystem-wide theme",
+          "ecosystem_theme": "1-2 plain sentences: the single most important topic, high-level",
+          "repo_themes": [ { "repo", "theme", "highlights": [bullets] } ],
+          "narrative": "2-3 short paragraphs tying the themes together; specifics live in highlights, not here",
+          "highlights": [3-6 bullets for the teaser]
+        }
+
+        Repo activity and contributions:
         {facts}
       sovereignty:
         classification: public
@@ -40,38 +88,157 @@ actions:
       timeout_ms: 300000
       collect: draft
 
-  # A — andreas' agent adds his perspective. THE federation moment:
-  # this envelope crosses the principal boundary.
+  # A — andreas' agent reviews the draft. THE federation moment: this envelope
+  # crosses the principal boundary. Output is FINDINGS, not a tacked-on block.
   - agent:
-      name: perspective
+      name: review
       capability: ecosystem.perspective
       federate:
         principal: andreas
         stack: meta-factory
       prompt: |
-        You are Andreas' agent on the meta-factory stack. Jens-Christian's
-        agent drafted this week's metafactory build journal. Review it, add
-        the perspective from your side of the ecosystem (myelin, cortex,
-        federation work), and flag anything overstated.
-        Respond as JSON: { "perspective", "additions": [bullets], "sign_off": true|false }
+        You are Andreas' agent on the meta-factory stack. Jens-Christian's agent
+        drafted this period's metafactory build journal. Review it from your side
+        of the ecosystem (myelin, cortex, federation work). Return concrete
+        findings the author should fold INTO the text: corrections of anything
+        overstated, missing federation/security context, and re-weightings.
+        Be specific — name the claim and what it should say instead.
+        Respond as JSON: { "findings": [bullets], "must_fix": [the few that block sign-off], "sign_off": true|false }
 
         Draft:
-        {draft.output}
+        {draft}
       sovereignty:
         classification: federated
         frontier_ok: true
         model_class: any
         max_hop: 1
       timeout_ms: 300000
-      collect: perspective
+      collect: review
+
+  # A — jc's agent folds the review findings INTO the narrative (not appended).
+  - agent:
+      name: revise
+      capability: ecosystem.narrative
+      prompt: |
+        You are the build narrator again. Here is your draft and Andreas' agent's
+        review findings. Rewrite the draft so the findings are woven INTO the
+        text — correct overstated claims in place, add the missing context where
+        it belongs, re-weight as advised. Do not append a "review says…" section;
+        the integrated text should simply read as accurate. Keep it honest and
+        plain. Stay BRIEF — folding in a finding is not a licence to re-inflate;
+        the lede stays high-level, the narrative stays 2-3 short paragraphs, and
+        themes keep space proportional to importance, not volume. Return the SAME
+        JSON shape as the draft (headline, ecosystem_theme, repo_themes,
+        narrative, highlights), revised.
+
+        Your draft:
+        {draft}
+
+        Andreas' review findings:
+        {review}
+      sovereignty:
+        classification: public
+        frontier_ok: true
+        model_class: any
+      timeout_ms: 300000
+      collect: revised
+
+  # A — andreas' agent reviews the REVISED text. Second federation pass: did the
+  # revision actually address the findings? What, if anything, remains?
+  - agent:
+      name: second-review
+      capability: ecosystem.perspective
+      federate:
+        principal: andreas
+        stack: meta-factory
+      prompt: |
+        You are Andreas' agent. Jens-Christian's agent revised the build journal
+        to fold in your earlier findings. Review the revised text: confirm the
+        findings were addressed, and flag anything still off. Keep it short.
+        Respond as JSON: { "perspective", "remaining": [bullets], "sign_off": true|false }
+
+        Revised text:
+        {revised}
+      sovereignty:
+        classification: federated
+        frontier_ok: true
+        model_class: any
+        max_hop: 1
+      timeout_ms: 300000
+      collect: second_review
+
+  # A — jc's agent folds the SECOND review INTO the text too (same as the first
+  # review — worked in, not tacked on). After this pass both reviews live in the
+  # body; the federation review survives only as provenance.
+  - agent:
+      name: revise2
+      capability: ecosystem.narrative
+      prompt: |
+        You are the build narrator. Andreas' agent did a second review of your
+        revised text. Fold its remaining findings INTO the text the same way as
+        before — correct or clarify in place, do not append a "review says…"
+        block. If a finding asks for a disposition that isn't in the facts (e.g.
+        the status of a security report), state it honestly as open / under
+        assessment rather than inventing a resolution. Stay BRIEF — no
+        re-inflation; lede high-level, narrative 2-3 short paragraphs, weight by
+        importance not volume. Return the SAME JSON shape (headline,
+        ecosystem_theme, repo_themes, narrative, highlights), revised.
+
+        Your revised text:
+        {revised}
+
+        Andreas' second-review findings:
+        {second_review}
+      sovereignty:
+        classification: public
+        frontier_ok: true
+        model_class: any
+      timeout_ms: 300000
+      collect: revised2
+
+  # A — de-AI the final text: strip AI-writing tells. Both reviews are already
+  # integrated; this is style only.
+  - agent:
+      name: humanize
+      capability: ecosystem.narrative
+      prompt: |
+        You are an editor removing the signs of AI-generated writing from this
+        build journal before it goes public. Apply these rules to every prose
+        field (ecosystem_theme, each repo theme string, narrative, highlights):
+
+        - Cut puffed significance: "marks a pivotal moment", "stands as a
+          testament", "underscores its importance", "represents a shift".
+        - Kill fake-depth "-ing" tails: "…, reflecting…", "…, enabling…",
+          "…, highlighting…". State the thing; drop the participle gloss.
+        - Drop promo words: vibrant, rich, profound, seamless, robust,
+          groundbreaking, powerful, comprehensive, leverage, delve.
+        - Break the rule of three (not everything comes in tidy triples) and
+          vary sentence length — some short, some long. No em-dash overuse.
+        - Have a point of view. Honest and specific beats neutral and smooth.
+        - TIGHTEN. Cut detail the opening doesn't need; keep the lede high-level
+          and the narrative short. If a sentence isn't earning its place, drop it.
+        - Do NOT add facts, contributors, or numbers. Style only — meaning intact.
+
+        Return ONLY the prose fields as JSON: { "headline", "ecosystem_theme",
+        "narrative", "highlights" }. Do NOT return repo_themes — the per-repo
+        breakdown is carried through unchanged and is not yours to edit.
+
+        Text to humanize:
+        {revised2}
+      sovereignty:
+        classification: public
+        frontier_ok: true
+        model_class: any
+      timeout_ms: 300000
+      collect: humanized
 
   # H — a human approves before anything goes public
   - gate:
       name: editor-approval
-      prompt: "Journal entry drafted by both agents. Publish to Discord + build log?"
+      prompt: "Journal reviewed twice across the federation and de-AI'd. Publish to Discord + build log?"
       collect: approval
 
-  # D — merge both agents' contributions into the final entry (with provenance)
+  # D — assemble the final entry (final text + second review + deterministic external links)
   - A_FORMAT_JOURNAL
 
   # D — post to the public Discord server (dry-run unless discord_post is set)

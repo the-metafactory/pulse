@@ -13,16 +13,38 @@
 
 import type { ActionContext, ShellResult } from "../../../src/types/action";
 
+interface RepoTheme {
+  repo: string;
+  theme: string;
+  highlights: string[];
+}
+
+interface ExternalItem {
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+}
+
+interface ExternalContribution {
+  repo: string;
+  merged_prs: ExternalItem[];
+  closed_issues: ExternalItem[];
+}
+
 interface JournalEntry {
   date: string;
   slug: string;
   headline: string;
+  ecosystem_theme?: string;
+  repo_themes?: RepoTheme[];
+  external_contributions?: ExternalContribution[];
   narrative: string;
   highlights: string[];
   perspective: string;
   additions: string[];
   stats: { period_days: number; total_commits: number; active_repos: string[] };
-  provenance: { draft_by: string; perspective_by: string };
+  provenance: { draft_by: string; reviewed_by?: string; perspective_by?: string };
 }
 
 const DISCORD_LIMIT = 1900; // margin under the 2000-char message limit
@@ -52,7 +74,27 @@ function renderTeaser(entry: JournalEntry, siteUrl: string): string {
 
 /** The full journal, split into thread-sized messages. */
 function renderFull(entry: JournalEntry): string[] {
-  const head: string[] = [entry.narrative];
+  const head: string[] = [];
+  if (entry.ecosystem_theme) head.push(`**${entry.ecosystem_theme}**`, "");
+  head.push(entry.narrative);
+
+  if (entry.repo_themes && entry.repo_themes.length > 0) {
+    head.push("", "**By repository**");
+    for (const r of entry.repo_themes) {
+      head.push(`**${r.repo}** — ${r.theme}`);
+      for (const h of r.highlights) head.push(`> ${h}`);
+    }
+  }
+
+  if (entry.external_contributions && entry.external_contributions.length > 0) {
+    head.push("", "**External contributions**");
+    for (const c of entry.external_contributions) {
+      head.push(`__${c.repo}__`);
+      for (const p of c.merged_prs) head.push(`> PR [#${p.number}](${p.url}) — ${p.title} (@${p.author})`);
+      for (const i of c.closed_issues) head.push(`> issue [#${i.number}](${i.url}) — ${i.title} (@${i.author})`);
+    }
+  }
+
   if (entry.highlights.length > 0) {
     head.push("", "**Shipped**");
     for (const h of entry.highlights) head.push(`> ${h}`);
@@ -69,7 +111,7 @@ function renderFull(entry: JournalEntry): string[] {
   second.push(
     "",
     `_${entry.stats.total_commits} commits across ${entry.stats.active_repos.length} repos in ${entry.stats.period_days} days._`,
-    `_Drafted by ${entry.provenance.draft_by}; perspective by ${entry.provenance.perspective_by}. Assembled by pulse P_BUILD_JOURNAL._`,
+    `_Drafted by ${entry.provenance.draft_by}; reviewed by ${entry.provenance.reviewed_by ?? entry.provenance.perspective_by ?? "andreas' agent"}. Assembled by pulse P_BUILD_JOURNAL._`,
   );
 
   const sections = [head.join("\n"), second.join("\n")].flatMap(splitToLimit);

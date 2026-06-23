@@ -10,10 +10,32 @@
 
 import type { ActionContext } from "../../../src/types/action";
 
+interface RepoTheme {
+  repo: string;
+  theme: string;
+  highlights: string[];
+}
+
+interface ExternalItem {
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+}
+
+interface ExternalContribution {
+  repo: string;
+  merged_prs: ExternalItem[];
+  closed_issues: ExternalItem[];
+}
+
 interface JournalEntry {
   date: string;
   slug: string;
   headline: string;
+  ecosystem_theme?: string;
+  repo_themes?: RepoTheme[];
+  external_contributions?: ExternalContribution[];
   narrative: string;
   highlights: string[];
   perspective: string;
@@ -86,22 +108,45 @@ ${body}
 `;
 }
 
+/** External PR/issue contributions as a linked list, grouped by repo. Real gh URLs. */
+function externalSection(contributions: ExternalContribution[]): string {
+  if (contributions.length === 0) return "";
+  const item = (kind: string, it: ExternalItem) =>
+    `          <li>${kind} <a href="${esc(it.url)}">#${it.number}</a> — ${esc(it.title)} <span class="meta">(@${esc(it.author)})</span></li>`;
+  const repos = contributions
+    .map((c) => {
+      const prs = c.merged_prs.map((p) => item("PR", p)).join("\n");
+      const issues = c.closed_issues.map((i) => item("issue", i)).join("\n");
+      return `        <li><strong>${esc(c.repo)}</strong>\n          <ul>\n${[prs, issues].filter(Boolean).join("\n")}\n          </ul>\n        </li>`;
+    })
+    .join("\n");
+  return `      <h2>External contributions</h2>\n      <ul>\n${repos}\n      </ul>`;
+}
+
 function entryPage(e: JournalEntry): string {
   const highlights = e.highlights.map((h) => `        <li>${esc(h)}</li>`).join("\n");
   const additions = e.additions.map((a) => `        <li>${esc(a)}</li>`).join("\n");
+  const repoThemes = (e.repo_themes ?? [])
+    .map((r) => {
+      const hs = r.highlights.map((h) => `          <li>${esc(h)}</li>`).join("\n");
+      return `        <li><strong>${esc(r.repo)}</strong> — ${esc(r.theme)}${
+        r.highlights.length ? `\n          <ul>\n${hs}\n          </ul>` : ""
+      }</li>`;
+    })
+    .join("\n");
   const body = `    <article class="prose narrow">
       <p class="meta">${e.date} · build journal · ${e.stats.total_commits} commits / ${e.stats.active_repos.length} repos / ${e.stats.period_days} days</p>
       <h1>${esc(e.headline)}</h1>
+${e.ecosystem_theme ? `      <p class="lede"><strong>${esc(e.ecosystem_theme)}</strong></p>` : ""}
       <p>${esc(e.narrative)}</p>
+${e.repo_themes && e.repo_themes.length ? `      <h2>By repository</h2>\n      <ul>\n${repoThemes}\n      </ul>` : ""}
+${externalSection(e.external_contributions ?? [])}
 ${e.highlights.length ? `      <h2>Shipped</h2>\n      <ul>\n${highlights}\n      </ul>` : ""}
-      <h2>From the meta-factory stack</h2>
-      <p class="meta">Andreas' agent — answered over <code>federated.andreas.meta-factory</code></p>
-      <p>${esc(e.perspective)}</p>
-${e.additions.length ? `      <ul>\n${additions}\n      </ul>` : ""}
+${e.perspective ? `      <h2>From the meta-factory stack</h2>\n      <p class="meta">Andreas' agent — answered over <code>federated.andreas.meta-factory</code></p>\n      <p>${esc(e.perspective)}</p>${e.additions.length ? `\n      <ul>\n${additions}\n      </ul>` : ""}` : ""}
       <h2>Provenance</h2>
       <ul>
         <li>Draft: ${esc(e.provenance.draft_by ?? "?")}</li>
-        <li>Perspective: ${esc(e.provenance.perspective_by ?? "?")}</li>
+        <li>Reviewed: ${esc(e.provenance.reviewed_by ?? e.provenance.perspective_by ?? "?")}</li>
         <li>Approved: human gate <code>${esc(e.provenance.approved_by_gate ?? "?")}</code> at ${esc(e.provenance.approved_at ?? "?")}</li>
         <li>Assembled: ${esc(e.provenance.pipeline ?? "pulse")}</li>
       </ul>
