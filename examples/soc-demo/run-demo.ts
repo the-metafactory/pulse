@@ -308,6 +308,138 @@ export function makeApertusAgentProviderFromEnv(): AgentProvider | null {
 }
 
 // ---------------------------------------------------------------------------
+// On-prem agent provider — an operator-run OpenAI-compatible inference cluster
+// ---------------------------------------------------------------------------
+
+export interface OnPremProviderOpts {
+  /** Base URL of the OpenAI-compatible API, INCLUDING its version segment (…/v1). */
+  baseUrl: string;
+  /** Bearer key issued to this consumer by the cluster's gateway. */
+  apiKey: string;
+  /** Model/alias to address. Prefer a stable role ALIAS over a model name. */
+  model?: string;
+  /** Per-call deadline. Default 120_000ms — on-prem open-weight models are slower than frontier. */
+  timeoutMs?: number;
+}
+
+/**
+ * Runs an `agent:` step against an OPERATOR-RUN OpenAI-compatible inference
+ * cluster — hardware the principal controls, reached over the network.
+ *
+ * ⚠️ THIS SERVES THE `local` LANE, AND THAT IS A DELIBERATE WIDENING.
+ * Until now `local-only` meant literally on-box (Ollama on the host running
+ * pulse). An on-prem cluster is NOT on-box: the prompt crosses a network. It is
+ * offered as the local lane because the property `local-only` actually protects
+ * is *the data never reaches a third party* — and operator-run hardware inside
+ * the same trust boundary satisfies that, while a laptop-sized model does not
+ * give a real answer. The distinction matters and should be a conscious choice,
+ * so this lane is OPT-IN: it is inert unless `PULSE_ONPREM_URL` +
+ * `PULSE_ONPREM_KEY` are both set, and when unset the on-box Ollama lane (or the
+ * fail-closed refusal) is unchanged.
+ *
+ * ⚠️ Do NOT point this at a cloud provider. Apertus-style Swiss cloud is
+ * sovereign but still third-party, and belongs on the FRONTIER lane
+ * ({@link makeApertusAgentProvider}), never here.
+ *
+ * Deliberately configuration-only: no endpoint, hostname, model name or key ever
+ * appears in this repo. A deployment supplies all four via env.
+ *
+ * Wire shape is plain OpenAI chat-completions (`{baseUrl}/chat/completions`,
+ * Bearer auth). A failed/timed-out call surfaces as a failed task, never a throw
+ * that strands the pipeline.
+ */
+export function makeOnPremAgentProvider(opts: OnPremProviderOpts): AgentProvider {
+  const model = opts.model ?? process.env.PULSE_ONPREM_MODEL ?? "chat";
+  const endpoint = `${opts.baseUrl.replace(/\/$/, "")}/chat/completions`;
+  const envTimeout = Number(process.env.PULSE_ONPREM_TIMEOUT_MS);
+  const timeoutMs =
+    opts.timeoutMs ?? (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 120_000);
+  return {
+    async dispatch(spec: AgentTaskSpec, dispatchOpts): Promise<AgentTaskResult> {
+      const startedAt = Date.now();
+      const taskId = crypto.randomUUID();
+      dispatchOpts?.onDispatched?.({ task_id: taskId });
+      const fail = (error: string): AgentTaskResult => ({
+        task_id: taskId,
+        status: "failed",
+        output: null,
+        error,
+        duration_ms: Date.now() - startedAt,
+      });
+      if (dispatchOpts?.signal?.aborted) return fail(`onprem ${model}: task aborted before dispatch`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      dispatchOpts?.signal?.addEventListener("abort", () => controller.abort(), { once: true });
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${opts.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are a SOC analyst agent executing one step of a security pipeline. " +
+                  "Respond concisely with the requested assessment as plain text — no preamble.",
+              },
+              { role: "user", content: spec.prompt },
+            ],
+            stream: false,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          // A gateway in front of the engines commonly enforces per-key token
+          // budgets by PRE-CHARGING the requested max_tokens, so a 429 here can
+          // mean "your quota is smaller than one reply", not "you are too busy".
+          return fail(`onprem ${model}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+        }
+        const body = (await res.json()) as {
+          choices?: { message?: { content?: string } }[];
+        };
+        const output = body.choices?.[0]?.message?.content;
+        if (typeof output !== "string") {
+          return fail(`onprem ${model}: no choices[0].message.content in response`);
+        }
+        return {
+          task_id: taskId,
+          status: "completed",
+          output: output.trim(),
+          model,
+          duration_ms: Date.now() - startedAt,
+        };
+      } catch (err) {
+        return fail(
+          controller.signal.aborted && !dispatchOpts?.signal?.aborted
+            ? `onprem ${model}: timeout after ${timeoutMs}ms`
+            : err instanceof Error
+              ? err.message
+              : String(err),
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  };
+}
+
+/** Build the on-prem provider from env, or null when not configured. */
+export function makeOnPremAgentProviderFromEnv(): AgentProvider | null {
+  const baseUrl = process.env.PULSE_ONPREM_URL;
+  const apiKey = process.env.PULSE_ONPREM_KEY;
+  if (!baseUrl || !apiKey) return null;
+  return makeOnPremAgentProvider({
+    baseUrl,
+    apiKey,
+    ...(process.env.PULSE_ONPREM_MODEL !== undefined && { model: process.env.PULSE_ONPREM_MODEL }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sovereign agent provider — route each task by its declared sovereignty
 // ---------------------------------------------------------------------------
 
@@ -342,6 +474,12 @@ export function makeSovereignAgentProvider(backends: {
  * harness both call this; the Yarrow bot pack is INTENDED to call it too once
  * its handler is wired (follow-up — not in this change).
  *
+ *   PULSE_ONPREM_URL + PULSE_ONPREM_KEY set → the LOCAL lane is an operator-run
+ *     OpenAI-compatible cluster instead of on-box Ollama. Takes precedence over
+ *     Ollama when both are configured, because the point of an on-prem cluster
+ *     is that `local-only` gets a real model rather than a laptop-sized one.
+ *     See {@link makeOnPremAgentProvider} for why "on-prem" is allowed to serve
+ *     a lane whose name says "local" — it is a deliberate widening.
  *   PULSE_LOCAL_MODEL or OLLAMA_URL set → sovereign routing: `local-only`
  *     steps run on Ollama, the rest on the frontier backend, so a flow the
  *     composer marked local-only EXECUTES end-to-end.
@@ -356,15 +494,37 @@ export function makeSovereignAgentProvider(backends: {
  */
 export function resolveAgentProvider(llm: ComposerLLM): AgentProvider | undefined {
   const localEnabled = Boolean(process.env.PULSE_LOCAL_MODEL || process.env.OLLAMA_URL);
+  const onprem = makeOnPremAgentProviderFromEnv();
   const apertus = makeApertusAgentProviderFromEnv();
-  if (!localEnabled && apertus === null) return undefined;
+  if (!localEnabled && onprem === null && apertus === null) return undefined;
   return makeSovereignAgentProvider({
     // Frontier = Apertus (Swiss-sovereign) when configured, else the composer LLM.
     frontier: apertus ?? makeLocalLlmAgentProvider(llm),
-    // local-only stays on-box (Ollama); if Ollama isn't set, the frontier-only
-    // provider fail-closes those (never routes confidential data to cloud).
-    local: localEnabled ? makeOllamaAgentProvider() : makeLocalLlmAgentProvider(llm),
+    // local-only prefers an operator-run on-prem cluster (a real model), then
+    // on-box Ollama; if neither is set, the frontier-only provider fail-closes
+    // those (never routes confidential data to cloud).
+    local:
+      onprem ??
+      (localEnabled ? makeOllamaAgentProvider() : makeLocalLlmAgentProvider(llm)),
   });
+}
+
+/**
+ * One line describing where each sovereignty lane actually goes, for the
+ * startup banner. Names no host and prints no key — only which backend won.
+ */
+export function describeAgentRouting(): string {
+  const onprem = Boolean(process.env.PULSE_ONPREM_URL && process.env.PULSE_ONPREM_KEY);
+  const localEnabled = Boolean(process.env.PULSE_LOCAL_MODEL || process.env.OLLAMA_URL);
+  const local = onprem
+    ? `on-prem cluster (${process.env.PULSE_ONPREM_MODEL ?? "chat"})`
+    : localEnabled
+      ? `Ollama (${process.env.PULSE_LOCAL_MODEL ?? "llama3.2:latest"})`
+      : "refused (fail-closed)";
+  const frontier = makeApertusAgentProviderFromEnv() !== null
+    ? `Apertus (${process.env.APERTUS_MODEL ?? "apertus"})`
+    : "composer LLM";
+  return `local-only → ${local} · frontier → ${frontier}`;
 }
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -708,7 +868,7 @@ if (import.meta.main) {
     : (console.log("🤖 ANTHROPIC_API_KEY unset — stub composer LLM"), makeStubLLM());
 
   const agentProvider = resolveAgentProvider(llm);
-  if (agentProvider) console.log(`🧠 local model enabled (${process.env.PULSE_LOCAL_MODEL ?? "llama3.2:latest"}) — local-only steps route to Ollama`);
+  if (agentProvider) console.log(`🧠 sovereign routing: ${describeAgentRouting()}`);
   const result = await runScenario(scenario, {
     llm,
     poster,
