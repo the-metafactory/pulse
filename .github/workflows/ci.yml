@@ -27,11 +27,12 @@ on:
 permissions:
   contents: read
 
-# A PR's runs share one group, so a new push cancels the superseded run. A
-# push to main gets a group of its own (run_id), so it is never cancelled or
+# A PR's runs share one group (keyed by PR number, so same-named fork
+# branches don't collide), and a new push cancels the superseded run. A push
+# to main gets a group of its own (run_id), so it is never cancelled or
 # replaced while queued: every main commit keeps its result.
 concurrency:
-  group: ci-${{ github.head_ref || github.run_id }}
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
@@ -43,6 +44,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Nothing after checkout needs git credentials; keep the token out of
+          # .git/config while PR code runs.
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
@@ -58,6 +63,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Nothing after checkout needs git credentials; keep the token out of
+          # .git/config while PR code runs.
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
