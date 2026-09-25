@@ -119,6 +119,8 @@ bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same two commands as named checks, **Typecheck** and **Test**, on every PR to `main` and every push to `main`, with Bun pinned in the workflow. They block a merge only when branch protection on `main` requires them. Keep the suite self-contained: no test may need a real model, NATS server, chat surface or credential.
+
 ## Working conventions
 
 - Tree runner tests in `tests/` mirroring `src/lib/`
