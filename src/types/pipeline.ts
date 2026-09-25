@@ -9,6 +9,7 @@
 import type { AgentStepSpec } from "./agent";
 import type { TribunalStepSpec } from "./tribunal";
 import type { GovernedStepSpec } from "./governed";
+import type { ResearchStepSpec } from "./research";
 
 // Agent step types live in ./agent (shared with the capability surface);
 // re-exported here so pipeline consumers see one vocabulary.
@@ -44,6 +45,9 @@ export type {
   GovernedGateSpec,
 } from "./governed";
 
+// Research step types live in ./research; re-exported likewise.
+export type { ResearchStepSpec, ResearchStats, ResearchEvent } from "./research";
+
 // ---------------------------------------------------------------------------
 // Step type — discriminated union
 // ---------------------------------------------------------------------------
@@ -58,7 +62,8 @@ export type PipelineStep =
   | { gate: GateStepSpec }
   | { agent: AgentStepSpec }
   | { tribunal: TribunalStepSpec }
-  | { governed: GovernedStepSpec };
+  | { governed: GovernedStepSpec }
+  | { research: ResearchStepSpec };
 
 // ---------------------------------------------------------------------------
 // Primitive specs

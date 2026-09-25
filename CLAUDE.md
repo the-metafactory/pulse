@@ -84,7 +84,7 @@ actions:
 ```
 
 ### Composition primitives
-Pipelines support 9 composition primitives that operate on collections or control execution while keeping actions pure:
+Pipelines support 10 primitives that operate on collections or control execution while keeping actions pure:
 - **map** — apply a sub-pipeline to each item (`over`, `as`, `collect`, `concurrency`, `onError: stop|skip|collect`)
 - **filter** — keep items where sub-pipeline predicate is true (`keep_field`)
 - **reduce** — sequential fold with accumulator (`init`, `item_as`, `acc_as`)
@@ -94,11 +94,12 @@ Pipelines support 9 composition primitives that operate on collections or contro
 - **agent** — dispatch an LLM/agent task to the fleet (`name`, `capability`, `prompt` template, `sovereignty?`, `timeout_ms?`, `collect?`); pluggable `AgentProvider` (no default — fail fast); `MyelinAgentProvider` publishes myelin v3 task envelopes over NATS and awaits the dispatch lifecycle; emits `agent.dispatched` / `agent.completed` / `agent.failed` / `agent.timeout` via `onAgentEvent`
 - **tribunal** — model-diverse agent panel adjudicates a judgment call (`name`, `seats[]`, `tiebreaker?`, `confidence_bar?`, `on_defer: fail|continue`); fail-closed aggregation to `allow/deny/defer` with worst-case abstain interpretation, Gate-22 diversity rule (restrictive-only reassignment), tiebreaker on split; emits `tribunal.convened` / `tribunal.seat_voted` / `tribunal.tiebreak` / `tribunal.verdict` via `onTribunalEvent`; L1 of the governed-action stack (`docs/verdict-tribunal.md`)
 - **governed** — the full L0→L1→L2 governed-action stack in one step (`name`, `tool`, `input_fields[]`, inline `policy`, `tribunal?`, `gate?`); L0 `evaluate()` allow skips the panel (zero LLM cost), deny halts, ask convenes the tribunal (or degrades to the gate when no tribunal is set); tribunal deny halts (refusals are terminal — no gate appeal), defer opens the gate; emits `governed.l0` / `governed.escalated` / `governed.resolved` via `onGovernedEvent`; composes evaluate()/tribunal/gate, never reimplements them (P-702)
+- **research** — a chat model researches through read-only actions as tools (`name`, `model`, `prompt`, `system?`, `tools[]`, `bind?`, `max_rounds?`, `write_prompt?`, `empty_retries?`, `result_chars?`, `timeout_ms?`, `collect?`); the host injects models by name (`StepRunnerOptions.models`, e.g. `OpenAICompatibleChatModel`); every tool must be `effect: read` or the pipeline refuses to start; `bind` pins fields out of the model's reach; the model's arguments are checked against the tool schema; tools get an argv-only shell; `timeout_ms` covers tool runs; JSONL transcript into `StepRunnerOptions.transcriptDir`; `ResearchUnavailable` when the model is down; emits `research.started` / `research.round` / `research.completed` / `research.failed` via `onResearchEvent` (P-900..P-905, `docs/research-step.md`)
 
-Types in `src/types/pipeline.ts` + `src/types/agent.ts` + `src/types/tribunal.ts` + `src/types/governed.ts`, dispatcher in `src/lib/step-runner.ts`, gate provider in `src/lib/gate-provider.ts`, agent providers in `src/lib/agent-provider.ts`, tribunal pure core in `src/lib/tribunal.ts`. Design rationale in `docs/iteration-primitives.md`, `docs/agent-actions.md`, and `docs/verdict-tribunal.md`.
+Types in `src/types/pipeline.ts` + `src/types/agent.ts` + `src/types/tribunal.ts` + `src/types/governed.ts` + `src/types/research.ts`, dispatcher in `src/lib/step-runner.ts`, shared step options/records in `src/lib/step-options.ts`, research runner in `src/lib/research.ts`, gate provider in `src/lib/gate-provider.ts`, agent providers in `src/lib/agent-provider.ts`, tribunal pure core in `src/lib/tribunal.ts`. Design rationale in `docs/iteration-primitives.md`, `docs/agent-actions.md`, `docs/verdict-tribunal.md`, and `docs/research-step.md`.
 
 ### Step lifecycle events
-Plain action steps emit `step.started` / `step.completed` / `step.failed` via the optional `StepRunnerOptions.onActionStepEvent` sink (`ActionStepEvent` in `src/types/pipeline.ts`) — the hook hosts use to surface per-step execution progress (e.g. the SOC demo's per-step Mattermost thread replies). Primitives keep their own channels (`onGateEvent`, `onAgentEvent`, `onTribunalEvent`, `onGovernedEvent`).
+Plain action steps emit `step.started` / `step.completed` / `step.failed` via the optional `StepRunnerOptions.onActionStepEvent` sink (`ActionStepEvent` in `src/types/pipeline.ts`) — the hook hosts use to surface per-step execution progress (e.g. the SOC demo's per-step Mattermost thread replies). Primitives keep their own channels (`onGateEvent`, `onAgentEvent`, `onTribunalEvent`, `onGovernedEvent`, `onResearchEvent`).
 
 ### SOC demo (P-800..P-806)
 `examples/soc-demo/` — live on-stage composition of SOC processes from Mattermost (design: `design/soc-demo-mm-composer.md`). 21-block stub-safe palette, deterministic compose→execute validator (`A_VALIDATE_FLOW` + pure `validatePipeline` with sovereignty-annotation lint), catalog-bound composer with validator-retry loop, Mermaid→PNG rendering with fallback-to-source, and execution wiring with operator-ack gate (principal-checked) + per-step thread replies. Fully offline by default; every external adapter returns canned fixtures when its env key is unset. `bun examples/soc-demo/rehearse.ts` runs the 8 design scenarios.
@@ -224,6 +225,7 @@ Pulse uses P-series feature numbering tracked via `blueprint.yaml` and iteration
 - **Iteration 5 — NATS Message Bus:** P-500 (transport abstraction), P-501 (cue.fired executor), P-502 (cue.fired publisher), P-503 (process events on bus)
 - **Iteration 6 — Agent actions:** P-600 (myelin envelope integration), P-601 (job publishing to NATS)
 - **Iteration 7 — Governance upgrade (Magnus × RavenClaude synthesis):** P-700 (enforcement gate L0), P-701 (verdict tribunal L1), P-702 (governed-action stack L0→L1→L2), P-703 (diplomatic pouch, trust rung 1). Cross-repo: cortex G-1115 (MC governance tab), `compass/sops/peer-contact.md`. Plan: `docs/governance-upgrade-plan.md`.
+- **Iteration 9 — Research step:** P-900 (JSON Schema action input), P-901 (effect + bind), P-902 (argv shell), P-903 (OpenAI-compatible chat model), P-904 (research step), P-905 (research transcript). Design: `docs/research-step.md`.
 
 **Workflow:**
 ```

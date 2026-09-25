@@ -1,4 +1,3 @@
-import type { ActionRunnerOptions } from "./action-runner";
 import { StdinGateProvider } from "./gate-provider";
 import type {
   PipelineStep,
@@ -8,18 +7,13 @@ import type {
   ParallelStepSpec,
   RetryStepSpec,
   GateStepSpec,
-  GateProvider,
-  GateEvent,
   GateResult,
   AgentStepSpec,
-  AgentEvent,
   AgentTaskResult,
-  ActionStepEvent,
 } from "../types/pipeline";
 import type {
   SeatSpec,
   SeatVote,
-  TribunalEvent,
   TribunalRuling,
   TribunalStepSpec,
   TribunalVerdict,
@@ -34,60 +28,16 @@ import {
   planDiversity,
 } from "./tribunal";
 import { evaluate } from "./enforcement-gate";
-import type { GovernedEvent, GovernedResult, GovernedStepSpec } from "../types/governed";
+import type { GovernedResult, GovernedStepSpec } from "../types/governed";
 
-export class StepFailure extends Error {
-  constructor(
-    public readonly step: string,
-    public readonly causeError: string,
-  ) {
-    super(`Step failed: ${step} — ${causeError}`);
-    this.name = "StepFailure";
-  }
-}
+import { StepFailure, MapItemFailure, partialPayload } from "./step-failure";
+import { mapWithConcurrency } from "./concurrency";
+import { ResearchUnavailable, checkResearchTools, runResearch, validateResearch } from "./research";
+import { renderPromptTemplate, runState, withRunState, type StepRecord, type StepRunnerOptions } from "./step-options";
+import type { ResearchStepSpec } from "../types/research";
 
-export class MapItemFailure extends Error {
-  constructor(
-    public readonly index: number,
-    public readonly item: unknown,
-    public readonly causeError: string,
-  ) {
-    super(`Map item ${index} failed: ${causeError}`);
-    this.name = "MapItemFailure";
-  }
-}
-
-export interface StepRecord {
-  action: string;
-  success: boolean;
-  durationMs: number;
-  error?: string;
-  /** Populated for gate steps — full GateResult so downstream traces can audit verdict + notes. */
-  gate?: GateResult;
-  /** Populated for tribunal steps — full TribunalVerdict (votes, diversity, tiebreak). */
-  tribunal?: TribunalVerdict;
-  /** Populated for governed steps — full GovernedResult (l0 + tribunal + gate verdicts). */
-  governed?: GovernedResult;
-}
-
-/** Options threaded through the step runner, extending ActionRunnerOptions */
-export interface StepRunnerOptions extends ActionRunnerOptions {
-  mode?: "local" | "cloud";
-  /** AbortSignal for cooperative cancellation (used by parallel branches) */
-  signal?: AbortSignal;
-  /** Gate input source. Defaults to StdinGateProvider when omitted. */
-  gateProvider?: GateProvider;
-  /** Optional sink for plain-action step lifecycle events. Hosts can pipe to traces, dashboards, chat threads, etc. */
-  onActionStepEvent?: (event: ActionStepEvent) => void;
-  /** Optional sink for gate lifecycle events. Hosts can pipe to traces, dashboards, etc. */
-  onGateEvent?: (event: GateEvent) => void;
-  /** Optional sink for agent lifecycle events. */
-  onAgentEvent?: (event: AgentEvent) => void;
-  /** Optional sink for tribunal lifecycle events. */
-  onTribunalEvent?: (event: TribunalEvent) => void;
-  /** Optional sink for governed-action lifecycle events. */
-  onGovernedEvent?: (event: GovernedEvent) => void;
-}
+export { StepFailure, MapItemFailure, renderPromptTemplate };
+export type { StepRecord, StepRunnerOptions };
 
 type ValidateStep = (step: unknown, path?: string) => PipelineStep;
 type RunSteps = (
@@ -110,7 +60,8 @@ type PrimitiveSpec =
   | GateStepSpec
   | AgentStepSpec
   | TribunalStepSpec
-  | GovernedStepSpec;
+  | GovernedStepSpec
+  | ResearchStepSpec;
 
 interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
   validate?: (spec: Record<string, unknown>, path: string, validateStep: ValidateStep) => void;
@@ -121,28 +72,46 @@ interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
     stepRecords: StepRecord[],
     runtime: PrimitiveRuntime,
   ) => Promise<Record<string, unknown>>;
+  /** The sub-pipelines this primitive runs, so a pipeline-wide walk (preflight) reaches nested steps. */
+  children?: (spec: TSpec) => PipelineStep[][];
+  /**
+   * A check over the whole pipeline before its first step runs (runPipeline);
+   * throws to refuse it. What it returns is kept in the run state, keyed by
+   * the spec, so the step need not repeat the work.
+   */
+  preflight?: (spec: TSpec, options: StepRunnerOptions) => Promise<unknown>;
 }
+
+/** The one sub-pipeline of map, filter, reduce and retry. */
+const nestedActions = (spec: { actions?: unknown }): PipelineStep[][] =>
+  Array.isArray(spec.actions) ? [spec.actions as PipelineStep[]] : [];
 
 const PRIMITIVES = {
   map: {
     validate: validateNestedActions,
     run: runMap,
+    children: nestedActions,
   },
   filter: {
     validate: validateNestedActions,
     run: runFilter,
+    children: nestedActions,
   },
   reduce: {
     validate: validateNestedActions,
     run: runReduce,
+    children: nestedActions,
   },
   parallel: {
     validate: validateParallel,
     run: runParallel,
+    children: (spec: ParallelStepSpec) =>
+      Object.values(spec.branches ?? {}).flatMap((branch) => nestedActions(branch ?? {})),
   },
   retry: {
     validate: validateNestedActions,
     run: runRetry,
+    children: nestedActions,
   },
   gate: {
     validate: validateGate,
@@ -160,11 +129,44 @@ const PRIMITIVES = {
     validate: validateGoverned,
     run: runGoverned,
   },
+  research: {
+    validate: validateResearch,
+    run: runResearch,
+    // A pipeline that would offer a model anything but a read action never
+    // starts. The manifests checked here are kept for the run's research steps.
+    preflight: (spec: ResearchStepSpec, options: StepRunnerOptions) => checkResearchTools(spec, options.actionDirs),
+  },
 } satisfies Record<string, PrimitiveHandler<any>>;
 
 type PrimitiveKey = keyof typeof PRIMITIVES;
 
 const KNOWN_PRIMITIVE_KEYS = new Set(Object.keys(PRIMITIVES));
+
+/**
+ * Run every primitive's preflight over a pipeline, nested steps included,
+ * before its first step runs, and return the options for the run: the host's
+ * options plus fresh run state holding what the preflights returned. A step
+ * whose shape does not resolve is left to runStep, which reports it in order.
+ */
+export async function preflightSteps(steps: PipelineStep[], options: StepRunnerOptions): Promise<StepRunnerOptions> {
+  const runOptions = withRunState(options);
+  const state = runState(runOptions)!;
+  const walk = async (list: PipelineStep[]): Promise<void> => {
+    for (const step of list) {
+      if (step === null || typeof step !== "object" || Array.isArray(step)) continue;
+      const keys = Object.keys(step).filter((k): k is PrimitiveKey => KNOWN_PRIMITIVE_KEYS.has(k));
+      if (keys.length !== 1) continue;
+      const spec = (step as Record<string, unknown>)[keys[0]];
+      if (spec === null || typeof spec !== "object" || Array.isArray(spec)) continue;
+      const handler: PrimitiveHandler<any> = PRIMITIVES[keys[0]];
+      const result = await handler.preflight?.(spec, runOptions);
+      if (result !== undefined) state.preflight.set(spec, result);
+      for (const sub of handler.children?.(spec) ?? []) await walk(sub);
+    }
+  };
+  await walk(steps);
+  return runOptions;
+}
 
 export function validatePrimitiveStep(
   step: Record<string, unknown>,
@@ -258,26 +260,6 @@ function validateGate(spec: Record<string, unknown>, path: string): void {
   }
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  worker: (item: T, index: number) => Promise<R>,
-  concurrency: number,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let cursor = 0;
-
-  async function runOne() {
-    while (true) {
-      const idx = cursor++;
-      if (idx >= items.length) return;
-      results[idx] = await worker(items[idx], idx);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runOne));
-  return results;
-}
-
 async function runMap(
   spec: MapStepSpec,
   payload: Record<string, unknown>,
@@ -305,12 +287,25 @@ async function runMap(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (onError === "stop") {
-        throw new MapItemFailure(index, item, errMsg);
+        throw new MapItemFailure(index, item, errMsg, err);
       }
       if (onError === "skip") {
         return undefined;
       }
-      return { _error: true, index, error: errMsg, item };
+      // `partial` is the item's payload as it stood when the failing step
+      // started — the work of the steps before it. A research model that was
+      // unreachable is a "retry later", not a failure of the item; flag it so
+      // a host can deliver `partial` and queue the rest without parsing the
+      // message.
+      const partial = partialPayload(err);
+      return {
+        _error: true,
+        index,
+        error: errMsg,
+        item,
+        ...(partial ? { partial } : {}),
+        ...(err instanceof ResearchUnavailable ? { unavailable: true } : {}),
+      };
     }
   }
 
@@ -706,25 +701,6 @@ function validateAgent(spec: Record<string, unknown>, path: string): void {
       throw new Error(`${path}: 'federate.stack' must be a non-empty string when set`);
     }
   }
-}
-
-/**
- * Render `{field}` / `{dotted.path}` placeholders from payload context.
- * Object values are JSON-encoded; missing paths throw — a silently empty
- * prompt section is worse than a loud failure.
- */
-export function renderPromptTemplate(template: string, payload: Record<string, unknown>): string {
-  return template.replace(/\{([\w.]+)\}/g, (_match, pathExpr: string) => {
-    let value: unknown = payload;
-    for (const segment of pathExpr.split(".")) {
-      if (value === null || typeof value !== "object" || !(segment in (value as Record<string, unknown>))) {
-        throw new Error(`agent prompt template: payload has no field '${pathExpr}'`);
-      }
-      value = (value as Record<string, unknown>)[segment];
-    }
-    if (typeof value === "string") return value;
-    return JSON.stringify(value, null, 2);
-  });
 }
 
 async function runAgent(

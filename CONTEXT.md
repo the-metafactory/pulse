@@ -34,6 +34,9 @@ The injected runtime services for an Action — capabilities, env, trace (`Actio
 **Passthrough**:
 The rule that an Action returns the untouched siblings of the fields it consumed, so the Payload grows monotonically down the Pipeline.
 
+**Effect**:
+What an Action declares it does to the world, in its manifest: `read` (gathers only) or `write` (sends, posts, drafts, changes state). Absent counts as not read. A research step offers a model `read` Actions only.
+
 ### Runtime
 
 **Engine**:
@@ -42,6 +45,10 @@ Pulse as a whole — the thing that executes Processes. Singular.
 **Tree Runner**:
 The component that executes a Tree (a dependency graph). Class name `PulseRunner` is historical; it runs Trees only, not Pipelines or Flows.
 _Note_: Scheduler and Executor are Tree-Runner implementation, not language.
+
+**Transcript**:
+The JSONL log of one research step's run (model turns, tool calls, arguments, results), written to a host-given directory. A debugging record, not a Trace.
+_Avoid_: "trace" for it — Trace is the miner-owned record.
 
 ### Capability
 
@@ -121,4 +128,5 @@ Metadata declared in the Envelope that travels with the message. Myelin-owned. P
 - "Trace" meant both an observability span and the miner-bound execution record — resolved: bare **Trace** = the miner-bound record; the span is "span context" and stays out of the glossary as generic.
 - "Trigger" was used loosely for Cue, Binding, and the event — resolved: banned as a noun; use **Cue** / **Binding** / **cue.fired**.
 - A **Tree** is really a DAG (cycle detection exists) — "Tree" is historical; resolved: keep the name **Tree** / **Tree Runner** rather than renaming to Graph.
+- "A Primitive is a Composition primitive or a Control primitive" no longer covers every Primitive: agent, tribunal, governed and research neither wrap a sub-pipeline nor only alter control flow — they do work through a model or the fleet. UNRESOLVED — a third kind (model-backed primitive?) is not named yet.
 - **Transport** has two candidate owners: pulse's `packages/transport/` (2026-04-04 decision, predates myelin) vs myelin's L2 Transport layer. UNRESOLVED — pending ADR. Pulse owns its abstraction today; may converge on myelin later.

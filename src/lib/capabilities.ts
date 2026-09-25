@@ -9,6 +9,17 @@
 
 import type { ActionCapabilities, CapabilityName, LLMOptions, LLMResponse } from "../types/action";
 
+export interface LocalCapabilityOptions {
+  /** Shell refuses the string (`sh -c`) form and runs argv arrays only. */
+  shellArgvOnly?: boolean;
+  /**
+   * When it fires, a running shell child is killed and a fetch aborted. The
+   * kill reaches the direct child: prompt for the argv form; a string-form
+   * command whose grandchildren hold the pipes open is not cut short.
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * Create capability providers for local (Bun) execution.
  *
@@ -16,7 +27,8 @@ import type { ActionCapabilities, CapabilityName, LLMOptions, LLMResponse } from
  * Actions never get capabilities they didn't ask for.
  */
 export async function createLocalCapabilities(
-  required: CapabilityName[] = []
+  required: CapabilityName[] = [],
+  options: LocalCapabilityOptions = {},
 ): Promise<ActionCapabilities> {
   const capabilities: ActionCapabilities = {};
 
@@ -26,10 +38,10 @@ export async function createLocalCapabilities(
         capabilities.llm = createLocalLLM();
         break;
       case "fetch":
-        capabilities.fetch = globalThis.fetch;
+        capabilities.fetch = options.signal ? abortableFetch(options.signal) : globalThis.fetch;
         break;
       case "shell":
-        capabilities.shell = createLocalShell();
+        capabilities.shell = createLocalShell(options);
         break;
       case "readFile":
         capabilities.readFile = async (path: string) => Bun.file(path).text();
@@ -299,21 +311,57 @@ function extractClaudeOutput(raw: string): { text: string; isError: boolean } {
   }
 }
 
+/** fetch that also aborts when `signal` fires, alongside any signal the caller passes (in init or on a Request). */
+function abortableFetch(signal: AbortSignal): typeof globalThis.fetch {
+  const wrapped = (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+    const own = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    return globalThis.fetch(input, { ...init, signal: own ? AbortSignal.any([own, signal]) : signal });
+  };
+  return Object.assign(wrapped, { preconnect: globalThis.fetch.preconnect }) as typeof globalThis.fetch;
+}
+
 /**
- * Local shell provider using Bun's shell.
+ * Local shell provider. A string command runs through `sh -c`; an argv
+ * array spawns argv[0] directly, so no argument is ever parsed by a shell.
+ * With shellArgvOnly the string form is refused — the promise rejects. When
+ * `signal` fires, the child is killed and the promise rejects (see
+ * LocalCapabilityOptions.signal for what the kill reaches).
  */
-function createLocalShell(): (cmd: string) => Promise<{ stdout: string; stderr: string; code: number }> {
-  return async (cmd: string) => {
-    const proc = Bun.spawn(["sh", "-c", cmd], {
+export function createLocalShell(
+  options: LocalCapabilityOptions = {},
+): (cmd: string | string[]) => Promise<{ stdout: string; stderr: string; code: number }> {
+  const { shellArgvOnly: argvOnly = false, signal } = options;
+  return async (cmd: string | string[]) => {
+    let argv: string[];
+    if (Array.isArray(cmd)) {
+      if (cmd.length === 0 || cmd.some((a) => typeof a !== "string")) {
+        throw new Error("shell: argv must be a non-empty array of strings");
+      }
+      argv = cmd;
+    } else {
+      if (argvOnly) {
+        throw new Error("shell: the string form (sh -c) is refused here; pass an argv array");
+      }
+      argv = ["sh", "-c", cmd];
+    }
+    if (signal?.aborted) throw new Error("shell: aborted");
+    const proc = Bun.spawn(argv, {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const code = await proc.exited;
-    return { stdout, stderr, code };
+    const kill = () => proc.kill();
+    signal?.addEventListener("abort", kill, { once: true });
+    try {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      const code = await proc.exited;
+      if (signal?.aborted) throw new Error("shell: aborted");
+      return { stdout, stderr, code };
+    } finally {
+      signal?.removeEventListener("abort", kill);
+    }
   };
 }
 

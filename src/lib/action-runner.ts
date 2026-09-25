@@ -11,6 +11,7 @@ import { readdir } from "fs/promises";
 import { join } from "path";
 import { createLocalCapabilities } from "./capabilities";
 import { guardCapabilities, type GateAuditHook } from "./policy-loader";
+import { prepareInput } from "./tool-schema";
 import type { Policy } from "../types/policy";
 import type {
   ActionManifest,
@@ -42,6 +43,23 @@ export interface ActionRunnerOptions {
   policy?: Policy;
   /** Called on every non-allow gate decision — wire to audit logging. */
   onGateDecision?: GateAuditHook;
+  /**
+   * When true, the injected `shell` refuses the string (`sh -c`) form and
+   * runs argv arrays only. A research step sets it for every tool it runs.
+   */
+  shellArgvOnly?: boolean;
+  /**
+   * Cancels a local action's capability calls: when it fires, a running
+   * `shell` child is killed and a `fetch` aborted. Also handed to the action
+   * as `ctx.signal`.
+   */
+  signal?: AbortSignal;
+}
+
+/** An action found on disk: its directory and its manifest. */
+export interface ResolvedAction {
+  path: string;
+  manifest: ActionManifest;
 }
 
 /**
@@ -60,6 +78,15 @@ async function loadImplementation<TInput, TOutput>(
 ): Promise<ActionImplementation<TInput, TOutput>> {
   const module = await import(join(actionPath, "action.ts"));
   return module.default as ActionImplementation<TInput, TOutput>;
+}
+
+/**
+ * Find an action by name, searching actionDirs in order, and load its
+ * manifest. Returns null when no directory holds the action.
+ */
+export async function resolveAction(name: string, dirs: string[]): Promise<ResolvedAction | null> {
+  const path = await findAction(name, dirs);
+  return path ? { path, manifest: await loadManifest(path) } : null;
 }
 
 /**
@@ -88,7 +115,12 @@ async function findAction(name: string, dirs: string[]): Promise<string | null> 
 export async function runAction<TInput = Record<string, unknown>, TOutput = unknown>(
   name: string,
   input: TInput,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud"; traceId?: string }
+  options: ActionRunnerOptions & {
+    mode?: "local" | "cloud";
+    traceId?: string;
+    /** The action as a caller already resolved it (a research step's preflight): skips the directory scan and manifest read. */
+    resolved?: ResolvedAction;
+  }
 ): Promise<ActionResult<TOutput>> {
   const startTime = Date.now();
   const mode = options.mode || options.defaultMode || "local";
@@ -98,25 +130,26 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
   }
 
   // Local execution
-  const actionPath = await findAction(name, options.actionDirs);
+  const actionPath = options.resolved?.path ?? (await findAction(name, options.actionDirs));
   if (!actionPath) {
     return { success: false, error: `Action not found: ${name}` };
   }
 
   try {
-    const manifest = await loadManifest(actionPath);
+    const manifest = options.resolved?.manifest ?? (await loadManifest(actionPath));
     const implementation = await loadImplementation<TInput, TOutput>(actionPath);
 
-    // Validate required inputs
-    const inputObj = input as Record<string, unknown>;
-    for (const [field, spec] of Object.entries(manifest.input)) {
-      if (spec.required && (inputObj[field] === undefined || inputObj[field] === null)) {
-        return { success: false, error: `Missing required input: ${field}` };
-      }
+    // Fill declared defaults, then validate required inputs and enums
+    const prepared = prepareInput(manifest, input as Record<string, unknown>);
+    if (prepared.error) {
+      return { success: false, error: prepared.error };
     }
 
     // Create capabilities for what this action needs
-    const capabilities = await createLocalCapabilities(manifest.requires);
+    const capabilities = await createLocalCapabilities(manifest.requires, {
+      shellArgvOnly: options.shellArgvOnly,
+      signal: options.signal,
+    });
 
     // Agent dispatch comes from the host-configured provider, not the
     // environment — same injection rule as every other capability.
@@ -144,9 +177,10 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
       trace: options.traceId
         ? { traceId: options.traceId, spanId: crypto.randomUUID().slice(0, 8) }
         : undefined,
+      signal: options.signal,
     };
 
-    const output = await implementation.execute(input, ctx);
+    const output = await implementation.execute(prepared.input as TInput, ctx);
 
     return {
       success: true,
