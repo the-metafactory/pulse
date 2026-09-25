@@ -364,6 +364,17 @@ describe("research step — tools, bind and the loop", () => {
     expect(b.start).toBeLessThan(a.end);
   });
 
+  test("at most four tool calls of a round run at once", async () => {
+    const calls = ["a", "b", "c", "d", "e"].map((q, i) => toolCall(`c${i}`, "A_SLOW", { q }));
+    script = [reply({ tool_calls: calls }), reply({ content: "ok" })];
+    await runPipeline(pipeline({ tools: ["A_SLOW"] }), {}, { actionDirs: [ACTIONS], models: { m: model() } });
+    const spans = requests[1].messages.filter((m: any) => m.role === "tool").map((m: any) => JSON.parse(m.content));
+    expect(spans.map((s: any) => s.q)).toEqual(["a", "b", "c", "d", "e"]);
+    const firstEnd = Math.min(...spans.slice(0, 4).map((s: any) => s.end));
+    expect(spans[4].start).toBeGreaterThanOrEqual(firstEnd);
+    expect(Math.max(...spans.slice(0, 4).map((s: any) => s.start))).toBeLessThan(firstEnd);
+  });
+
   test("timeout_ms ends the step while a tool is still running", async () => {
     script = [reply({ tool_calls: [toolCall("c1", "A_HANG", {})] }), reply({ content: "never asked" })];
     const events: ResearchEvent[] = [];
@@ -489,6 +500,23 @@ describe("research step — transcript", () => {
     expect(lines.at(-1).error).toMatch(/model unavailable/);
   });
 
+  test("a gateway error's detail reaches the transcript, never the event", async () => {
+    script = [{ status: 400, raw: "prompt echoed: secret mail text" }];
+    const events: ResearchEvent[] = [];
+    const result = await runPipeline(pipeline({}), {}, {
+      actionDirs: [ACTIONS],
+      models: { m: model() },
+      transcriptDir: TRANSCRIPTS,
+      onResearchEvent: (e) => events.push(e),
+    });
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(events)).not.toContain("secret mail text");
+    expect(result.error).not.toContain("secret mail text");
+    const [file] = readdirSync(TRANSCRIPTS);
+    const lines = readFileSync(join(TRANSCRIPTS, file), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(lines.find((l) => l.type === "model_error")).toMatchObject({ error: "model test-alias: HTTP 400", detail: "prompt echoed: secret mail text" });
+  });
+
   test("without a transcript dir nothing is written", async () => {
     script = [reply({ tool_calls: [toolCall("c1", "A_LOOKUP", { query: "b" })] }), reply({ content: "ok" })];
     const before = readdirSync(process.cwd());
@@ -547,6 +575,33 @@ describe("research step — degrade per item inside map", () => {
     expect(out.map((e) => [e._error, e.unavailable, e.index])).toEqual([[true, true, 0], [true, true, 1]]);
   });
 
+  test("a collected item keeps the output of the steps before the failing one", async () => {
+    createAction("A_DRAFT", { input: { item: { type: "number" } }, output: { draft: { type: "string" } } }, `export default {
+      async execute(input) { return { ...input, draft: "draft " + input.item }; }
+    };`);
+    const p = {
+      name: "P",
+      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: ["A_DRAFT", { research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
+    } as any;
+    const result = await runPipeline(p, { items: [1, 2] }, { actionDirs: [ACTIONS], models: { m: downModel() } });
+    const out = result.output!.out as any[];
+    expect(out.map((e) => e.partial?.draft)).toEqual(["draft 1", "draft 2"]);
+    expect(out.every((e) => e.unavailable === true)).toBe(true);
+  });
+
+  test("once the model is found unreachable, later items fail fast without calling it", async () => {
+    script = [{ status: 503, raw: "down" }];
+    const p = {
+      name: "P",
+      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: [{ research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
+    } as any;
+    const result = await runPipeline(p, { items: [1, 2, 3] }, { actionDirs: [ACTIONS], models: { m: model() } });
+    const out = result.output!.out as any[];
+    expect(out.map((e) => e.unavailable)).toEqual([true, true, true]);
+    expect(requests.length).toBe(1);
+    expect(out[2].error).toMatch(/earlier in this run/);
+  });
+
   test("a failure that is not unavailability carries no flag", async () => {
     const p = {
       name: "P",
@@ -580,8 +635,44 @@ describe("OpenAICompatibleChatModel", () => {
     expect(e2).toBeInstanceOf(ModelUnavailableError);
     expect(e3).not.toBeInstanceOf(ModelUnavailableError);
     expect(e3.name).toBe("ModelError");
-    for (const e of [e1, e2, e3]) expect(e.message).not.toContain(KEY);
-    expect(e1.message).toContain("[redacted]");
+    for (const e of [e1, e2, e3]) {
+      expect(e.message).not.toContain(KEY);
+      expect(e.detail ?? "").not.toContain(KEY);
+    }
+    // What the gateway said stays off the message (it may echo the request).
+    expect(e1.message).toBe("model test-alias unavailable: HTTP 503");
+    expect(e1.detail).toBe("upstream down for key [redacted]");
+    expect(e3.message).toBe("model test-alias: HTTP 400");
+  });
+
+  test("every 5xx is unavailable, gateway codes included", async () => {
+    script = [{ status: 501, raw: "" }, { status: 522, raw: "origin timed out" }];
+    const m = model();
+    for (let i = 0; i < 2; i++) {
+      const err = await m.complete({ messages: [{ role: "user", content: "x" }] }).catch((e) => e);
+      expect(err).toBeInstanceOf(ModelUnavailableError);
+    }
+  });
+
+  test("a timeout while the body is still arriving is unavailable, not a model error", async () => {
+    const slowBody = Bun.serve({
+      port: 0,
+      fetch: () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"choices":'));
+              // the rest never comes
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+    });
+    const m = new OpenAICompatibleChatModel({ baseUrl: `http://127.0.0.1:${slowBody.port}/v1`, model: "x", apiKeyEnv: KEY_ENV, env: { [KEY_ENV]: KEY }, timeoutMs: 100 });
+    const err = await m.complete({ messages: [{ role: "user", content: "x" }] }).catch((e) => e);
+    slowBody.stop(true);
+    expect(err).toBeInstanceOf(ModelUnavailableError);
+    expect(err.reason).toBe("timeout");
   });
 
   test("a timeout is unavailable", async () => {

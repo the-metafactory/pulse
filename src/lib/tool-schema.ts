@@ -92,7 +92,19 @@ function matchesType(value: unknown, type: string): boolean {
   }
 }
 
-/** Check one value against a (field) schema's type and bounds. Returns an error or undefined. */
+/** The one enum check (and message) for model arguments and runAction input alike. */
+function enumError(label: string, value: unknown, allowed: unknown): string | undefined {
+  if (!Array.isArray(allowed) || allowed.includes(value)) return undefined;
+  return `${label} must be one of: ${allowed.map(String).join(", ")}`;
+}
+
+const isSchema = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+
+/**
+ * Check one value against a (field) schema: type, enum, minimum / maximum,
+ * minLength / maxLength, pattern, minItems / maxItems, and items, properties
+ * and required recursively. Returns an error or undefined.
+ */
 function checkValue(name: string, value: unknown, schema: Record<string, unknown>): string | undefined {
   const type = schema.type;
   if (typeof type === "string" && !matchesType(value, type)) return `${name} must be ${type}`;
@@ -103,16 +115,38 @@ function checkValue(name: string, value: unknown, schema: Record<string, unknown
   if (typeof value === "string") {
     if (typeof schema.minLength === "number" && value.length < schema.minLength) return `${name} must have at least ${schema.minLength} characters`;
     if (typeof schema.maxLength === "number" && value.length > schema.maxLength) return `${name} must have at most ${schema.maxLength} characters`;
+    if (typeof schema.pattern === "string") {
+      let re: RegExp;
+      try {
+        re = new RegExp(schema.pattern);
+      } catch (_err) {
+        // A pattern that does not compile guards nothing; refuse rather than pass.
+        return `${name}: the manifest's pattern is not a valid regular expression`;
+      }
+      if (!re.test(value)) return `${name} must match ${schema.pattern}`;
+    }
   }
-  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
-    return `${name} must be one of: ${schema.enum.map(String).join(", ")}`;
-  }
+  const badEnum = enumError(name, value, schema.enum);
+  if (badEnum) return badEnum;
   if (Array.isArray(value)) {
+    if (typeof schema.minItems === "number" && value.length < schema.minItems) return `${name} must have at least ${schema.minItems} items`;
     if (typeof schema.maxItems === "number" && value.length > schema.maxItems) return `${name} must have at most ${schema.maxItems} items`;
-    const items = schema.items;
-    if (items && typeof items === "object" && !Array.isArray(items)) {
+    if (isSchema(schema.items)) {
       for (let i = 0; i < value.length; i++) {
-        const error = checkValue(`${name}[${i}]`, value[i], items as Record<string, unknown>);
+        const error = checkValue(`${name}[${i}]`, value[i], schema.items);
+        if (error) return error;
+      }
+    }
+  }
+  if (isSchema(value)) {
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    for (const key of required) {
+      if (typeof key === "string" && !(key in value)) return `${name}.${key} is required`;
+    }
+    if (isSchema(schema.properties)) {
+      for (const [key, sub] of Object.entries(schema.properties)) {
+        if (!(key in value) || !isSchema(sub)) continue;
+        const error = checkValue(`${name}.${key}`, value[key], sub);
         if (error) return error;
       }
     }
@@ -121,10 +155,10 @@ function checkValue(name: string, value: unknown, schema: Record<string, unknown
 }
 
 /**
- * Check a model's tool arguments against the schema it was shown: type,
- * minimum / maximum, minLength / maxLength, enum, maxItems and item types, for
- * every unbound declared field the model set. Returns an error naming the
- * first offending field, or undefined. Only model-chosen values are checked
+ * Check a model's tool arguments against the schema it was shown, for every
+ * unbound declared field the model set (keywords: see checkValue). Any other
+ * keyword (format, uniqueItems, …) is shown to the model but left to the
+ * action. Returns an error naming the first offending field, or undefined. Only model-chosen values are checked
  * this way; other callers of runAction get defaults, required and enum only.
  */
 export function checkToolArgs(
@@ -161,9 +195,8 @@ export function prepareInput(
     if (field.required && (value === undefined || value === null)) {
       return { input: completed, error: `Missing required input: ${name}` };
     }
-    if (value !== undefined && value !== null && Array.isArray(field.enum) && !field.enum.includes(value)) {
-      return { input: completed, error: `Input ${name} must be one of: ${field.enum.map(String).join(", ")}` };
-    }
+    const badEnum = value === undefined || value === null ? undefined : enumError(`Input ${name}`, value, field.enum);
+    if (badEnum) return { input: completed, error: badEnum };
   }
   return { input: completed };
 }

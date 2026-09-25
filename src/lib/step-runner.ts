@@ -6,6 +6,7 @@
  */
 
 import { runAction } from "./action-runner";
+import { recordPartialPayload } from "./step-failure";
 import type { PipelineStep } from "../types/pipeline";
 import {
   StepFailure,
@@ -58,7 +59,14 @@ export async function runSteps(
     if (options.signal?.aborted) {
       throw new Error("Aborted");
     }
-    current = await runStep(step, current, options, stepRecords);
+    try {
+      current = await runStep(step, current, options, stepRecords);
+    } catch (err) {
+      // Keep what the steps before this one produced, for callers that
+      // collect a failed item (map onError: collect).
+      recordPartialPayload(err, current);
+      throw err;
+    }
   }
   return current;
 }

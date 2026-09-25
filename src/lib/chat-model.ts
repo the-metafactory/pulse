@@ -63,25 +63,31 @@ export interface ChatModel {
 
 /**
  * The model could not be reached or refused for a transient reason: network
- * failure, timeout, missing key, HTTP 408/429/5xx. A host that queues work
- * for later (the laptop off VPN, a gateway down) catches this class and
- * retries; anything else is a real failure.
+ * failure, timeout, missing key, HTTP 408/425/429 or any 5xx. A host that
+ * queues work for later (the laptop off VPN, a gateway down) catches this
+ * class and retries; anything else is a real failure.
+ *
+ * The message carries the status only. What the gateway said (`detail`,
+ * redacted, clipped) may echo the request's content, so it stays off the
+ * message and out of anything forwarded to a chat surface.
  */
 export class ModelUnavailableError extends Error {
   constructor(
     public readonly model: string,
     public readonly reason: string,
+    public readonly detail?: string,
   ) {
     super(`model ${model} unavailable: ${reason}`);
     this.name = "ModelUnavailableError";
   }
 }
 
-/** The model answered with a non-transient error (HTTP 4xx, malformed body). */
+/** The model answered with a non-transient error (HTTP 4xx, malformed body). `detail` as for ModelUnavailableError. */
 export class ModelError extends Error {
   constructor(
     public readonly model: string,
     message: string,
+    public readonly detail?: string,
   ) {
     super(`model ${model}: ${message}`);
     this.name = "ModelError";
@@ -113,7 +119,8 @@ export interface OpenAICompatibleConfig {
 }
 
 const DEFAULT_TIMEOUT_MS = 300_000;
-const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+/** Transient below 500; every 5xx is transient too (gateway codes such as 520–524 included). */
+const TRANSIENT_STATUS = new Set([408, 425, 429]);
 
 export class OpenAICompatibleChatModel implements ChatModel {
   readonly label: string;
@@ -170,17 +177,21 @@ export class OpenAICompatibleChatModel implements ChatModel {
     }
 
     if (!res.ok) {
-      const detail = this.redact((await res.text().catch(() => "")).slice(0, 300), key);
-      if (TRANSIENT_STATUS.has(res.status)) {
-        throw new ModelUnavailableError(this.label, `HTTP ${res.status} ${detail}`.trim());
+      // An unreadable error body leaves the status alone to report.
+      const detail = this.redact((await res.text().catch(() => "")).slice(0, 300), key) || undefined;
+      if (res.status >= 500 || TRANSIENT_STATUS.has(res.status)) {
+        throw new ModelUnavailableError(this.label, `HTTP ${res.status}`, detail);
       }
-      throw new ModelError(this.label, `HTTP ${res.status} ${detail}`.trim());
+      throw new ModelError(this.label, `HTTP ${res.status}`, detail);
     }
 
     let data: any;
     try {
       data = await res.json();
-    } catch (_err) {
+    } catch (err) {
+      // The body is read under the same signals as the request.
+      if (options.signal?.aborted) throw err;
+      if (timeout.aborted) throw new ModelUnavailableError(this.label, "timeout");
       // A 200 with a non-JSON body is a gateway fault, not a model answer.
       throw new ModelError(this.label, "response body is not JSON");
     }

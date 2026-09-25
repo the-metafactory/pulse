@@ -67,8 +67,7 @@ export type { LocalCapabilityOptions } from "./lib/capabilities";
 
 // Research step — a model researches through read-only actions (P-900..P-905)
 export type { ResearchStepSpec, ResearchStats, ResearchEvent } from "./types/research";
-export { ResearchUnavailable, checkResearchTools } from "./lib/research";
-export { preflightSteps } from "./lib/primitive-runner";
+export { ResearchUnavailable } from "./lib/research";
 export { OpenAICompatibleChatModel, ModelUnavailableError, ModelError } from "./lib/chat-model";
 export type {
   ChatModel,
@@ -79,9 +78,6 @@ export type {
   ChatResponse,
   OpenAICompatibleConfig,
 } from "./lib/chat-model";
-export { toolSchema, toolInput, fieldSchema, prepareInput } from "./lib/tool-schema";
-export type { ToolParameters } from "./lib/tool-schema";
-export { loadActionManifest } from "./lib/action-runner";
 export type {
   ActionCapabilities,
   CapabilityName,

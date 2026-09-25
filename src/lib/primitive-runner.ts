@@ -30,9 +30,10 @@ import {
 import { evaluate } from "./enforcement-gate";
 import type { GovernedResult, GovernedStepSpec } from "../types/governed";
 
-import { StepFailure, MapItemFailure } from "./step-failure";
+import { StepFailure, MapItemFailure, partialPayload } from "./step-failure";
+import { mapWithConcurrency } from "./concurrency";
 import { ResearchUnavailable, checkResearchTools, runResearch, validateResearch } from "./research";
-import { renderPromptTemplate, type StepRecord, type StepRunnerOptions } from "./step-context";
+import { renderPromptTemplate, runState, withRunState, type StepRecord, type StepRunnerOptions } from "./step-options";
 import type { ResearchStepSpec } from "../types/research";
 
 export { StepFailure, MapItemFailure, renderPromptTemplate };
@@ -73,8 +74,12 @@ interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
   ) => Promise<Record<string, unknown>>;
   /** The sub-pipelines this primitive runs, so a pipeline-wide walk (preflight) reaches nested steps. */
   children?: (spec: TSpec) => PipelineStep[][];
-  /** A check over the whole pipeline before its first step runs (runPipeline); throws to refuse it. */
-  preflight?: (spec: TSpec, options: StepRunnerOptions) => Promise<void>;
+  /**
+   * A check over the whole pipeline before its first step runs (runPipeline);
+   * throws to refuse it. What it returns is kept in the run state, keyed by
+   * the spec, so the step need not repeat the work.
+   */
+  preflight?: (spec: TSpec, options: StepRunnerOptions) => Promise<unknown>;
 }
 
 /** The one sub-pipeline of map, filter, reduce and retry. */
@@ -129,9 +134,7 @@ const PRIMITIVES = {
     run: runResearch,
     // A pipeline that would offer a model anything but a read action never
     // starts. The manifests checked here are kept for the run's research steps.
-    preflight: async (spec: ResearchStepSpec, options: StepRunnerOptions) => {
-      options.researchTools?.set(spec, await checkResearchTools(spec, options.actionDirs));
-    },
+    preflight: (spec: ResearchStepSpec, options: StepRunnerOptions) => checkResearchTools(spec, options.actionDirs),
   },
 } satisfies Record<string, PrimitiveHandler<any>>;
 
@@ -141,20 +144,28 @@ const KNOWN_PRIMITIVE_KEYS = new Set(Object.keys(PRIMITIVES));
 
 /**
  * Run every primitive's preflight over a pipeline, nested steps included,
- * before its first step runs. A step whose shape does not resolve is left to
- * runStep, which reports it in order.
+ * before its first step runs, and return the options for the run: the host's
+ * options plus fresh run state holding what the preflights returned. A step
+ * whose shape does not resolve is left to runStep, which reports it in order.
  */
-export async function preflightSteps(steps: PipelineStep[], options: StepRunnerOptions): Promise<void> {
-  for (const step of steps) {
-    if (step === null || typeof step !== "object" || Array.isArray(step)) continue;
-    const keys = Object.keys(step).filter((k): k is PrimitiveKey => KNOWN_PRIMITIVE_KEYS.has(k));
-    if (keys.length !== 1) continue;
-    const spec = (step as Record<string, unknown>)[keys[0]];
-    if (spec === null || typeof spec !== "object" || Array.isArray(spec)) continue;
-    const handler: PrimitiveHandler<any> = PRIMITIVES[keys[0]];
-    await handler.preflight?.(spec, options);
-    for (const sub of handler.children?.(spec) ?? []) await preflightSteps(sub, options);
-  }
+export async function preflightSteps(steps: PipelineStep[], options: StepRunnerOptions): Promise<StepRunnerOptions> {
+  const runOptions = withRunState(options);
+  const state = runState(runOptions)!;
+  const walk = async (list: PipelineStep[]): Promise<void> => {
+    for (const step of list) {
+      if (step === null || typeof step !== "object" || Array.isArray(step)) continue;
+      const keys = Object.keys(step).filter((k): k is PrimitiveKey => KNOWN_PRIMITIVE_KEYS.has(k));
+      if (keys.length !== 1) continue;
+      const spec = (step as Record<string, unknown>)[keys[0]];
+      if (spec === null || typeof spec !== "object" || Array.isArray(spec)) continue;
+      const handler: PrimitiveHandler<any> = PRIMITIVES[keys[0]];
+      const result = await handler.preflight?.(spec, runOptions);
+      if (result !== undefined) state.preflight.set(spec, result);
+      for (const sub of handler.children?.(spec) ?? []) await walk(sub);
+    }
+  };
+  await walk(steps);
+  return runOptions;
 }
 
 export function validatePrimitiveStep(
@@ -249,26 +260,6 @@ function validateGate(spec: Record<string, unknown>, path: string): void {
   }
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  worker: (item: T, index: number) => Promise<R>,
-  concurrency: number,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let cursor = 0;
-
-  async function runOne() {
-    while (true) {
-      const idx = cursor++;
-      if (idx >= items.length) return;
-      results[idx] = await worker(items[idx], idx);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runOne));
-  return results;
-}
-
 async function runMap(
   spec: MapStepSpec,
   payload: Record<string, unknown>,
@@ -301,10 +292,20 @@ async function runMap(
       if (onError === "skip") {
         return undefined;
       }
-      // A research model that was unreachable is a "retry later", not a
-      // failure of the item; flag it so a host can queue it without parsing
-      // the message.
-      return { _error: true, index, error: errMsg, item, ...(err instanceof ResearchUnavailable ? { unavailable: true } : {}) };
+      // `partial` is the item's payload as it stood when the failing step
+      // started — the work of the steps before it. A research model that was
+      // unreachable is a "retry later", not a failure of the item; flag it so
+      // a host can deliver `partial` and queue the rest without parsing the
+      // message.
+      const partial = partialPayload(err);
+      return {
+        _error: true,
+        index,
+        error: errMsg,
+        item,
+        ...(partial ? { partial } : {}),
+        ...(err instanceof ResearchUnavailable ? { unavailable: true } : {}),
+      };
     }
   }
 

@@ -13,7 +13,9 @@
  *   otherwise (preflight), and a step driven without runPipeline checks itself
  * - `bind:` pins input fields; a bound field leaves the schema the model sees
  *   and its value is forced onto every call
- * - the model's arguments are checked against the schema it was shown
+ * - the model's arguments are checked against the schema's type, bounds,
+ *   lengths, pattern, enum, items and properties (checkToolArgs); any other
+ *   keyword is shown to the model but left to the action
  * - tools run with an argv-only shell (no `sh -c`)
  * - when the host sets StepRunnerOptions.policy, it guards every tool call
  *

@@ -16,10 +16,11 @@
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { loadActionManifest, runAction } from "./action-runner";
-import { ModelUnavailableError, type ChatMessage, type ChatResponse, type ChatTool } from "./chat-model";
+import { ModelError, ModelUnavailableError, type ChatMessage, type ChatModel, type ChatResponse, type ChatTool } from "./chat-model";
+import { mapWithConcurrency } from "./concurrency";
 import { StepFailure } from "./step-failure";
 import { checkToolArgs, toolInput, toolSchema } from "./tool-schema";
-import { renderPromptTemplate, type StepRecord, type StepRunnerOptions } from "./step-context";
+import { renderPromptTemplate, runState, type StepRecord, type StepRunnerOptions } from "./step-options";
 import type { ActionManifest } from "../types/action";
 import type { ResearchStats, ResearchStepSpec } from "../types/research";
 
@@ -176,6 +177,9 @@ async function openTranscript(dir: string | undefined, name: string): Promise<Tr
 // Runner
 // ---------------------------------------------------------------------------
 
+/** Tool runs in flight at once within one round; the model may ask for more. */
+const TOOL_CONCURRENCY = 4;
+
 const clip = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n)}\n[… truncated]`);
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -209,45 +213,270 @@ function resultText(manifest: ActionManifest, output: unknown): string {
   return JSON.stringify(Object.fromEntries(fields.map((f) => [f, out[f]])));
 }
 
+/** One tool call after screening: either the text the model gets, or the input to run. */
+type ScreenedCall = { reply: string; extra?: Record<string, unknown> } | { manifest: ActionManifest; input: Record<string, unknown> };
+
+/** One research step's run: its settings, its state, and the loop. */
+class ResearchRun {
+  readonly stepName: string;
+  readonly stats: ResearchStats;
+  transcript: Transcript = NO_TRANSCRIPT;
+  private readonly bind: Record<string, unknown>;
+  private readonly maxRounds: number;
+  private readonly emptyRetries: number;
+  private readonly resultChars: number;
+  private readonly writePrompt: string;
+  private readonly controller = new AbortController();
+  private manifests = new Map<string, ActionManifest>();
+  private readonly seen = new Set<string>();
+  private readonly messages: ChatMessage[] = [];
+  private tools: ChatTool[] = [];
+  private writing = false;
+
+  constructor(
+    private readonly spec: ResearchStepSpec,
+    private readonly payload: Record<string, unknown>,
+    private readonly options: StepRunnerOptions,
+  ) {
+    this.stepName = `research:${spec.name}`;
+    this.bind = spec.bind ?? {};
+    this.maxRounds = spec.max_rounds ?? DEFAULT_MAX_ROUNDS;
+    this.emptyRetries = spec.empty_retries ?? DEFAULT_EMPTY_RETRIES;
+    this.resultChars = spec.result_chars ?? DEFAULT_RESULT_CHARS;
+    this.writePrompt = spec.write_prompt ?? DEFAULT_WRITE_PROMPT;
+    this.stats = {
+      name: spec.name,
+      model: spec.model,
+      rounds: 0,
+      tool_calls: {},
+      duplicates: 0,
+      empty_retries: 0,
+      tokens_in: 0,
+      tokens_out: 0,
+      answer_chars: 0,
+    };
+  }
+
+  /** Set up, loop until the model answers, return the answer. Throws on any failure. */
+  async run(): Promise<string> {
+    const { spec, options } = this;
+    const model = options.models?.[spec.model];
+    if (!model) throw new StepFailure(this.stepName, `no model '${spec.model}' in StepRunnerOptions.models`);
+    const state = runState(options);
+    // Once a model is found unreachable in this run, later steps on it (the
+    // rest of a map) fail at once instead of each waiting out a timeout.
+    const down = state?.unavailableModels.get(spec.model);
+    if (down !== undefined) throw new ResearchUnavailable(this.stepName, `${down} (earlier in this run)`);
+
+    // runPipeline's preflight already checked this step's tools; driven any
+    // other way, the step checks them itself.
+    this.manifests =
+      (state?.preflight.get(spec) as Map<string, ActionManifest> | undefined) ??
+      (await checkResearchTools(spec, options.actionDirs));
+
+    const prompt = renderPromptTemplate(spec.prompt, this.payload);
+    const system = spec.system ? renderPromptTemplate(spec.system, this.payload) : undefined;
+    if (system) this.messages.push({ role: "system", content: system });
+    this.messages.push({ role: "user", content: prompt });
+
+    try {
+      this.transcript = await openTranscript(options.transcriptDir, spec.name);
+    } catch (err) {
+      throw new StepFailure(this.stepName, `transcript dir: ${errorText(err)}`);
+    }
+    this.stats.transcript = this.transcript.path;
+
+    this.tools = spec.tools.map((name) => {
+      const manifest = this.manifests.get(name)!;
+      return {
+        type: "function",
+        function: { name, description: manifest.description ?? "", parameters: { ...toolSchema(manifest, this.bind) } },
+      };
+    });
+
+    // The runner owns the timeout: it reaches the model call and every tool
+    // run, and a round ends the moment it fires.
+    const timer = spec.timeout_ms ? setTimeout(() => this.controller.abort(), spec.timeout_ms) : null;
+    const onParentAbort = () => this.controller.abort();
+    options.signal?.addEventListener("abort", onParentAbort, { once: true });
+    if (options.signal?.aborted) this.controller.abort();
+
+    this.transcript.write({ type: "start", step: spec.name, model: model.label, tools: spec.tools, bind: Object.keys(this.bind) });
+    options.onResearchEvent?.({ type: "research.started", name: spec.name, model: spec.model, tools: spec.tools });
+
+    try {
+      while (true) {
+        const answer = await this.round(model);
+        if (answer !== undefined) return answer;
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+      options.signal?.removeEventListener("abort", onParentAbort);
+    }
+  }
+
+  private aborted = (): StepFailure =>
+    new StepFailure(this.stepName, this.spec.timeout_ms ? `timeout after ${this.spec.timeout_ms}ms` : "aborted");
+
+  /** One model call and whatever it asks for. Returns the answer once there is one. */
+  private async round(model: ChatModel): Promise<string | undefined> {
+    const { signal } = this.controller;
+    if (signal.aborted) throw this.aborted();
+    if (!this.writing && this.stats.rounds >= this.maxRounds) {
+      this.writing = true;
+      this.messages.push({ role: "user", content: this.writePrompt });
+    }
+    this.stats.rounds++;
+
+    const res = await this.complete(model);
+    this.stats.tokens_in += res.usage?.input ?? 0;
+    this.stats.tokens_out += res.usage?.output ?? 0;
+    this.transcript.write({
+      type: "model",
+      round: this.stats.rounds,
+      writing: this.writing,
+      finish: res.finishReason,
+      content: res.content,
+      reasoning: res.reasoning,
+      tool_calls: res.toolCalls.map((c) => ({ name: c.function.name, args: c.function.arguments })),
+      usage: res.usage,
+    });
+
+    if (!this.writing && res.toolCalls.length > 0) {
+      this.messages.push({ role: "assistant", content: res.content ?? "", tool_calls: res.toolCalls });
+      // Screening runs in the model's order (it decides which of two identical
+      // calls is the duplicate); the real runs then go at most
+      // TOOL_CONCURRENCY at a time, and results go back in the model's order.
+      const screened = res.toolCalls.map((call) => this.screen(call.function.name, call.function.arguments));
+      const results = await raceAbort(
+        mapWithConcurrency(screened, (s, i) => this.execute(res.toolCalls[i].function, s), TOOL_CONCURRENCY),
+        signal,
+        this.aborted,
+      );
+      res.toolCalls.forEach((call, i) => {
+        this.messages.push({ role: "tool", tool_call_id: call.id, content: clip(results[i], this.resultChars) });
+      });
+      this.options.onResearchEvent?.({
+        type: "research.round",
+        name: this.spec.name,
+        round: this.stats.rounds,
+        tool_calls: res.toolCalls.map((c) => c.function.name),
+      });
+      return undefined;
+    }
+
+    const content = res.content ?? "";
+    if (content.trim() !== "") return content;
+    if (this.stats.empty_retries >= this.emptyRetries) {
+      throw new StepFailure(this.stepName, `empty answer after ${this.stats.empty_retries} retries`);
+    }
+    this.stats.empty_retries++;
+    this.writing = true;
+    // Keep strict user/assistant alternation for chat templates that demand it.
+    this.messages.push({ role: "assistant", content }, { role: "user", content: this.writePrompt });
+    return undefined;
+  }
+
+  /** The model call. What the gateway said on an error goes to the transcript, never into the step's error. */
+  private async complete(model: ChatModel): Promise<ChatResponse> {
+    const { signal } = this.controller;
+    try {
+      return await raceAbort(
+        model.complete(
+          {
+            messages: this.messages,
+            tools: this.writing ? undefined : this.tools,
+            maxTokens: this.spec.max_tokens,
+            temperature: this.spec.temperature,
+          },
+          { signal },
+        ),
+        signal,
+        this.aborted,
+      );
+    } catch (err) {
+      if (signal.aborted) throw this.aborted();
+      if (err instanceof ModelUnavailableError || err instanceof ModelError) {
+        this.transcript.write({ type: "model_error", round: this.stats.rounds, error: err.message, detail: err.detail });
+      }
+      if (err instanceof ModelUnavailableError) {
+        runState(this.options)?.unavailableModels.set(this.spec.model, err.reason);
+        throw new ResearchUnavailable(this.stepName, err.reason);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Decide a tool call without running it: unknown tool, duplicate, bad
+   * arguments are answered here; anything else comes back as the input to run.
+   */
+  private screen(name: string, rawArgs: string): ScreenedCall {
+    const manifest = this.manifests.get(name);
+    if (!manifest) return { reply: `unknown tool ${name}` };
+    const sig = `${name}:${rawArgs}`;
+    if (this.seen.has(sig)) {
+      this.stats.duplicates++;
+      return { reply: "(duplicate call; see the earlier result)", extra: { duplicate: true } };
+    }
+    this.seen.add(sig);
+    this.stats.tool_calls[name] = (this.stats.tool_calls[name] ?? 0) + 1;
+
+    let args: unknown;
+    try {
+      args = rawArgs.trim() === "" ? {} : JSON.parse(rawArgs);
+    } catch (_err) {
+      // The model's arguments are data; a parse failure is reported back to it.
+      return { reply: "tool error: arguments are not valid JSON" };
+    }
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return { reply: "tool error: arguments must be a JSON object" };
+    }
+    const invalid = checkToolArgs(manifest, args as Record<string, unknown>, this.bind);
+    if (invalid) return { reply: `tool error: ${invalid}` };
+    return { manifest, input: toolInput(manifest, args as Record<string, unknown>, this.bind) };
+  }
+
+  /** Run a screened call (unless the step has ended) and return the text the model sees. Never rejects. */
+  private async execute(fn: { name: string; arguments: string }, call: ScreenedCall): Promise<string> {
+    const round = this.stats.rounds;
+    const reply = (result: string, extra: Record<string, unknown> = {}): string => {
+      this.transcript.write({ type: "tool", round, tool: fn.name, args: fn.arguments, result, ...extra });
+      return result;
+    };
+    if ("reply" in call) return reply(call.reply, call.extra);
+    // A call still queued when the step times out never starts.
+    if (this.controller.signal.aborted) return "tool error: the step ended before this call ran";
+    try {
+      // An action takes no signal; the step's timeout ends the round around it (raceAbort).
+      const run = await runAction(fn.name, call.input, { ...this.options, shellArgvOnly: true, traceId: crypto.randomUUID() });
+      const text = run.success ? resultText(call.manifest, run.output) : `tool error: ${run.error ?? "unknown error"}`;
+      return reply(text, { input: call.input, ok: run.success });
+    } catch (err) {
+      return reply(`tool error: ${errorText(err)}`, { input: call.input, ok: false });
+    }
+  }
+}
+
 export async function runResearch(
   spec: ResearchStepSpec,
   payload: Record<string, unknown>,
   options: StepRunnerOptions,
   stepRecords: StepRecord[],
 ): Promise<Record<string, unknown>> {
-  const stepName = `research:${spec.name}`;
   const stepStart = Date.now();
-  const bind = spec.bind ?? {};
-  const maxRounds = spec.max_rounds ?? DEFAULT_MAX_ROUNDS;
-  const emptyRetries = spec.empty_retries ?? DEFAULT_EMPTY_RETRIES;
-  const resultChars = spec.result_chars ?? DEFAULT_RESULT_CHARS;
-  const writePrompt = spec.write_prompt ?? DEFAULT_WRITE_PROMPT;
-  const stats: ResearchStats = {
-    name: spec.name,
-    model: spec.model,
-    rounds: 0,
-    tool_calls: {},
-    duplicates: 0,
-    empty_retries: 0,
-    tokens_in: 0,
-    tokens_out: 0,
-    answer_chars: 0,
-  };
-  let transcript = NO_TRANSCRIPT;
-  let manifests = new Map<string, ActionManifest>();
-  const seen = new Set<string>();
-
+  const run = new ResearchRun(spec, payload, options);
   let answer: string;
   try {
-    answer = await research();
-    stats.answer_chars = answer.length;
-    transcript.write({ type: "end", ok: true, stats });
-    await transcript.close();
+    answer = await run.run();
+    run.stats.answer_chars = answer.length;
+    run.transcript.write({ type: "end", ok: true, stats: run.stats });
+    await run.transcript.close();
   } catch (err) {
-    const failure = err instanceof StepFailure ? err : new StepFailure(stepName, errorText(err));
-    transcript.write({ type: "end", ok: false, error: failure.causeError });
+    const failure = err instanceof StepFailure ? err : new StepFailure(run.stepName, errorText(err));
+    run.transcript.write({ type: "end", ok: false, error: failure.causeError });
     try {
-      await transcript.close();
+      await run.transcript.close();
     } catch (_err) {
       // The step has already failed; a transcript that could not be written
       // must not replace that error.
@@ -258,177 +487,11 @@ export async function runResearch(
       error: failure.causeError,
       unavailable: failure instanceof ResearchUnavailable,
     });
-    stepRecords.push({ action: stepName, success: false, durationMs: Date.now() - stepStart, error: failure.causeError, research: stats });
+    stepRecords.push({ action: run.stepName, success: false, durationMs: Date.now() - stepStart, error: failure.causeError, research: run.stats });
     throw failure;
   }
 
-  options.onResearchEvent?.({ type: "research.completed", name: spec.name, stats });
-  stepRecords.push({ action: stepName, success: true, durationMs: Date.now() - stepStart, research: stats });
+  options.onResearchEvent?.({ type: "research.completed", name: spec.name, stats: run.stats });
+  stepRecords.push({ action: run.stepName, success: true, durationMs: Date.now() - stepStart, research: run.stats });
   return { ...payload, [spec.collect ?? `research_${spec.name}`]: answer };
-
-  /** Set up, run the loop, return the model's answer. Throws on any failure. */
-  async function research(): Promise<string> {
-    const model = options.models?.[spec.model];
-    if (!model) throw new StepFailure(stepName, `no model '${spec.model}' in StepRunnerOptions.models`);
-
-    // runPipeline's preflight already checked this step's tools; driven any
-    // other way, the step checks them itself.
-    manifests = options.researchTools?.get(spec) ?? (await checkResearchTools(spec, options.actionDirs));
-
-    const prompt = renderPromptTemplate(spec.prompt, payload);
-    const system = spec.system ? renderPromptTemplate(spec.system, payload) : undefined;
-
-    try {
-      transcript = await openTranscript(options.transcriptDir, spec.name);
-    } catch (err) {
-      throw new StepFailure(stepName, `transcript dir: ${errorText(err)}`);
-    }
-    stats.transcript = transcript.path;
-
-    const tools: ChatTool[] = spec.tools.map((name) => {
-      const manifest = manifests.get(name)!;
-      return {
-        type: "function",
-        function: { name, description: manifest.description ?? "", parameters: { ...toolSchema(manifest, bind) } },
-      };
-    });
-
-    // The runner owns the timeout: it reaches the model call and every tool
-    // run, and a round ends the moment it fires.
-    const controller = new AbortController();
-    const timer = spec.timeout_ms ? setTimeout(() => controller.abort(), spec.timeout_ms) : null;
-    const onParentAbort = () => controller.abort();
-    options.signal?.addEventListener("abort", onParentAbort, { once: true });
-    if (options.signal?.aborted) controller.abort();
-    const aborted = () => new StepFailure(stepName, spec.timeout_ms ? `timeout after ${spec.timeout_ms}ms` : "aborted");
-
-    const messages: ChatMessage[] = [
-      ...(system ? [{ role: "system" as const, content: system }] : []),
-      { role: "user", content: prompt },
-    ];
-    let writing = false;
-
-    transcript.write({ type: "start", step: spec.name, model: model.label, tools: spec.tools, bind: Object.keys(bind) });
-    options.onResearchEvent?.({ type: "research.started", name: spec.name, model: spec.model, tools: spec.tools });
-
-    try {
-      while (true) {
-        if (controller.signal.aborted) throw aborted();
-        if (!writing && stats.rounds >= maxRounds) {
-          writing = true;
-          messages.push({ role: "user", content: writePrompt });
-        }
-        stats.rounds++;
-        let res: ChatResponse;
-        try {
-          res = await raceAbort(
-            model.complete(
-              { messages, tools: writing ? undefined : tools, maxTokens: spec.max_tokens, temperature: spec.temperature },
-              { signal: controller.signal },
-            ),
-            controller.signal,
-            aborted,
-          );
-        } catch (err) {
-          if (err instanceof ModelUnavailableError) throw new ResearchUnavailable(stepName, err.reason);
-          if (controller.signal.aborted) throw aborted();
-          throw err;
-        }
-        stats.tokens_in += res.usage?.input ?? 0;
-        stats.tokens_out += res.usage?.output ?? 0;
-        transcript.write({
-          type: "model",
-          round: stats.rounds,
-          writing,
-          finish: res.finishReason,
-          content: res.content,
-          reasoning: res.reasoning,
-          tool_calls: res.toolCalls.map((c) => ({ name: c.function.name, args: c.function.arguments })),
-          usage: res.usage,
-        });
-
-        if (!writing && res.toolCalls.length > 0) {
-          messages.push({ role: "assistant", content: res.content ?? "", tool_calls: res.toolCalls });
-          // Calls are screened in the model's order (that decides which of two
-          // identical calls is the duplicate), then run concurrently; results
-          // go back in the model's order.
-          const calls = res.toolCalls.map((call) => callTool(call.function.name, call.function.arguments));
-          const results = await raceAbort(Promise.all(calls), controller.signal, aborted);
-          res.toolCalls.forEach((call, i) => {
-            messages.push({ role: "tool", tool_call_id: call.id, content: clip(results[i], resultChars) });
-          });
-          options.onResearchEvent?.({
-            type: "research.round",
-            name: spec.name,
-            round: stats.rounds,
-            tool_calls: res.toolCalls.map((c) => c.function.name),
-          });
-          continue;
-        }
-
-        const content = res.content ?? "";
-        if (content.trim() === "" && stats.empty_retries < emptyRetries) {
-          stats.empty_retries++;
-          writing = true;
-          // Keep strict user/assistant alternation for chat templates that demand it.
-          messages.push({ role: "assistant", content }, { role: "user", content: writePrompt });
-          continue;
-        }
-        if (content.trim() === "") {
-          throw new StepFailure(stepName, `empty answer after ${stats.empty_retries} retries`);
-        }
-        return content;
-      }
-    } finally {
-      if (timer) clearTimeout(timer);
-      options.signal?.removeEventListener("abort", onParentAbort);
-    }
-  }
-
-  /**
-   * One tool call → the text the model sees. Never rejects. Screening
-   * (unknown tool, duplicate, bad arguments) runs synchronously, before this
-   * returns, so the order of calls decides duplicates.
-   */
-  function callTool(name: string, rawArgs: string): Promise<string> {
-    const round = stats.rounds;
-    const reply = (result: string, extra: Record<string, unknown> = {}): string => {
-      transcript.write({ type: "tool", round, tool: name, args: rawArgs, result, ...extra });
-      return result;
-    };
-
-    const manifest = manifests.get(name);
-    if (!manifest) return Promise.resolve(reply(`unknown tool ${name}`));
-    const sig = `${name}:${rawArgs}`;
-    if (seen.has(sig)) {
-      stats.duplicates++;
-      return Promise.resolve(reply("(duplicate call; see the earlier result)", { duplicate: true }));
-    }
-    seen.add(sig);
-    stats.tool_calls[name] = (stats.tool_calls[name] ?? 0) + 1;
-
-    let args: unknown;
-    try {
-      args = rawArgs.trim() === "" ? {} : JSON.parse(rawArgs);
-    } catch (_err) {
-      // The model's arguments are data; a parse failure is reported back to it.
-      return Promise.resolve(reply("tool error: arguments are not valid JSON"));
-    }
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return Promise.resolve(reply("tool error: arguments must be a JSON object"));
-    }
-    const invalid = checkToolArgs(manifest, args as Record<string, unknown>, bind);
-    if (invalid) return Promise.resolve(reply(`tool error: ${invalid}`));
-
-    const input = toolInput(manifest, args as Record<string, unknown>, bind);
-    // An action takes no signal; the step's timeout ends the round around it (raceAbort).
-    return runAction(name, input, { ...options, shellArgvOnly: true, traceId: crypto.randomUUID() }).then(
-      (run) =>
-        reply(run.success ? resultText(manifest, run.output) : `tool error: ${run.error ?? "unknown error"}`, {
-          input,
-          ok: run.success,
-        }),
-      (err) => reply(`tool error: ${errorText(err)}`, { input, ok: false }),
-    );
-  }
 }

@@ -137,6 +137,21 @@ describe("checkToolArgs — model arguments against the schema it was shown", ()
     expect(checkToolArgs(m, { tags: ["a", 2] })).toBe("tags[1] must be string");
   });
 
+  test("pattern, minItems and nested object properties are enforced too", () => {
+    const n = manifest({
+      term: { type: "string", pattern: "^[a-z ]+$" },
+      ids: { type: "array", minItems: 1, items: { type: "integer" } },
+      ranges: { type: "array", items: { type: "object", required: ["from"], properties: { from: { type: "string" }, days: { type: "integer", maximum: 30 } } } },
+      bad: { type: "string", pattern: "(" },
+    });
+    expect(checkToolArgs(n, { term: "budget review", ids: [1], ranges: [{ from: "x", days: 7 }] })).toBeUndefined();
+    expect(checkToolArgs(n, { term: "--output=/tmp/x" })).toBe("term must match ^[a-z ]+$");
+    expect(checkToolArgs(n, { ids: [] })).toBe("ids must have at least 1 items");
+    expect(checkToolArgs(n, { ranges: [{ days: 7 }] })).toBe("ranges[0].from is required");
+    expect(checkToolArgs(n, { ranges: [{ from: "x", days: 90 }] })).toBe("ranges[0].days must be <= 30");
+    expect(checkToolArgs(n, { bad: "x" })).toBe("bad: the manifest's pattern is not a valid regular expression");
+  });
+
   test("a bound field is not the model's to set, so it is not checked", () => {
     expect(checkToolArgs(m, { account: 42 }, { account: "pinned" })).toBeUndefined();
   });

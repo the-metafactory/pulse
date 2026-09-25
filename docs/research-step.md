@@ -47,8 +47,8 @@ actions:
 1. Each round sends the conversation with the tools. Every tool call runs
    through `runAction` with the model's arguments and the step's `bind`; the
    result (the action's declared output fields, clipped) goes back as a
-   `tool` message. The calls of one round run concurrently; their results
-   go back in the order the model made them.
+   `tool` message. The calls of one round run concurrently, at most four at
+   a time; their results go back in the order the model made them.
 2. A reply without tool calls is the answer. After `max_rounds` the step adds
    `write_prompt` and sends the conversation **without a `tools` field** —
    some gateways answer `tool_choice: "none"` with an empty message.
@@ -60,7 +60,8 @@ actions:
    are answered with an error text, not run.
 5. `timeout_ms` bounds the whole step. It ends a round the moment it fires,
    whether the model or a tool is still working; a tool that is still running
-   is left to finish on its own, and its result is dropped.
+   is left to finish on its own, its result is dropped, and calls still
+   queued never start.
 
 ## What limits a manipulated model
 
@@ -79,9 +80,12 @@ narrow what its arguments can do:
   dropped. Actions carry no pins of their own, so one action serves several
   pipelines with different pins. A bind key that no tool declares is a
   preflight error, since a typo would silently unpin the field.
-- **Schema check.** The model's arguments are checked against the schema it
-  was shown — `type`, `minimum` / `maximum`, `minLength` / `maxLength`,
-  `enum`, `maxItems` and item types — before the action runs.
+- **Schema check.** Before the action runs, the model's arguments are checked
+  against these keywords of the schema it was shown: `type`, `enum`,
+  `minimum` / `maximum`, `minLength` / `maxLength`, `pattern`,
+  `minItems` / `maxItems`, and `items`, `properties` and `required` in
+  nested schemas. Other keywords (`format`, `uniqueItems`, …) are shown to
+  the model but not checked; the action checks those itself.
 - **Argv shell.** `shell` takes an argv array and spawns the program with no
   `sh -c`, so a model-chosen query cannot become shell syntax. Tools run
   inside a research step get a shell that refuses the string form.
@@ -124,10 +128,13 @@ if (!result.success && result.cause instanceof ResearchUnavailable) {
 ```
 
 `OpenAICompatibleChatModel` speaks `POST {baseUrl}/chat/completions`. It
-throws `ModelUnavailableError` for a missing key, network failure, timeout and
-HTTP 408/425/429/5xx, and `ModelError` for other 4xx or a malformed body. The
-key never appears in an error message. Any object with a `complete()` method
-matching `ChatModel` works in its place.
+throws `ModelUnavailableError` for a missing key, network failure, timeout
+(while connecting or while the body arrives) and HTTP 408/425/429 or any 5xx,
+and `ModelError` for other 4xx or a malformed body. An error's message
+carries the status only; what the gateway answered goes on `detail`
+(redacted, clipped), since it may echo the request — a research step writes it
+to the transcript, never into an event. The key never appears in either. Any
+object with a `complete()` method matching `ChatModel` works in its place.
 
 ### Degrading per item
 
@@ -135,16 +142,20 @@ A research step inside `map` should run with `onError: collect`. With the
 default `stop`, the first unreachable model call stops the map and later
 items never get their deterministic work. With `collect`, every item runs
 its plain actions, and an item whose research could not reach the model is
-collected as `{ _error: true, unavailable: true, index, item, error }` — the
-host queues those and treats any `_error` without `unavailable` as a real
-failure. With `stop`, `PipelineResult.cause` is the `MapItemFailure` and its
-`original` holds the `ResearchUnavailable`.
+collected as `{ _error: true, unavailable: true, index, item, error, partial }`.
+`partial` is the item's payload as it stood when the research step started:
+the output of the steps before it. Steps after the research step did not run
+for that item. The host delivers `partial`, queues the research, and treats
+any `_error` without `unavailable` as a real failure. With `stop`,
+`PipelineResult.cause` is the `MapItemFailure` and its `original` holds the
+`ResearchUnavailable`.
 
-A network that drops packets (off VPN, say) does not refuse the connection;
-each call waits out `timeoutMs` (default 300 s, since long generations take
-minutes). A host that expects the model to be absent often should check
-reachability once per run with a short request and skip the research steps
-when it fails, rather than lower the timeout for every call.
+Within one `runPipeline` run, once a model is found unreachable, every later
+research step on it fails at once with `ResearchUnavailable` (its message
+ends "earlier in this run") instead of calling the model again. A network
+that drops packets (off VPN, say) does not refuse the connection, so the
+first call waits out `timeoutMs` (default 300 s, since long generations take
+minutes); the rest of the run does not.
 
 ## Transcript
 
@@ -153,6 +164,7 @@ With `StepRunnerOptions.transcriptDir` set, each research run writes
 whether the step creates it or the host reuses one; the file is 0600. It holds a
 `start` line, one `model` line per model turn (content, tool calls, usage),
 one `tool` line per call (raw arguments, the input after bind, the result),
+a `model_error` line with the gateway's `detail` when a model call fails,
 and an `end` line with the stats, on success and on failure alike. Without
 `transcriptDir` nothing is written. A transcript is not a Trace (the
 miner-owned execution record); it is a debugging log of one research run.

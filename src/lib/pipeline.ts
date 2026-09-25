@@ -174,9 +174,9 @@ export async function runPipeline(
   let currentData = { ...initialInput };
   try {
     // A research step that would offer a model anything but a read action
-    // fails the pipeline here, before any step runs.
-    const runOptions: StepRunnerOptions = { ...options, researchTools: new Map() };
-    await preflightSteps(pipeline.actions, runOptions);
+    // fails the pipeline here, before any step runs. The returned options
+    // carry this run's state (what the preflight checked).
+    const runOptions = await preflightSteps(pipeline.actions, options);
     for (const step of pipeline.actions) {
       currentData = await runStep(step, currentData, runOptions, stepRecords);
     }
