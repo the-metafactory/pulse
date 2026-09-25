@@ -283,42 +283,48 @@ features:
   # Iteration 9 — Research step: a model researches through read-only actions
   - id: P-900
     name: JSON Schema action input
-    status: in-progress
+    status: done
     iteration: 9
+    issue: 75
     depends: [ P-200 ]
     description: "action.json input fields take JSON Schema keywords (description, enum, default, items) beside the legacy {type, required}; runAction fills defaults and checks enums; toolSchema() turns a manifest into a model tool definition. One schema, not two."
 
   - id: P-901
     name: Action effect and step bind
-    status: in-progress
+    status: done
     iteration: 9
+    issue: 75
     depends: [ P-900 ]
     description: "effect: read | write on action.json (absent = not read). A research step offers only read actions and the pipeline refuses to start otherwise (preflight); bind: pins input fields, hides them from the model's schema and forces them onto every call."
 
   - id: P-902
     name: Argv shell
-    status: in-progress
+    status: done
     iteration: 9
+    issue: 75
     depends: [ P-700 ]
     description: "shell(cmd: string | string[]) — argv spawns with no sh -c. The policy gate sees form/program/argv plus a shell-quoted command, so a policy can pin the binary and deny the string form. Tools inside a research step get an argv-only shell."
 
   - id: P-903
     name: OpenAI-compatible chat model
-    status: in-progress
+    status: done
     iteration: 9
+    issue: 75
     depends: []
     description: "ChatModel interface + OpenAICompatibleChatModel (chat/completions with tool calling). Host-injected by name via StepRunnerOptions.models; key from a host-named env var with no fallback; ModelUnavailableError (network, timeout, 408/429/5xx, no key) vs ModelError; key redacted from errors."
 
   - id: P-904
     name: Research step
-    status: in-progress
+    status: done
     iteration: 9
+    issue: 75
     depends: [ P-901, P-902, P-903 ]
     description: "research: step — model + read actions as tools, round cap, final write turn sent without tools, empty-answer retry, duplicate-call suppression, result clipping; ResearchUnavailable so a host can queue work when the model is down; PipelineResult.cause keeps the error class."
 
   - id: P-905
     name: Research transcript (JSONL)
-    status: in-progress
+    status: done
     iteration: 9
+    issue: 75
     depends: [ P-904 ]
     description: "Every model turn and tool call (arguments, bound input, result) to a JSONL file in the host-given StepRunnerOptions.transcriptDir (dir set to 0700, file 0600); nothing written without it. Events carry names and counts only. A debugging log of one research run, not the miner-owned Trace (P-302)."

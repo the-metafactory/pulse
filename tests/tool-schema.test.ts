@@ -42,6 +42,12 @@ describe("toolSchema — an action manifest as a tool definition", () => {
     expect(schema.required).toEqual(["q"]);
   });
 
+  test("a model's null for a field is unset: the default applies, the action never sees null", () => {
+    const m = manifest({ q: { type: "string" }, n: { type: "integer", default: 10 } });
+    expect(toolInput(m, { q: null, n: null })).toEqual({});
+    expect(prepareInput(m, toolInput(m, { q: null, n: null })).input).toEqual({ n: 10 });
+  });
+
   test("toolInput keeps declared fields only and forces bound values", () => {
     const m = manifest({ q: { type: "string" }, account: { type: "string" } });
     expect(toolInput(m, { q: "hi", account: "evil", extra: 1 }, { account: "pinned" })).toEqual({ q: "hi", account: "pinned" });

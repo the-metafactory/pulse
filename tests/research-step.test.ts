@@ -456,6 +456,14 @@ describe("research step — argv shell for tools", () => {
     expect(requests[1].messages.at(-1).content).toBe(payload);
   });
 
+  test("research tools run locally even when the host defaults to cloud mode", async () => {
+    const payload = "$(echo pwned)";
+    script = [reply({ tool_calls: [toolCall("c1", "A_SHELL_ARGV", { q: payload })] }), reply({ content: "ok" })];
+    const result = await runPipeline(pipeline({ tools: ["A_SHELL_ARGV"] }, []), { topic: "t" }, opts({ defaultMode: "cloud", cloudUrlPattern: "http://127.0.0.1:1/{name}" }));
+    expect(result.success).toBe(true);
+    expect(requests[1].messages.at(-1).content).toBe(payload);
+  });
+
   test("a policy that pins the program lets the pinned argv call through", async () => {
     const policy: Policy = {
       version: 1,
@@ -651,7 +659,7 @@ describe("research step — degrade per item inside map", () => {
     expect(out[2].error).toMatch(/earlier in this run/);
   });
 
-  test("a step timeout while the model is silent is unavailability, and marks the model", async () => {
+  test("a step timeout while the model works is unavailability, but marks nothing", async () => {
     const silent = Bun.serve({ port: 0, fetch: () => new Promise<Response>((r) => setTimeout(() => r(Response.json({})), 2000)) });
     let calls = 0;
     const m = new OpenAICompatibleChatModel({
@@ -668,8 +676,9 @@ describe("research step — degrade per item inside map", () => {
     silent.stop(true);
     const out = result.output!.out as any[];
     expect(out.map((e) => e.unavailable)).toEqual([true, true]);
-    expect(out[0].error).toMatch(/timeout after 100ms/);
-    expect(calls).toBe(1);
+    expect(out.map((e) => e.error)).toEqual([expect.stringMatching(/timeout after 100ms/), expect.stringMatching(/timeout after 100ms/)]);
+    // A slow generation looks like a dead link; the second item still tries.
+    expect(calls).toBe(2);
   });
 
   test("a 429 or 5xx is an answer: it marks nothing, and the next item calls the model again", async () => {

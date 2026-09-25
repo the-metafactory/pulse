@@ -402,13 +402,10 @@ class ResearchRun {
       );
     } catch (err) {
       if (signal.aborted) {
-        // The step's own timer fired while the model was silent: no answer
-        // came, which is unavailability (queue it), not a failure of the work.
-        if (this.timedOut) {
-          const reason = `timeout after ${this.spec.timeout_ms}ms`;
-          runState(this.options)?.unavailableModels.set(this.spec.model, reason);
-          throw new ResearchUnavailable(this.stepName, reason);
-        }
+        // The step's own timer fired while the model had not answered: queue
+        // it (unavailable), but mark nothing — a slow generation looks the
+        // same as a dead link, and the next item may well get its answer.
+        if (this.timedOut) throw new ResearchUnavailable(this.stepName, `timeout after ${this.spec.timeout_ms}ms`);
         throw this.aborted();
       }
       if (err instanceof ModelUnavailableError || err instanceof ModelError) {
@@ -469,6 +466,10 @@ class ResearchRun {
       // fetches; raceAbort ends the round even if the action ignores it.
       const run = await runAction(fn.name, call.input, {
         ...this.options,
+        // Local always: the argv-only shell, the checked manifest and the
+        // signal apply on the local path only, so a host's cloud mode must
+        // not carry a model-driven call past them.
+        mode: "local",
         signal: this.controller.signal,
         resolved: call.tool,
         shellArgvOnly: true,

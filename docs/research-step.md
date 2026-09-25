@@ -65,9 +65,9 @@ actions:
    see it as `ctx.signal`). The kill reaches the direct child, which is
    prompt for the argv form research tools are held to; whatever an action
    does without those capabilities is left to finish, its result dropped.
-   Calls still queued never start. If the model was the one still silent,
-   the step fails with `ResearchUnavailable` (no answer came); if a tool
-   was, with a plain timeout. A step aborted from outside (a failing
+   Calls still queued never start. If the model had not answered yet, the
+   step fails with `ResearchUnavailable` (queue it); if a tool was still
+   running, with a plain timeout. A step aborted from outside (a failing
    `parallel` sibling) reports "aborted".
 
 ## What limits a manipulated model
@@ -159,16 +159,19 @@ any `_error` without `unavailable` as a real failure. With `stop`,
 `PipelineResult.cause` is the `MapItemFailure` and its `original` holds the
 `ResearchUnavailable`.
 
-Within one `runPipeline` run, once a model gives no answer at all (no key,
-network failure, timeout), every later research step on it fails at once
+Within one `runPipeline` run, once a model call gets no answer at all (no
+key, network failure, the model's own `timeoutMs`), every later research
+step on it fails at once
 with `ResearchUnavailable` (its message ends "earlier in this run") instead
 of calling the model again. That includes a `retry:` around the step: the
 run treats the model as absent, and the host queues the work. A 429 or 5xx
 is an answer from the gateway and marks nothing; the next step calls again.
+Neither does the step's `timeout_ms` firing while the model works: a slow
+generation looks the same as a dead link, so that item is queued and the
+next one tries.
 A network that drops packets (off VPN, say) does not refuse the connection,
 so the first call waits out `timeoutMs` (default 300 s, since long
-generations take minutes), or the step's `timeout_ms` if shorter; later
-calls in the run do not. With map `concurrency` above 1, the items already
+generations take minutes); later calls in the run do not. With map `concurrency` above 1, the items already
 in flight when the first call gives up have each called the model and each
 wait too; only items that start after it fail at once.
 

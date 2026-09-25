@@ -65,7 +65,8 @@ export function toolInput(
   const input: Record<string, unknown> = {};
   for (const name of Object.keys(manifest.input ?? {})) {
     if (Object.hasOwn(bind, name)) input[name] = bind[name];
-    else if (Object.hasOwn(modelArgs, name)) input[name] = modelArgs[name];
+    // A model's null for a field is "unset": defaults apply, the action never sees null.
+    else if (Object.hasOwn(modelArgs, name) && modelArgs[name] !== null) input[name] = modelArgs[name];
   }
   return input;
 }
@@ -137,9 +138,9 @@ const checkArray: Check = (name, value, schema) => {
 };
 
 /**
- * With `properties` declared, a key it does not name is refused (the same
- * rule as a tool's top level), unless `additionalProperties` is true or a
- * schema the extra keys are checked against.
+ * With `properties` declared, a key it does not name is refused, unless
+ * `additionalProperties` is true or a schema the extra keys are checked
+ * against. (At a tool's top level, toolInput drops undeclared keys instead.)
  */
 const checkObject: Check = (name, value, schema) => {
   if (!isSchema(value)) return undefined;
