@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Mirrors pilot's CI (pilot .github/workflows/ci.yml, itself after cortex):
+# one named job per gate, oven-sh/setup-bun@v2, and a frozen install so every
+# run reproduces bun.lock exactly. The job names (Typecheck, Test) are what a
+# merge gate reads from `statusCheckRollup`; keep them stable.
+#
+# No lint job: pulse has no ESLint setup yet. No private-dependency auth step:
+# every dependency is public on npm.
+#
+# The suite is hermetic on a bare runner: models, agent providers, gateways
+# and chat surfaces are local mock servers or injected fakes, and the shell
+# tests use only sh, echo and sleep.
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: tsc --noEmit
+        run: bun run typecheck
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: bun test
+        run: bun test

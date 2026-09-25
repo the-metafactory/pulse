@@ -119,6 +119,8 @@ bun src/cli.ts validate examples/simple-tree.json
 bun examples/rss-pipeline/run-demo.ts  # Run RSS demo
 ```
 
+CI (`.github/workflows/ci.yml`) runs the same two gates as named jobs, **Typecheck** and **Test**, on every PR to `main` and every push to `main`. Keep the suite hermetic: no test may need a real model, NATS server, chat surface or credential.
+
 ## Working conventions
 
 - Tree runner tests in `tests/` mirroring `src/lib/`
