@@ -111,8 +111,22 @@ HTTP 408/425/429/5xx, and `ModelError` for other 4xx or a malformed body. The
 key never appears in an error message. Any object with a `complete()` method
 matching `ChatModel` works in its place.
 
-Inside `map`, the failing item's `MapItemFailure.original` holds the
-`ResearchUnavailable`; `PipelineResult.cause` holds the `MapItemFailure`.
+### Degrading per item
+
+A research step inside `map` should run with `onError: collect`. With the
+default `stop`, the first unreachable model call stops the map and later
+items never get their deterministic work. With `collect`, every item runs
+its plain actions, and an item whose research could not reach the model is
+collected as `{ _error: true, unavailable: true, index, item, error }` — the
+host queues those and treats any `_error` without `unavailable` as a real
+failure. With `stop`, `PipelineResult.cause` is the `MapItemFailure` and its
+`original` holds the `ResearchUnavailable`.
+
+A network that drops packets (off VPN, say) does not refuse the connection;
+each call waits out `timeoutMs` (default 300 s, since long generations take
+minutes). A host that expects the model to be absent often should check
+reachability once per run with a short request and skip the research steps
+when it fails, rather than lower the timeout for every call.
 
 ## Trace
 

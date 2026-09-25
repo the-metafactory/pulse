@@ -37,7 +37,7 @@ import { evaluate } from "./enforcement-gate";
 import type { GovernedEvent, GovernedResult, GovernedStepSpec } from "../types/governed";
 
 import { StepFailure, MapItemFailure } from "./step-failure";
-import { runResearch, validateResearch } from "./research";
+import { ResearchUnavailable, runResearch, validateResearch } from "./research";
 import type { ChatModel } from "./chat-model";
 import type { ResearchEvent, ResearchStats, ResearchStepSpec } from "../types/research";
 
@@ -312,7 +312,10 @@ async function runMap(
       if (onError === "skip") {
         return undefined;
       }
-      return { _error: true, index, error: errMsg, item };
+      // A research model that was unreachable is a "retry later", not a
+      // failure of the item; flag it so a host can queue it without parsing
+      // the message.
+      return { _error: true, index, error: errMsg, item, ...(err instanceof ResearchUnavailable ? { unavailable: true } : {}) };
     }
   }
 

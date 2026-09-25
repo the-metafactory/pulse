@@ -398,6 +398,37 @@ describe("research step — model unavailable", () => {
   });
 });
 
+describe("research step — degrade per item inside map", () => {
+  test("onError: collect keeps every item's deterministic work and flags the unavailable ones", async () => {
+    const down = new OpenAICompatibleChatModel({ baseUrl: "http://127.0.0.1:1/v1", model: "x", apiKeyEnv: KEY_ENV, env: { [KEY_ENV]: KEY } });
+    createAction("A_MARK", { input: { item: { type: "number" } }, output: {} }, `export default {
+      async execute(input) {
+        await Bun.write(${JSON.stringify(DIR)} + "/mark-" + input.item, "done");
+        return input;
+      }
+    };`);
+    const p = {
+      name: "P",
+      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: ["A_MARK", { research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
+    } as any;
+    const result = await runPipeline(p, { items: [1, 2] }, { actionDirs: [ACTIONS], models: { m: down } });
+    expect(result.success).toBe(true);
+    expect(existsSync(join(DIR, "mark-1"))).toBe(true);
+    expect(existsSync(join(DIR, "mark-2"))).toBe(true);
+    const out = result.output!.out as any[];
+    expect(out.map((e) => [e._error, e.unavailable, e.index])).toEqual([[true, true, 0], [true, true, 1]]);
+  });
+
+  test("a failure that is not unavailability carries no flag", async () => {
+    const p = {
+      name: "P",
+      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: [{ research: { name: "r", model: "missing", prompt: "p", tools: ["A_OTHER"] } }] } }],
+    } as any;
+    const result = await runPipeline(p, { items: [1] }, { actionDirs: [ACTIONS], models: {} });
+    expect((result.output!.out as any[])[0].unavailable).toBeUndefined();
+  });
+});
+
 describe("OpenAICompatibleChatModel", () => {
   test("a missing key is unavailable, named by variable, with no fallback", async () => {
     const m = new OpenAICompatibleChatModel({ baseUrl: `http://127.0.0.1:${server.port}/v1`, model: "x", apiKeyEnv: "PULSE_TEST_UNSET_KEY", env: { OPENAI_API_KEY: "other" } });
