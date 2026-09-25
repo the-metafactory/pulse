@@ -125,7 +125,7 @@ describe("loadPolicy — fail-closed loading", () => {
 describe("guardCapabilities — the gate bites", () => {
   test("denied shell call throws PolicyDenial; allowed runs", async () => {
     let ran = false;
-    const caps = { shell: async (_cmd: string) => { ran = true; return { stdout: "", stderr: "", code: 0 }; } };
+    const caps = { shell: async (_cmd: string | string[]) => { ran = true; return { stdout: "", stderr: "", code: 0 }; } };
     const policy: Policy = {
       version: 1,
       default: "deny",
@@ -189,7 +189,7 @@ describe("guardCapabilities — the gate bites", () => {
 
   test("audit hook distinguishes ask-became-deny from hard deny", async () => {
     const seen: string[] = [];
-    const caps = { shell: async (_c: string) => ({ stdout: "", stderr: "", code: 0 }) };
+    const caps = { shell: async (_c: string | string[]) => ({ stdout: "", stderr: "", code: 0 }) };
     const policy: Policy = {
       version: 1,
       default: "deny",

@@ -36,26 +36,12 @@ import {
 import { evaluate } from "./enforcement-gate";
 import type { GovernedEvent, GovernedResult, GovernedStepSpec } from "../types/governed";
 
-export class StepFailure extends Error {
-  constructor(
-    public readonly step: string,
-    public readonly causeError: string,
-  ) {
-    super(`Step failed: ${step} — ${causeError}`);
-    this.name = "StepFailure";
-  }
-}
+import { StepFailure, MapItemFailure } from "./step-failure";
+import { runResearch, validateResearch } from "./research";
+import type { ChatModel } from "./chat-model";
+import type { ResearchEvent, ResearchStats, ResearchStepSpec } from "../types/research";
 
-export class MapItemFailure extends Error {
-  constructor(
-    public readonly index: number,
-    public readonly item: unknown,
-    public readonly causeError: string,
-  ) {
-    super(`Map item ${index} failed: ${causeError}`);
-    this.name = "MapItemFailure";
-  }
-}
+export { StepFailure, MapItemFailure };
 
 export interface StepRecord {
   action: string;
@@ -68,6 +54,8 @@ export interface StepRecord {
   tribunal?: TribunalVerdict;
   /** Populated for governed steps — full GovernedResult (l0 + tribunal + gate verdicts). */
   governed?: GovernedResult;
+  /** Populated for research steps — rounds, tool calls, tokens, trace path. */
+  research?: ResearchStats;
 }
 
 /** Options threaded through the step runner, extending ActionRunnerOptions */
@@ -87,6 +75,15 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
   onTribunalEvent?: (event: TribunalEvent) => void;
   /** Optional sink for governed-action lifecycle events. */
   onGovernedEvent?: (event: GovernedEvent) => void;
+  /** Chat models a research step may name, keyed by the name pipelines use. */
+  models?: Record<string, ChatModel>;
+  /**
+   * Directory for research JSONL traces (tool calls, arguments, results).
+   * Absent → no trace is written. Created 0700, files 0600.
+   */
+  traceDir?: string;
+  /** Optional sink for research lifecycle events (names and counts only). */
+  onResearchEvent?: (event: ResearchEvent) => void;
 }
 
 type ValidateStep = (step: unknown, path?: string) => PipelineStep;
@@ -110,7 +107,8 @@ type PrimitiveSpec =
   | GateStepSpec
   | AgentStepSpec
   | TribunalStepSpec
-  | GovernedStepSpec;
+  | GovernedStepSpec
+  | ResearchStepSpec;
 
 interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
   validate?: (spec: Record<string, unknown>, path: string, validateStep: ValidateStep) => void;
@@ -159,6 +157,10 @@ const PRIMITIVES = {
   governed: {
     validate: validateGoverned,
     run: runGoverned,
+  },
+  research: {
+    validate: validateResearch,
+    run: runResearch,
   },
 } satisfies Record<string, PrimitiveHandler<any>>;
 
@@ -305,7 +307,7 @@ async function runMap(
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (onError === "stop") {
-        throw new MapItemFailure(index, item, errMsg);
+        throw new MapItemFailure(index, item, errMsg, err);
       }
       if (onError === "skip") {
         return undefined;

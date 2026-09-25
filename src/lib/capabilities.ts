@@ -15,8 +15,14 @@ import type { ActionCapabilities, CapabilityName, LLMOptions, LLMResponse } from
  * Only creates capabilities that the action declared in its manifest.
  * Actions never get capabilities they didn't ask for.
  */
+export interface LocalCapabilityOptions {
+  /** Shell refuses the string (`sh -c`) form and runs argv arrays only. */
+  shellArgvOnly?: boolean;
+}
+
 export async function createLocalCapabilities(
-  required: CapabilityName[] = []
+  required: CapabilityName[] = [],
+  options: LocalCapabilityOptions = {},
 ): Promise<ActionCapabilities> {
   const capabilities: ActionCapabilities = {};
 
@@ -29,7 +35,7 @@ export async function createLocalCapabilities(
         capabilities.fetch = globalThis.fetch;
         break;
       case "shell":
-        capabilities.shell = createLocalShell();
+        capabilities.shell = createLocalShell(options.shellArgvOnly === true);
         break;
       case "readFile":
         capabilities.readFile = async (path: string) => Bun.file(path).text();
@@ -300,11 +306,27 @@ function extractClaudeOutput(raw: string): { text: string; isError: boolean } {
 }
 
 /**
- * Local shell provider using Bun's shell.
+ * Local shell provider. A string command runs through `sh -c`; an argv
+ * array spawns argv[0] directly, so no argument is ever parsed by a shell.
+ * With argvOnly the string form is refused — the promise rejects.
  */
-function createLocalShell(): (cmd: string) => Promise<{ stdout: string; stderr: string; code: number }> {
-  return async (cmd: string) => {
-    const proc = Bun.spawn(["sh", "-c", cmd], {
+export function createLocalShell(
+  argvOnly = false,
+): (cmd: string | string[]) => Promise<{ stdout: string; stderr: string; code: number }> {
+  return async (cmd: string | string[]) => {
+    let argv: string[];
+    if (Array.isArray(cmd)) {
+      if (cmd.length === 0 || cmd.some((a) => typeof a !== "string")) {
+        throw new Error("shell: argv must be a non-empty array of strings");
+      }
+      argv = cmd;
+    } else {
+      if (argvOnly) {
+        throw new Error("shell: the string form (sh -c) is refused here; pass an argv array");
+      }
+      argv = ["sh", "-c", cmd];
+    }
+    const proc = Bun.spawn(argv, {
       stdout: "pipe",
       stderr: "pipe",
     });

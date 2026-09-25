@@ -6,7 +6,7 @@
  * passes through `evaluate` before it runs — the manifest declares, this bites.
  *
  * Tool-name mapping (capability → policy tool, matched field):
- *   shell     → "Bash"  (match: command)
+ *   shell     → "Bash"  (match: command, form, program, argv — see shellGateInput)
  *   fetch     → "Fetch" (match: url)
  *   writeFile → "Write" (match: path)
  *   readFile  → "Read"  (match: path)
@@ -109,6 +109,25 @@ function guard<TArgs extends unknown[], TReturn>(
   };
 }
 
+/** Quote one argv element the way a POSIX shell would read it back. */
+function shellQuote(arg: string): string {
+  return /^[\w@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The gate input for a shell call. Both forms carry `command` (argv is
+ * shell-quoted, so a rule written against command strings reads an argv call
+ * unambiguously) and `form` (`string` or `argv`), so a policy can deny the
+ * `sh -c` form outright. The argv form adds `program` (argv[0], match it
+ * with an anchored regex to pin the binary) and `argv` (the JSON array).
+ */
+export function shellGateInput(cmd: string | string[]): Record<string, unknown> {
+  if (Array.isArray(cmd)) {
+    return { command: cmd.map(shellQuote).join(" "), form: "argv", program: cmd[0] ?? "", argv: cmd };
+  }
+  return { command: cmd, form: "string" };
+}
+
 /**
  * Wrap injected capabilities so every guarded tool call passes the gate first.
  * Only the capabilities present on the object are wrapped; absent ones stay
@@ -119,7 +138,7 @@ export function guardCapabilities(caps: ActionCapabilities, opts: GuardOptions):
   const guarded: ActionCapabilities = { ...caps };
 
   if (caps.shell) {
-    guarded.shell = guard("Bash", (cmd: string) => ({ command: cmd }), caps.shell, opts);
+    guarded.shell = guard("Bash", shellGateInput, caps.shell, opts);
   }
   if (caps.fetch) {
     guarded.fetch = guard(

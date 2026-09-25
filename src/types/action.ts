@@ -29,8 +29,13 @@ export interface ActionCapabilities {
   /** HTTP fetch */
   fetch?: typeof globalThis.fetch;
 
-  /** Shell command execution */
-  shell?: (cmd: string) => Promise<ShellResult>;
+  /**
+   * Shell command execution. A string runs through `sh -c`; an argv array
+   * spawns the program directly, with no shell to interpret its arguments.
+   * Actions that pass model-chosen values must use the argv form — a research
+   * step hands its tools a shell that refuses the string form.
+   */
+  shell?: (cmd: string | string[]) => Promise<ShellResult>;
 
   /** File read (sandboxed to allowed paths) */
   readFile?: (path: string) => Promise<string>;
@@ -72,6 +77,30 @@ export interface ShellResult {
 }
 
 // ---------------------------------------------------------------------------
+// Input fields — legacy {type, required} plus JSON Schema keywords
+// ---------------------------------------------------------------------------
+
+export type ActionEffect = "read" | "write";
+
+/**
+ * One declared input field. `type` keeps the legacy shorthand (`string[]`
+ * is accepted and becomes an array of strings in a tool schema); the rest are
+ * JSON Schema keywords passed through to the model as written.
+ */
+export interface ActionInputField {
+  type: string;
+  required?: boolean;
+  description?: string;
+  enum?: unknown[];
+  default?: unknown;
+  items?: Record<string, unknown>;
+  properties?: Record<string, unknown>;
+  minimum?: number;
+  maximum?: number;
+  [keyword: string]: unknown;
+}
+
+// ---------------------------------------------------------------------------
 // Action Manifest — the action.json file
 // ---------------------------------------------------------------------------
 
@@ -85,11 +114,24 @@ export interface ActionManifest {
   /** Human-readable description */
   description: string;
 
-  /** Input field declarations */
-  input: Record<string, { type: string; required?: boolean }>;
+  /**
+   * Input field declarations. The legacy form is `{type, required}`; any
+   * JSON Schema keyword (description, enum, default, items, …) may be added,
+   * so the manifest doubles as the tool definition a research step offers a
+   * model (see toolSchema in src/lib/tool-schema.ts).
+   */
+  input: Record<string, ActionInputField>;
 
   /** Output field declarations */
   output: Record<string, { type: string }>;
+
+  /**
+   * What the action does to the world. `read` gathers only; `write` sends,
+   * posts, drafts or changes state. A research step offers a model `read`
+   * actions only and refuses the pipeline otherwise; absent counts as not
+   * read (fail closed).
+   */
+  effect?: ActionEffect;
 
   /** Capabilities this action requires from the runtime */
   requires?: CapabilityName[];

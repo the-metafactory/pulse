@@ -62,7 +62,25 @@ export {
 } from "./lib/agent-provider";
 export type { AgentTransport, MyelinAgentProviderConfig, MyelinEnvelope } from "./lib/agent-provider";
 export { renderPromptTemplate } from "./lib/primitive-runner";
-export { createLocalCapabilities, createCloudCapabilities } from "./lib/capabilities";
+export { createLocalCapabilities, createCloudCapabilities, createLocalShell } from "./lib/capabilities";
+export type { LocalCapabilityOptions } from "./lib/capabilities";
+
+// Research step — a model researches through read-only actions (P-900..P-905)
+export type { ResearchStepSpec, ResearchStats, ResearchEvent } from "./types/research";
+export { ResearchUnavailable, checkResearchTools, preflightSteps } from "./lib/research";
+export { OpenAICompatibleChatModel, ModelUnavailableError, ModelError } from "./lib/chat-model";
+export type {
+  ChatModel,
+  ChatMessage,
+  ChatTool,
+  ChatToolCall,
+  ChatRequest,
+  ChatResponse,
+  OpenAICompatibleConfig,
+} from "./lib/chat-model";
+export { toolSchema, toolInput, fieldSchema, prepareInput } from "./lib/tool-schema";
+export type { ToolParameters } from "./lib/tool-schema";
+export { loadActionManifest } from "./lib/action-runner";
 export type {
   ActionCapabilities,
   CapabilityName,
@@ -73,6 +91,8 @@ export type {
   LLMOptions,
   LLMResponse,
   ShellResult,
+  ActionEffect,
+  ActionInputField,
 } from "./types/action";
 
 // Verdict tribunal (governance Stage 3, P-701) — L1 of the governed-action stack
@@ -110,7 +130,7 @@ export { runFlow, scheduleFlow, loadFlow } from "./lib/flow";
 
 // Enforcement gate (governance Stage 1) — the runtime complement to manifests
 export { evaluate } from "./lib/enforcement-gate";
-export { loadPolicy, guardCapabilities, DENY_ALL, PolicyDenial } from "./lib/policy-loader";
+export { loadPolicy, guardCapabilities, shellGateInput, DENY_ALL, PolicyDenial } from "./lib/policy-loader";
 export type { GateAuditHook, GuardOptions, PolicyLoadResult } from "./lib/policy-loader";
 export type { Policy, PolicyRule, Decision, GateDecision } from "./types/policy";
 

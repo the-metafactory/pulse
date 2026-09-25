@@ -19,6 +19,7 @@ import { join, dirname } from "path";
 import { parse as parseYaml } from "yaml";
 import { runStep, validateSteps, type StepRecord, type StepRunnerOptions } from "./step-runner";
 import type { PipelineStep } from "../types/pipeline";
+import { preflightSteps } from "./research";
 
 export interface PipelineDef {
   /** Pipeline name (e.g. "P_LABEL_EMAIL") */
@@ -139,6 +140,11 @@ export interface PipelineResult {
   output?: Record<string, unknown>;
   /** Error message if the pipeline failed */
   error?: string;
+  /**
+   * The error the failing step threw, class intact — e.g. a host checks
+   * `cause instanceof ResearchUnavailable` to queue the run for later.
+   */
+  cause?: unknown;
   /** Per-step results for debugging */
   steps: Array<{
     action: string;
@@ -168,6 +174,9 @@ export async function runPipeline(
   // Run steps one-by-one to preserve partial output on failure
   let currentData = { ...initialInput };
   try {
+    // A research step that would offer a model anything but a read action
+    // fails the pipeline here, before any step runs.
+    await preflightSteps(pipeline.actions, options.actionDirs);
     for (const step of pipeline.actions) {
       currentData = await runStep(step, currentData, options, stepRecords);
     }
@@ -182,6 +191,7 @@ export async function runPipeline(
       success: false,
       output: currentData,
       error: err instanceof Error ? err.message : String(err),
+      cause: err,
       steps: stepRecords,
       durationMs: Date.now() - startTime,
     };
