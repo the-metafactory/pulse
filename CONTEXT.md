@@ -46,6 +46,10 @@ Pulse as a whole — the thing that executes Processes. Singular.
 The component that executes a Tree (a dependency graph). Class name `PulseRunner` is historical; it runs Trees only, not Pipelines or Flows.
 _Note_: Scheduler and Executor are Tree-Runner implementation, not language.
 
+**Transcript**:
+The JSONL log of one research step's run (model turns, tool calls, arguments, results), written to a host-given directory. A debugging record, not a Trace.
+_Avoid_: "trace" for it — Trace is the miner-owned record.
+
 ### Capability
 
 **Capability**:
@@ -80,10 +84,6 @@ A Primitive that wraps a sub-pipeline: map, filter, reduce, parallel, retry.
 
 **Control primitive**:
 A leaf Primitive that alters control flow without a sub-pipeline: gate (future: sleep, wait-for-event).
-
-**Transcript**:
-The JSONL log of one research step's run (model turns, tool calls, arguments, results), written to a host-given directory. A debugging record, not a Trace.
-_Avoid_: "trace" for it — Trace is the miner-owned record.
 
 ### Triggering
 

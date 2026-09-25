@@ -9,19 +9,23 @@
 
 import type { ActionCapabilities, CapabilityName, LLMOptions, LLMResponse } from "../types/action";
 
+export interface LocalCapabilityOptions {
+  /** Shell refuses the string (`sh -c`) form and runs argv arrays only. */
+  shellArgvOnly?: boolean;
+  /**
+   * When it fires, a running shell child is killed and a fetch aborted. The
+   * kill reaches the direct child: prompt for the argv form; a string-form
+   * command whose grandchildren hold the pipes open is not cut short.
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * Create capability providers for local (Bun) execution.
  *
  * Only creates capabilities that the action declared in its manifest.
  * Actions never get capabilities they didn't ask for.
  */
-export interface LocalCapabilityOptions {
-  /** Shell refuses the string (`sh -c`) form and runs argv arrays only. */
-  shellArgvOnly?: boolean;
-  /** When it fires, a running shell child is killed and a fetch aborted. */
-  signal?: AbortSignal;
-}
-
 export async function createLocalCapabilities(
   required: CapabilityName[] = [],
   options: LocalCapabilityOptions = {},
@@ -37,7 +41,7 @@ export async function createLocalCapabilities(
         capabilities.fetch = options.signal ? abortableFetch(options.signal) : globalThis.fetch;
         break;
       case "shell":
-        capabilities.shell = createLocalShell(options.shellArgvOnly === true, options.signal);
+        capabilities.shell = createLocalShell(options);
         break;
       case "readFile":
         capabilities.readFile = async (path: string) => Bun.file(path).text();
@@ -307,23 +311,26 @@ function extractClaudeOutput(raw: string): { text: string; isError: boolean } {
   }
 }
 
-/** fetch that also aborts when `signal` fires, alongside any signal the caller passes. */
+/** fetch that also aborts when `signal` fires, alongside any signal the caller passes (in init or on a Request). */
 function abortableFetch(signal: AbortSignal): typeof globalThis.fetch {
-  const wrapped = (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) =>
-    globalThis.fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
+  const wrapped = (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+    const own = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    return globalThis.fetch(input, { ...init, signal: own ? AbortSignal.any([own, signal]) : signal });
+  };
   return Object.assign(wrapped, { preconnect: globalThis.fetch.preconnect }) as typeof globalThis.fetch;
 }
 
 /**
  * Local shell provider. A string command runs through `sh -c`; an argv
  * array spawns argv[0] directly, so no argument is ever parsed by a shell.
- * With argvOnly the string form is refused — the promise rejects. When
- * `signal` fires, the child is killed and the promise rejects.
+ * With shellArgvOnly the string form is refused — the promise rejects. When
+ * `signal` fires, the child is killed and the promise rejects (see
+ * LocalCapabilityOptions.signal for what the kill reaches).
  */
 export function createLocalShell(
-  argvOnly = false,
-  signal?: AbortSignal,
+  options: LocalCapabilityOptions = {},
 ): (cmd: string | string[]) => Promise<{ stdout: string; stderr: string; code: number }> {
+  const { shellArgvOnly: argvOnly = false, signal } = options;
   return async (cmd: string | string[]) => {
     let argv: string[];
     if (Array.isArray(cmd)) {

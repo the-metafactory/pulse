@@ -170,6 +170,10 @@ async function openTranscript(dir: string | undefined, name: string): Promise<Tr
 
 /** Tool runs in flight at once within one round; the model may ask for more. */
 const TOOL_CONCURRENCY = 4;
+/** Tool calls one round may make; the rest are answered with an error, not run. */
+const MAX_CALLS_PER_ROUND = 16;
+/** A transcript keeps this many times result_chars of each tool result. */
+const TRANSCRIPT_RESULT_FACTOR = 10;
 
 const clip = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n)}\n[… truncated]`);
 const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -345,7 +349,11 @@ class ResearchRun {
       // Screening runs in the model's order (it decides which of two identical
       // calls is the duplicate); the real runs then go at most
       // TOOL_CONCURRENCY at a time, and results go back in the model's order.
-      const screened = res.toolCalls.map((call) => this.screen(call.function.name, call.function.arguments));
+      const screened = res.toolCalls.map((call, i): ScreenedCall =>
+        i < MAX_CALLS_PER_ROUND
+          ? this.screen(call.function.name, call.function.arguments)
+          : { reply: `tool error: too many calls in one round (limit ${MAX_CALLS_PER_ROUND}); this one was not run` },
+      );
       const results = await raceAbort(
         mapWithConcurrency(screened, (s, i) => this.execute(res.toolCalls[i].function, s), TOOL_CONCURRENCY),
         signal,
@@ -393,7 +401,16 @@ class ResearchRun {
         this.aborted,
       );
     } catch (err) {
-      if (signal.aborted) throw this.aborted();
+      if (signal.aborted) {
+        // The step's own timer fired while the model was silent: no answer
+        // came, which is unavailability (queue it), not a failure of the work.
+        if (this.timedOut) {
+          const reason = `timeout after ${this.spec.timeout_ms}ms`;
+          runState(this.options)?.unavailableModels.set(this.spec.model, reason);
+          throw new ResearchUnavailable(this.stepName, reason);
+        }
+        throw this.aborted();
+      }
       if (err instanceof ModelUnavailableError || err instanceof ModelError) {
         this.transcript.write({ type: "model_error", round: this.stats.rounds, error: err.message, detail: err.detail });
       }
@@ -439,7 +456,9 @@ class ResearchRun {
   private async execute(fn: { name: string; arguments: string }, call: ScreenedCall): Promise<string> {
     const round = this.stats.rounds;
     const reply = (result: string, extra: Record<string, unknown> = {}): string => {
-      this.transcript.write({ type: "tool", round, tool: fn.name, args: fn.arguments, result, ...extra });
+      const keep = this.resultChars * TRANSCRIPT_RESULT_FACTOR;
+      const clipped = result.length > keep ? { result: clip(result, keep), result_length: result.length } : { result };
+      this.transcript.write({ type: "tool", round, tool: fn.name, args: fn.arguments, ...clipped, ...extra });
       return result;
     };
     if ("reply" in call) return reply(call.reply, call.extra);

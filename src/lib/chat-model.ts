@@ -206,36 +206,45 @@ export class OpenAICompatibleChatModel implements ChatModel {
       // A 200 with a non-JSON body is a gateway fault, not a model answer.
       throw new ModelError(this.label, "response body is not JSON");
     }
-    const choice = data?.choices?.[0];
-    if (!choice || typeof choice !== "object") {
-      throw new ModelError(this.label, "response has no choices");
-    }
-    const msg = choice.message ?? {};
-    const toolCalls: ChatToolCall[] = Array.isArray(msg.tool_calls)
-      ? msg.tool_calls
-          .filter((c: any) => c && typeof c.function?.name === "string")
-          .map((c: any, i: number) => ({
-            id: typeof c.id === "string" && c.id ? c.id : `call_${i}`,
-            type: "function" as const,
-            function: {
-              name: c.function.name,
-              arguments: typeof c.function.arguments === "string" ? c.function.arguments : JSON.stringify(c.function.arguments ?? {}),
-            },
-          }))
-      : [];
-    return {
-      content: typeof msg.content === "string" ? msg.content : null,
-      toolCalls,
-      finishReason: choice.finish_reason ?? undefined,
-      usage: data.usage
-        ? { input: Number(data.usage.prompt_tokens ?? 0), output: Number(data.usage.completion_tokens ?? 0) }
-        : undefined,
-      reasoning: typeof msg.reasoning_content === "string" ? msg.reasoning_content : undefined,
-    };
+    return parseChatResponse(data, this.label);
   }
 
   /** Strip the key from any text that might reach an error message. */
   private redact(text: string, key: string): string {
     return key ? text.split(key).join("[redacted]") : text;
   }
+}
+
+/**
+ * An OpenAI-compatible `/chat/completions` body as a ChatResponse: the first
+ * choice's content, tool calls (arguments always a string, ids filled in),
+ * finish reason, usage and reasoning. Throws ModelError when there is no choice.
+ */
+export function parseChatResponse(data: any, label: string): ChatResponse {
+  const choice = data?.choices?.[0];
+  if (!choice || typeof choice !== "object") {
+    throw new ModelError(label, "response has no choices");
+  }
+  const msg = choice.message ?? {};
+  const toolCalls: ChatToolCall[] = Array.isArray(msg.tool_calls)
+    ? msg.tool_calls
+        .filter((c: any) => c && typeof c.function?.name === "string")
+        .map((c: any, i: number) => ({
+          id: typeof c.id === "string" && c.id ? c.id : `call_${i}`,
+          type: "function" as const,
+          function: {
+            name: c.function.name,
+            arguments: typeof c.function.arguments === "string" ? c.function.arguments : JSON.stringify(c.function.arguments ?? {}),
+          },
+        }))
+    : [];
+  return {
+    content: typeof msg.content === "string" ? msg.content : null,
+    toolCalls,
+    finishReason: choice.finish_reason ?? undefined,
+    usage: data.usage
+      ? { input: Number(data.usage.prompt_tokens ?? 0), output: Number(data.usage.completion_tokens ?? 0) }
+      : undefined,
+    reasoning: typeof msg.reasoning_content === "string" ? msg.reasoning_content : undefined,
+  };
 }

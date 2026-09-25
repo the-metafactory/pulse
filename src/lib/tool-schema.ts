@@ -45,7 +45,7 @@ export function toolSchema(manifest: ActionManifest, bind: Record<string, unknow
   const properties: Record<string, Record<string, unknown>> = {};
   const required: string[] = [];
   for (const [name, field] of Object.entries(manifest.input ?? {})) {
-    if (name in bind) continue;
+    if (Object.hasOwn(bind, name)) continue;
     properties[name] = fieldSchema(field);
     if (field.required) required.push(name);
   }
@@ -64,8 +64,8 @@ export function toolInput(
 ): Record<string, unknown> {
   const input: Record<string, unknown> = {};
   for (const name of Object.keys(manifest.input ?? {})) {
-    if (name in bind) input[name] = bind[name];
-    else if (name in modelArgs) input[name] = modelArgs[name];
+    if (Object.hasOwn(bind, name)) input[name] = bind[name];
+    else if (Object.hasOwn(modelArgs, name)) input[name] = modelArgs[name];
   }
   return input;
 }
@@ -145,13 +145,14 @@ const checkObject: Check = (name, value, schema) => {
   if (!isSchema(value)) return undefined;
   const required = Array.isArray(schema.required) ? schema.required : [];
   for (const key of required) {
-    if (typeof key === "string" && !(key in value)) return `${name}.${key} is required`;
+    if (typeof key === "string" && !Object.hasOwn(value, key)) return `${name}.${key} is required`;
   }
   if (!isSchema(schema.properties)) return undefined;
   const properties = schema.properties;
   const extra = schema.additionalProperties;
   for (const [key, v] of Object.entries(value)) {
-    const sub = key in properties ? properties[key] : extra;
+    // Own keys only: a JSON-parsed "__proto__" must not resolve to Object.prototype.
+    const sub = Object.hasOwn(properties, key) ? properties[key] : extra;
     if (sub === true) continue;
     if (!isSchema(sub)) return `${name}.${key} is not a declared property`;
     const error = checkValue(`${name}.${key}`, v, sub);
@@ -188,7 +189,7 @@ export function checkToolArgs(
   bind: Record<string, unknown> = {},
 ): string | undefined {
   for (const [name, field] of Object.entries(manifest.input ?? {})) {
-    if (name in bind || !(name in modelArgs)) continue;
+    if (Object.hasOwn(bind, name) || !Object.hasOwn(modelArgs, name)) continue;
     const value = modelArgs[name];
     if (value === null && !field.required) continue;
     const error = checkValue(name, value, fieldSchema(field));

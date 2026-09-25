@@ -48,7 +48,8 @@ actions:
    through `runAction` with the model's arguments and the step's `bind`; the
    result (the action's declared output fields, clipped) goes back as a
    `tool` message. The calls of one round run concurrently, at most four at
-   a time; their results go back in the order the model made them.
+   a time; their results go back in the order the model made them. A round
+   runs at most 16 calls; any beyond that are answered with an error text.
 2. A reply without tool calls is the answer. After `max_rounds` the step adds
    `write_prompt` and sends the conversation **without a `tools` field** —
    some gateways answer `tool_choice: "none"` with an empty message.
@@ -60,11 +61,14 @@ actions:
    are answered with an error text, not run.
 5. `timeout_ms` bounds the whole step. It ends a round the moment it fires,
    whether the model or a tool is still working. The step's signal kills a
-   tool's running `shell` children and aborts its `fetch` calls (actions
-   also see it as `ctx.signal`); whatever an action does without those
-   capabilities is left to finish, its result dropped. Calls still queued
-   never start. A step aborted from outside (a failing `parallel` sibling)
-   reports "aborted", not a timeout.
+   tool's running `shell` child and aborts its `fetch` calls (actions also
+   see it as `ctx.signal`). The kill reaches the direct child, which is
+   prompt for the argv form research tools are held to; whatever an action
+   does without those capabilities is left to finish, its result dropped.
+   Calls still queued never start. If the model was the one still silent,
+   the step fails with `ResearchUnavailable` (no answer came); if a tool
+   was, with a plain timeout. A step aborted from outside (a failing
+   `parallel` sibling) reports "aborted".
 
 ## What limits a manipulated model
 
@@ -163,7 +167,10 @@ run treats the model as absent, and the host queues the work. A 429 or 5xx
 is an answer from the gateway and marks nothing; the next step calls again.
 A network that drops packets (off VPN, say) does not refuse the connection,
 so the first call waits out `timeoutMs` (default 300 s, since long
-generations take minutes); the rest of the run does not.
+generations take minutes), or the step's `timeout_ms` if shorter; later
+calls in the run do not. With map `concurrency` above 1, the items already
+in flight when the first call gives up have each called the model and each
+wait too; only items that start after it fail at once.
 
 ## Transcript
 
@@ -171,7 +178,8 @@ With `StepRunnerOptions.transcriptDir` set, each research run writes
 `research-<name>-<timestamp>-<id>.jsonl` there. The dir is set to 0700,
 whether the step creates it or the host reuses one; the file is 0600. It holds a
 `start` line, one `model` line per model turn (content, tool calls, usage),
-one `tool` line per call (raw arguments, the input after bind, the result),
+one `tool` line per call (raw arguments, the input after bind, the result,
+clipped to ten times `result_chars` with its full length in `result_length`),
 a `model_error` line with the gateway's `detail` when a model call fails,
 and an `end` line with the stats, on success and on failure alike. Without
 `transcriptDir` nothing is written. A transcript is not a Trace (the
@@ -212,3 +220,8 @@ pipeline author.
 - A policy generated from a pack's declared capabilities.
 - Streaming, and a `write` path of any kind — effects go
   through plain actions, `gate:` or `governed:`.
+- Sovereignty. An `agent:` step declares `sovereignty` (e.g. `model_class:
+  local-only`); a research step does not yet. It sends the payload and tool
+  results to whichever model the host injected under that name, so today the
+  host alone decides where that data may go. UNRESOLVED: a `sovereignty`
+  field checked against a host-declared class per model.

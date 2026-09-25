@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { checkToolArgs, fieldSchema, prepareInput, toolInput, toolSchema } from "../src/lib/tool-schema";
-import { createLocalShell } from "../src/lib/capabilities";
+import { createLocalCapabilities, createLocalShell } from "../src/lib/capabilities";
 import { evaluate } from "../src/lib/enforcement-gate";
 import { shellGateInput } from "../src/lib/policy-loader";
 import type { ActionManifest } from "../src/types/action";
@@ -78,13 +78,26 @@ describe("shell — argv form", () => {
     const controller = new AbortController();
     const started = Date.now();
     setTimeout(() => controller.abort(), 50);
-    await expect(createLocalShell(false, controller.signal)(["sleep", "3"])).rejects.toThrow(/shell: aborted/);
+    await expect(createLocalShell({ signal: controller.signal })(["sleep", "3"])).rejects.toThrow(/shell: aborted/);
     expect(Date.now() - started).toBeLessThan(1000);
-    await expect(createLocalShell(false, controller.signal)(["echo", "late"])).rejects.toThrow(/shell: aborted/);
+    await expect(createLocalShell({ signal: controller.signal })(["echo", "late"])).rejects.toThrow(/shell: aborted/);
+  });
+
+  test("fetch aborts on the step's signal and still honours a Request's own signal", async () => {
+    const server = Bun.serve({ port: 0, fetch: () => new Response("ok") });
+    const step = new AbortController();
+    const { fetch: f } = await createLocalCapabilities(["fetch"], { signal: step.signal });
+    const own = new AbortController();
+    own.abort();
+    await expect(f!(new Request(`http://127.0.0.1:${server.port}/`, { signal: own.signal }))).rejects.toThrow();
+    expect(await (await f!(`http://127.0.0.1:${server.port}/`)).text()).toBe("ok");
+    step.abort();
+    await expect(f!(`http://127.0.0.1:${server.port}/`)).rejects.toThrow();
+    server.stop(true);
   });
 
   test("argvOnly refuses the string form; empty argv is refused", async () => {
-    const shell = createLocalShell(true);
+    const shell = createLocalShell({ shellArgvOnly: true });
     await expect(shell("echo hi")).rejects.toThrow(/string form \(sh -c\) is refused/);
     await expect(shell([])).rejects.toThrow(/non-empty array/);
     expect((await shell(["echo", "ok"])).stdout.trim()).toBe("ok");
@@ -171,6 +184,15 @@ describe("checkToolArgs — model arguments against the schema it was shown", ()
     expect(checkToolArgs(n, { open: [{ a: "x", anything: 1 }] })).toBeUndefined();
     expect(checkToolArgs(n, { typed: [{ k: 1 }] })).toBeUndefined();
     expect(checkToolArgs(n, { typed: [{ k: "one" }] })).toBe("typed[0].k must be integer");
+  });
+
+  test("a JSON-parsed __proto__ key is an undeclared property like any other", () => {
+    const n = manifest({ filter: { type: "array", items: { type: "object", properties: { from: { type: "string" } } } } });
+    const args = JSON.parse('{"filter":[{"from":"x","__proto__":{"type":"string"}}]}');
+    expect(checkToolArgs(n, args)).toBe("filter[0].__proto__ is not a declared property");
+    // A declared name the model did not send is not picked up from the prototype chain.
+    const m2 = manifest({ constructor: { type: "string" } });
+    expect(toolInput(m2, {})).toEqual({});
   });
 
   test("a bound field is not the model's to set, so it is not checked", () => {
