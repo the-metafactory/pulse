@@ -70,6 +70,78 @@ export function toolInput(
   return input;
 }
 
+/** Whether a value matches a JSON Schema primitive type name. Unknown names pass. */
+function matchesType(value: unknown, type: string): boolean {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "array":
+      return Array.isArray(value);
+    case "object":
+      return value !== null && typeof value === "object" && !Array.isArray(value);
+    case "null":
+      return value === null;
+    default:
+      return true;
+  }
+}
+
+/** Check one value against a (field) schema's type and bounds. Returns an error or undefined. */
+function checkValue(name: string, value: unknown, schema: Record<string, unknown>): string | undefined {
+  const type = schema.type;
+  if (typeof type === "string" && !matchesType(value, type)) return `${name} must be ${type}`;
+  if (typeof value === "number") {
+    if (typeof schema.minimum === "number" && value < schema.minimum) return `${name} must be >= ${schema.minimum}`;
+    if (typeof schema.maximum === "number" && value > schema.maximum) return `${name} must be <= ${schema.maximum}`;
+  }
+  if (typeof value === "string") {
+    if (typeof schema.minLength === "number" && value.length < schema.minLength) return `${name} must have at least ${schema.minLength} characters`;
+    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) return `${name} must have at most ${schema.maxLength} characters`;
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+    return `${name} must be one of: ${schema.enum.map(String).join(", ")}`;
+  }
+  if (Array.isArray(value)) {
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) return `${name} must have at most ${schema.maxItems} items`;
+    const items = schema.items;
+    if (items && typeof items === "object" && !Array.isArray(items)) {
+      for (let i = 0; i < value.length; i++) {
+        const error = checkValue(`${name}[${i}]`, value[i], items as Record<string, unknown>);
+        if (error) return error;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Check a model's tool arguments against the schema it was shown: type,
+ * minimum / maximum, minLength / maxLength, enum, maxItems and item types, for
+ * every unbound declared field the model set. Returns an error naming the
+ * first offending field, or undefined. Only model-chosen values are checked
+ * this way; other callers of runAction get defaults, required and enum only.
+ */
+export function checkToolArgs(
+  manifest: ActionManifest,
+  modelArgs: Record<string, unknown>,
+  bind: Record<string, unknown> = {},
+): string | undefined {
+  for (const [name, field] of Object.entries(manifest.input ?? {})) {
+    if (name in bind || !(name in modelArgs)) continue;
+    const value = modelArgs[name];
+    if (value === null && !field.required) continue;
+    const error = checkValue(name, value, fieldSchema(field));
+    if (error) return error;
+  }
+  return undefined;
+}
+
 /**
  * Fill declared defaults and check declared enums. Returns the completed
  * input, or an error string naming the first offending field. Legacy

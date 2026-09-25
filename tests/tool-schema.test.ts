@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fieldSchema, prepareInput, toolInput, toolSchema } from "../src/lib/tool-schema";
+import { checkToolArgs, fieldSchema, prepareInput, toolInput, toolSchema } from "../src/lib/tool-schema";
 import { createLocalShell } from "../src/lib/capabilities";
 import { evaluate } from "../src/lib/enforcement-gate";
 import { shellGateInput } from "../src/lib/policy-loader";
@@ -109,5 +109,35 @@ describe("shellGateInput — what the policy gate matches", () => {
     const legacy: Policy = { version: 1, default: "deny", rules: [{ tool: "Bash", match: { command: "^echo " }, decision: "allow" }] };
     expect(evaluate("Bash", shellGateInput(["echo", "hi"]), legacy).decision).toBe("allow");
     expect(evaluate("Bash", shellGateInput("echo hi"), legacy).decision).toBe("allow");
+  });
+});
+
+describe("checkToolArgs — model arguments against the schema it was shown", () => {
+  const m = manifest({
+    q: { type: "string", required: true, maxLength: 5 },
+    n: { type: "integer", minimum: 1, maximum: 25 },
+    mode: { type: "string", enum: ["a", "b"] },
+    tags: { type: "string[]", maxItems: 2 },
+    account: { type: "string" },
+  });
+
+  test("values inside the schema pass; unset and optional null fields are skipped", () => {
+    expect(checkToolArgs(m, { q: "hi", n: 25, mode: "a", tags: ["x"] })).toBeUndefined();
+    expect(checkToolArgs(m, { q: "hi", n: null })).toBeUndefined();
+  });
+
+  test("type, bounds, length, enum, item count and item type are enforced", () => {
+    expect(checkToolArgs(m, { q: 1 })).toBe("q must be string");
+    expect(checkToolArgs(m, { q: "toolong" })).toBe("q must have at most 5 characters");
+    expect(checkToolArgs(m, { n: 1.5 })).toBe("n must be integer");
+    expect(checkToolArgs(m, { n: 0 })).toBe("n must be >= 1");
+    expect(checkToolArgs(m, { n: 26 })).toBe("n must be <= 25");
+    expect(checkToolArgs(m, { mode: "c" })).toBe("mode must be one of: a, b");
+    expect(checkToolArgs(m, { tags: ["a", "b", "c"] })).toBe("tags must have at most 2 items");
+    expect(checkToolArgs(m, { tags: ["a", 2] })).toBe("tags[1] must be string");
+  });
+
+  test("a bound field is not the model's to set, so it is not checked", () => {
+    expect(checkToolArgs(m, { account: 42 }, { account: "pinned" })).toBeUndefined();
   });
 });

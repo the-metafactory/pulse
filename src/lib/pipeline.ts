@@ -17,9 +17,8 @@
 import { readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { parse as parseYaml } from "yaml";
-import { runStep, validateSteps, type StepRecord, type StepRunnerOptions } from "./step-runner";
+import { preflightSteps, runStep, validateSteps, type StepRecord, type StepRunnerOptions } from "./step-runner";
 import type { PipelineStep } from "../types/pipeline";
-import { preflightSteps } from "./research";
 
 export interface PipelineDef {
   /** Pipeline name (e.g. "P_LABEL_EMAIL") */
@@ -176,9 +175,10 @@ export async function runPipeline(
   try {
     // A research step that would offer a model anything but a read action
     // fails the pipeline here, before any step runs.
-    await preflightSteps(pipeline.actions, options.actionDirs);
+    const runOptions: StepRunnerOptions = { ...options, researchTools: new Map() };
+    await preflightSteps(pipeline.actions, runOptions);
     for (const step of pipeline.actions) {
-      currentData = await runStep(step, currentData, options, stepRecords);
+      currentData = await runStep(step, currentData, runOptions, stepRecords);
     }
     return {
       success: true,

@@ -18,6 +18,7 @@ import {
 export {
   StepFailure,
   MapItemFailure,
+  preflightSteps,
   type StepRecord,
   type StepRunnerOptions,
 } from "./primitive-runner";

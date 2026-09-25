@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeAll, afterAll, beforeEach } from "bun:test";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { runPipeline } from "../src/lib/pipeline";
 import { validateStep } from "../src/lib/step-runner";
@@ -11,7 +11,7 @@ import type { Policy } from "../src/types/policy";
 
 const DIR = join(import.meta.dir, ".test-research");
 const ACTIONS = join(DIR, "actions");
-const TRACES = join(DIR, "traces");
+const TRANSCRIPTS = join(DIR, "transcripts");
 const MARKER = join(DIR, "marker.txt");
 const KEY_ENV = "PULSE_TEST_RESEARCH_KEY";
 const KEY = "sk-test-secret-123";
@@ -86,7 +86,7 @@ beforeAll(() => {
     input: {
       query: { type: "string", required: true, description: "words to match" },
       account: { type: "string", required: true, enum: ["alpha", "beta"] },
-      limit: { type: "integer", default: 5 },
+      limit: { type: "integer", default: 5, maximum: 25 },
       tags: { type: "string[]" },
     },
     output: { text: { type: "string" } },
@@ -121,7 +121,25 @@ beforeAll(() => {
       return { out: r.stdout.trim() };
     }
   };`);
+
+  createAction("A_SLOW", { effect: "read", input: { q: { type: "string" } }, output: { span: { type: "string" } } }, `export default {
+    async execute(input) {
+      const start = Date.now();
+      await new Promise((r) => setTimeout(r, 200));
+      return { span: JSON.stringify({ q: input.q, start, end: Date.now() }) };
+    }
+  };`);
+
+  createAction("A_HANG", { effect: "read", input: {}, output: {} }, `export default {
+    async execute() {
+      await new Promise((r) => setTimeout(r, 2000));
+      return {};
+    }
+  };`);
 });
+
+/** A model whose endpoint refuses connections. */
+const downModel = () => model({ baseUrl: "http://127.0.0.1:1/v1" });
 
 afterAll(() => {
   server.stop(true);
@@ -133,7 +151,7 @@ beforeEach(() => {
   requests = [];
   headers = [];
   rmSync(MARKER, { force: true });
-  rmSync(TRACES, { recursive: true, force: true });
+  rmSync(TRANSCRIPTS, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -175,6 +193,18 @@ describe("research step — the never-list is checked before anything runs", () 
     const result = await runPipeline(nested, { items: [1] }, { actionDirs: [ACTIONS], models: { m: model() } });
     expect(result.success).toBe(false);
     expect(existsSync(MARKER)).toBe(false);
+  });
+
+  test("research steps inside parallel branches and retry are preflighted too", async () => {
+    const research = { research: { name: "r", model: "m", prompt: "p", tools: ["A_SEND"] } };
+    for (const nested of [
+      { parallel: { branches: { a: { actions: ["A_OTHER"] }, b: { actions: [research] } } } },
+      { retry: { attempts: 2, actions: [research] } },
+    ]) {
+      const result = await runPipeline({ name: "P", actions: ["A_SEED", nested] } as any, {}, { actionDirs: [ACTIONS], models: { m: model() } });
+      expect(result.error).toMatch(/A_SEND is effect write/);
+      expect(existsSync(MARKER)).toBe(false);
+    }
   });
 
   test("a bind key no tool declares is refused (a typo would unpin a field)", async () => {
@@ -243,9 +273,15 @@ describe("research step — tools, bind and the loop", () => {
 
   test("an empty answer earns write turns up to empty_retries, then fails", async () => {
     script = [reply({ content: null }), reply({ content: "  " }), reply({ content: "Finally." })];
-    const ok = await runPipeline(pipeline({}), {}, { actionDirs: [ACTIONS], models: { m: model() } });
+    const ok = await runPipeline(pipeline({ write_prompt: "Write now." }), {}, { actionDirs: [ACTIONS], models: { m: model() } });
     expect(ok.output!.research_prep).toBe("Finally.");
     expect("tools" in requests[1]).toBe(false);
+    // The empty reply stays in the history, so user and assistant turns alternate.
+    expect(requests[1].messages.map((m: any) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(requests[1].messages.slice(-2)).toEqual([
+      { role: "assistant", content: "" },
+      { role: "user", content: "Write now." },
+    ]);
 
     requests = [];
     script = [reply({ content: null }), reply({ content: null })];
@@ -295,6 +331,54 @@ describe("research step — tools, bind and the loop", () => {
     expect(result.output!.prep).toBe("ok");
     expect(requests[1].messages.at(-1).content).toBe(`${"found " + "q".repeat(14)}\n[… truncated]`);
   });
+
+  test("arguments outside the schema the model saw are answered, not run", async () => {
+    script = [
+      reply({
+        tool_calls: [
+          toolCall("c1", "A_LOOKUP", { query: "a", limit: 100000 }),
+          toolCall("c2", "A_LOOKUP", { query: 42 }),
+          toolCall("c3", "A_LOOKUP", { query: "b", tags: ["x", 1] }),
+        ],
+      }),
+      reply({ content: "ok" }),
+    ];
+    await runPipeline(pipeline({ bind: { account: "alpha" } }), {}, { actionDirs: [ACTIONS], models: { m: model() } });
+    const toolMsgs = requests[1].messages.filter((m: any) => m.role === "tool").map((m: any) => m.content);
+    expect(toolMsgs).toEqual([
+      "tool error: limit must be <= 25",
+      "tool error: query must be string",
+      "tool error: tags[1] must be string",
+    ]);
+  });
+
+  test("the tool calls of one round run concurrently; results keep the model's order", async () => {
+    script = [
+      reply({ tool_calls: [toolCall("c1", "A_SLOW", { q: "first" }), toolCall("c2", "A_SLOW", { q: "second" })] }),
+      reply({ content: "ok" }),
+    ];
+    await runPipeline(pipeline({ tools: ["A_SLOW"] }), {}, { actionDirs: [ACTIONS], models: { m: model() } });
+    const [a, b] = requests[1].messages.filter((m: any) => m.role === "tool").map((m: any) => JSON.parse(m.content));
+    expect([a.q, b.q]).toEqual(["first", "second"]);
+    // Each call sleeps 200ms; run one after the other, the second would start after the first ended.
+    expect(b.start).toBeLessThan(a.end);
+  });
+
+  test("timeout_ms ends the step while a tool is still running", async () => {
+    script = [reply({ tool_calls: [toolCall("c1", "A_HANG", {})] }), reply({ content: "never asked" })];
+    const events: ResearchEvent[] = [];
+    const started = Date.now();
+    const result = await runPipeline(pipeline({ tools: ["A_HANG"], timeout_ms: 150 }), {}, {
+      actionDirs: [ACTIONS],
+      models: { m: model() },
+      onResearchEvent: (e) => events.push(e),
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/timeout after 150ms/);
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(requests.length).toBe(1);
+    expect(events.at(-1)).toMatchObject({ type: "research.failed", unavailable: false });
+  });
 });
 
 describe("research step — argv shell for tools", () => {
@@ -311,7 +395,7 @@ describe("research step — argv shell for tools", () => {
     expect(requests[1].messages.at(-1).content).toBe(payload);
   });
 
-  test("the host policy guards tool calls; a policy can deny the string form", async () => {
+  test("a policy that pins the program lets the pinned argv call through", async () => {
     const policy: Policy = {
       version: 1,
       default: "deny",
@@ -331,23 +415,53 @@ describe("research step — argv shell for tools", () => {
     expect(requests[1].messages.at(-1).content).toBe("fine");
     expect(denied).toEqual([]);
   });
+
+  test("the host policy guards tool calls: it denies the string form and an unpinned program", async () => {
+    const policy: Policy = {
+      version: 1,
+      default: "deny",
+      rules: [
+        { tool: "Bash", match: { form: "^string$" }, decision: "deny", reason: "string form refused" },
+        { tool: "Bash", match: { program: "^ls$" }, decision: "allow" },
+      ],
+    };
+    script = [
+      reply({ tool_calls: [toolCall("c1", "A_SHELL_STRING", { q: "hi" }), toolCall("c2", "A_SHELL_ARGV", { q: "hi" })] }),
+      reply({ content: "ok" }),
+    ];
+    const decisions: Array<{ decision: string; form: unknown }> = [];
+    await runPipeline(pipeline({ tools: ["A_SHELL_STRING", "A_SHELL_ARGV"] }), {}, {
+      actionDirs: [ACTIONS],
+      models: { m: model() },
+      policy,
+      onGateDecision: (e) => decisions.push({ decision: e.decision.decision, form: e.input.form }),
+    });
+    const toolMsgs = requests[1].messages.filter((m: any) => m.role === "tool").map((m: any) => m.content);
+    expect(toolMsgs[0]).toMatch(/^tool error: enforcement gate denied Bash: /);
+    expect(toolMsgs[1]).toMatch(/^tool error: enforcement gate denied Bash: /);
+    // The two calls run concurrently, so their decisions may land in either order.
+    expect(decisions.sort((x, y) => String(x.form).localeCompare(String(y.form)))).toEqual([
+      { decision: "deny", form: "argv" },
+      { decision: "deny", form: "string" },
+    ]);
+  });
 });
 
-describe("research step — trace", () => {
-  test("every tool call lands in a 0600 JSONL file under the host's trace dir", async () => {
+describe("research step — transcript", () => {
+  test("every tool call lands in a 0600 JSONL file under the host's transcript dir", async () => {
     script = [reply({ tool_calls: [toolCall("c1", "A_LOOKUP", { query: "budget" })] }), reply({ content: "The prep." })];
     const events: ResearchEvent[] = [];
     await runPipeline(pipeline({ bind: { account: "alpha" } }), {}, {
       actionDirs: [ACTIONS],
       models: { m: model() },
-      traceDir: TRACES,
+      transcriptDir: TRANSCRIPTS,
       onResearchEvent: (e) => events.push(e),
     });
-    const files = readdirSync(TRACES);
+    const files = readdirSync(TRANSCRIPTS);
     expect(files.length).toBe(1);
-    const path = join(TRACES, files[0]);
+    const path = join(TRANSCRIPTS, files[0]);
     expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(statSync(TRACES).mode & 0o777).toBe(0o700);
+    expect(statSync(TRANSCRIPTS).mode & 0o777).toBe(0o700);
     const lines = readFileSync(path, "utf8").trim().split("\n").map((l) => JSON.parse(l));
     expect(lines.map((l) => l.type)).toEqual(["start", "model", "tool", "model", "end"]);
     const tool = lines.find((l) => l.type === "tool");
@@ -355,25 +469,41 @@ describe("research step — trace", () => {
     expect(tool.input).toEqual({ query: "budget", account: "alpha" });
     expect(tool.result).toBe("found budget in alpha limit 5");
     const completed = events.find((e) => e.type === "research.completed") as any;
-    expect(completed.stats.trace).toBe(path);
+    expect(completed.stats.transcript).toBe(path);
   });
 
-  test("without a trace dir nothing is written", async () => {
+  test("a reused transcript dir with looser permissions is set to 0700", async () => {
+    mkdirSync(TRANSCRIPTS, { recursive: true, mode: 0o755 });
+    chmodSync(TRANSCRIPTS, 0o755);
+    script = [reply({ content: "ok" })];
+    await runPipeline(pipeline({}), {}, { actionDirs: [ACTIONS], models: { m: model() }, transcriptDir: TRANSCRIPTS });
+    expect(statSync(TRANSCRIPTS).mode & 0o777).toBe(0o700);
+  });
+
+  test("a failed step still closes its transcript with an end line", async () => {
+    const result = await runPipeline(pipeline({}), {}, { actionDirs: [ACTIONS], models: { m: downModel() }, transcriptDir: TRANSCRIPTS });
+    expect(result.cause).toBeInstanceOf(ResearchUnavailable);
+    const [file] = readdirSync(TRANSCRIPTS);
+    const lines = readFileSync(join(TRANSCRIPTS, file), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(lines.at(-1)).toMatchObject({ type: "end", ok: false });
+    expect(lines.at(-1).error).toMatch(/model unavailable/);
+  });
+
+  test("without a transcript dir nothing is written", async () => {
     script = [reply({ tool_calls: [toolCall("c1", "A_LOOKUP", { query: "b" })] }), reply({ content: "ok" })];
     const before = readdirSync(process.cwd());
     const events: ResearchEvent[] = [];
     await runPipeline(pipeline({ bind: { account: "alpha" } }), {}, { actionDirs: [ACTIONS], models: { m: model() }, onResearchEvent: (e) => events.push(e) });
     expect(readdirSync(process.cwd())).toEqual(before);
-    expect(existsSync(TRACES)).toBe(false);
-    expect((events.at(-1) as any).stats.trace).toBeUndefined();
+    expect(existsSync(TRANSCRIPTS)).toBe(false);
+    expect((events.at(-1) as any).stats.transcript).toBeUndefined();
   });
 });
 
 describe("research step — model unavailable", () => {
   test("an unreachable model fails with ResearchUnavailable and keeps earlier output", async () => {
-    const down = new OpenAICompatibleChatModel({ baseUrl: "http://127.0.0.1:1/v1", model: "x", apiKeyEnv: KEY_ENV, env: { [KEY_ENV]: KEY } });
     const events: ResearchEvent[] = [];
-    const result = await runPipeline(pipeline({}), {}, { actionDirs: [ACTIONS], models: { m: down }, onResearchEvent: (e) => events.push(e) });
+    const result = await runPipeline(pipeline({}), {}, { actionDirs: [ACTIONS], models: { m: downModel() }, onResearchEvent: (e) => events.push(e) });
     expect(result.success).toBe(false);
     expect(result.cause).toBeInstanceOf(ResearchUnavailable);
     expect(result.output!.topic).toBe("the quarterly review");
@@ -388,19 +518,17 @@ describe("research step — model unavailable", () => {
   });
 
   test("inside map, the original error survives on MapItemFailure", async () => {
-    const down = new OpenAICompatibleChatModel({ baseUrl: "http://127.0.0.1:1/v1", model: "x", apiKeyEnv: KEY_ENV, env: { [KEY_ENV]: KEY } });
     const p = {
       name: "P",
       actions: [{ map: { over: "items", as: "item", collect: "out", actions: [{ research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
     } as any;
-    const result = await runPipeline(p, { items: [1] }, { actionDirs: [ACTIONS], models: { m: down } });
+    const result = await runPipeline(p, { items: [1] }, { actionDirs: [ACTIONS], models: { m: downModel() } });
     expect((result.cause as any).original).toBeInstanceOf(ResearchUnavailable);
   });
 });
 
 describe("research step — degrade per item inside map", () => {
   test("onError: collect keeps every item's deterministic work and flags the unavailable ones", async () => {
-    const down = new OpenAICompatibleChatModel({ baseUrl: "http://127.0.0.1:1/v1", model: "x", apiKeyEnv: KEY_ENV, env: { [KEY_ENV]: KEY } });
     createAction("A_MARK", { input: { item: { type: "number" } }, output: {} }, `export default {
       async execute(input) {
         await Bun.write(${JSON.stringify(DIR)} + "/mark-" + input.item, "done");
@@ -411,7 +539,7 @@ describe("research step — degrade per item inside map", () => {
       name: "P",
       actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: ["A_MARK", { research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
     } as any;
-    const result = await runPipeline(p, { items: [1, 2] }, { actionDirs: [ACTIONS], models: { m: down } });
+    const result = await runPipeline(p, { items: [1, 2] }, { actionDirs: [ACTIONS], models: { m: downModel() } });
     expect(result.success).toBe(true);
     expect(existsSync(join(DIR, "mark-1"))).toBe(true);
     expect(existsSync(join(DIR, "mark-2"))).toBe(true);

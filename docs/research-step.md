@@ -28,7 +28,7 @@ actions:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `name` | required | Events, trace file name, default collect field |
+| `name` | required | Events, transcript file name, default collect field |
 | `model` | required | Key into `StepRunnerOptions.models` |
 | `prompt` | required | User message; `{field}` / `{a.b}` render from the payload |
 | `system` | — | System message; same rendering |
@@ -39,7 +39,7 @@ actions:
 | `empty_retries` | 2 | Extra write turns when the answer is empty |
 | `result_chars` | 4000 | Characters of each tool result the model sees |
 | `max_tokens`, `temperature` | model's | Per-request settings |
-| `timeout_ms` | — | Whole-step timeout |
+| `timeout_ms` | — | Whole-step timeout; covers model calls and tool runs |
 | `collect` | `research_<name>` | Payload field for the answer |
 
 ## The loop
@@ -47,33 +47,41 @@ actions:
 1. Each round sends the conversation with the tools. Every tool call runs
    through `runAction` with the model's arguments and the step's `bind`; the
    result (the action's declared output fields, clipped) goes back as a
-   `tool` message.
+   `tool` message. The calls of one round run concurrently; their results
+   go back in the order the model made them.
 2. A reply without tool calls is the answer. After `max_rounds` the step adds
    `write_prompt` and sends the conversation **without a `tools` field** —
    some gateways answer `tool_choice: "none"` with an empty message.
 3. An empty answer earns up to `empty_retries` more write turns, then fails
    the step.
 4. A repeated call (same tool, same argument string) is answered with a
-   pointer to the earlier result instead of running again. Unknown tools and
-   malformed arguments are answered with an error text, not run.
+   pointer to the earlier result instead of running again. Unknown tools,
+   malformed arguments and arguments outside the schema the model was shown
+   are answered with an error text, not run.
+5. `timeout_ms` bounds the whole step. It ends a round the moment it fires,
+   whether the model or a tool is still working; a tool that is still running
+   is left to finish on its own, and its result is dropped.
 
-## What keeps a manipulated model harmless
+## What limits a manipulated model
 
 Tools read untrusted text (mail bodies, tickets), so a tool result can try to
 instruct the model. Pulse has no sandbox — an action is code in the host
-process — so the defence is that nothing dangerous is within the model's
-reach:
+process — so the defence is to keep effects out of the model's reach and to
+narrow what its arguments can do:
 
 - **`effect: read` only.** `action.json` declares `effect: read | write`. A
   research step naming a tool that is not `read` (absent counts as not read)
-  fails the pipeline in a preflight before its first step runs; the step
-  checks again when it starts. Sending, posting and drafting never become
-  tools.
+  fails the pipeline in a preflight before its first step runs; a step
+  driven without `runPipeline` checks its tools itself. Sending, posting and
+  drafting never become tools.
 - **`bind:` pins.** A bound field leaves the schema the model sees and is
   forced onto every call; model arguments outside the declared fields are
   dropped. Actions carry no pins of their own, so one action serves several
   pipelines with different pins. A bind key that no tool declares is a
   preflight error, since a typo would silently unpin the field.
+- **Schema check.** The model's arguments are checked against the schema it
+  was shown — `type`, `minimum` / `maximum`, `minLength` / `maxLength`,
+  `enum`, `maxItems` and item types — before the action runs.
 - **Argv shell.** `shell` takes an argv array and spawns the program with no
   `sh -c`, so a model-chosen query cannot become shell syntax. Tools run
   inside a research step get a shell that refuses the string form.
@@ -83,6 +91,16 @@ reach:
   `argv` and a shell-quoted `command`, so a policy can pin binaries with an
   anchored `program` regex and deny `form: string` outright. Rules written
   against `command` keep working.
+
+What this does not cover: `effect: read` is the action author's claim, and
+a read action still carries the model's arguments to wherever it reads from.
+A search tool that fetches a URL built from the model's query can send what
+the model has read to that host; an argv element the model chose can be a
+flag (`--output=…`) rather than a search term. An action that takes a
+model-chosen value treats it as untrusted: an `enum` or tight bounds in the
+manifest, a `--` before positional arguments, a fixed host. The host policy
+is the second line (pin programs and URLs); without one, the actions are the
+only line.
 
 ## Models
 
@@ -98,7 +116,7 @@ const models = {
     apiKeyEnv: "MYPACK_GATEWAY_KEY",        // read at call time; no fallback name
   }),
 };
-const result = await runPipelineFromYaml(path, input, { models, traceDir, policy });
+const result = await runPipelineFromYaml(path, input, { models, transcriptDir, policy });
 if (!result.success && result.cause instanceof ResearchUnavailable) {
   // the gateway is unreachable: deliver what the deterministic steps produced,
   // queue the research for later
@@ -128,13 +146,16 @@ minutes). A host that expects the model to be absent often should check
 reachability once per run with a short request and skip the research steps
 when it fails, rather than lower the timeout for every call.
 
-## Trace
+## Transcript
 
-With `StepRunnerOptions.traceDir` set, each research run writes
-`research-<name>-<timestamp>-<id>.jsonl` there (dir 0700, file 0600): a
+With `StepRunnerOptions.transcriptDir` set, each research run writes
+`research-<name>-<timestamp>-<id>.jsonl` there. The dir is set to 0700,
+whether the step creates it or the host reuses one; the file is 0600. It holds a
 `start` line, one `model` line per model turn (content, tool calls, usage),
 one `tool` line per call (raw arguments, the input after bind, the result),
-and an `end` line with the stats. Without `traceDir` nothing is written.
+and an `end` line with the stats, on success and on failure alike. Without
+`transcriptDir` nothing is written. A transcript is not a Trace (the
+miner-owned execution record); it is a debugging log of one research run.
 `onResearchEvent` carries names, counts and sizes only, never arguments or
 results, so it is safe to forward to a chat surface.
 
@@ -159,7 +180,9 @@ results, so it is safe to forward to a chat surface.
 The description is what the model reads to choose the tool; field
 descriptions, enums and defaults go into the tool's JSON Schema as written.
 `runAction` fills defaults and checks enums for every caller, so the same
-action runs as a plain pipeline step with no model involved.
+action runs as a plain pipeline step with no model involved. Type and bounds
+are checked for a model's arguments only; a plain step's input comes from the
+pipeline author.
 
 ## Not here
 
@@ -167,5 +190,5 @@ action runs as a plain pipeline step with no model involved.
   an `agent:` step may take over the loop. The tool definition this step
   builds (manifest JSON Schema plus `effect`) is the shape to hand it.
 - A policy generated from a pack's declared capabilities.
-- Streaming, parallel tool calls, and a `write` path of any kind — effects go
+- Streaming, and a `write` path of any kind — effects go
   through plain actions, `gate:` or `governed:`.

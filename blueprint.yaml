@@ -317,8 +317,8 @@ features:
     description: "research: step — model + read actions as tools, round cap, final write turn sent without tools, empty-answer retry, duplicate-call suppression, result clipping; ResearchUnavailable so a host can queue work when the model is down; PipelineResult.cause keeps the error class."
 
   - id: P-905
-    name: Research trace (JSONL)
+    name: Research transcript (JSONL)
     status: in-progress
     iteration: 9
     depends: [ P-904 ]
-    description: "Every model turn and tool call (arguments, bound input, result) to a JSONL file in the host-given StepRunnerOptions.traceDir (dir 0700, file 0600); nothing written without it. Events carry names and counts only. A first slice of P-302 scoped to research steps."
+    description: "Every model turn and tool call (arguments, bound input, result) to a JSONL file in the host-given StepRunnerOptions.transcriptDir (dir set to 0700, file 0600); nothing written without it. Events carry names and counts only. A debugging log of one research run, not the miner-owned Trace (P-302)."

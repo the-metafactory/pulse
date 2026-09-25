@@ -1,4 +1,3 @@
-import type { ActionRunnerOptions } from "./action-runner";
 import { StdinGateProvider } from "./gate-provider";
 import type {
   PipelineStep,
@@ -8,18 +7,13 @@ import type {
   ParallelStepSpec,
   RetryStepSpec,
   GateStepSpec,
-  GateProvider,
-  GateEvent,
   GateResult,
   AgentStepSpec,
-  AgentEvent,
   AgentTaskResult,
-  ActionStepEvent,
 } from "../types/pipeline";
 import type {
   SeatSpec,
   SeatVote,
-  TribunalEvent,
   TribunalRuling,
   TribunalStepSpec,
   TribunalVerdict,
@@ -34,57 +28,15 @@ import {
   planDiversity,
 } from "./tribunal";
 import { evaluate } from "./enforcement-gate";
-import type { GovernedEvent, GovernedResult, GovernedStepSpec } from "../types/governed";
+import type { GovernedResult, GovernedStepSpec } from "../types/governed";
 
 import { StepFailure, MapItemFailure } from "./step-failure";
-import { ResearchUnavailable, runResearch, validateResearch } from "./research";
-import type { ChatModel } from "./chat-model";
-import type { ResearchEvent, ResearchStats, ResearchStepSpec } from "../types/research";
+import { ResearchUnavailable, checkResearchTools, runResearch, validateResearch } from "./research";
+import { renderPromptTemplate, type StepRecord, type StepRunnerOptions } from "./step-context";
+import type { ResearchStepSpec } from "../types/research";
 
-export { StepFailure, MapItemFailure };
-
-export interface StepRecord {
-  action: string;
-  success: boolean;
-  durationMs: number;
-  error?: string;
-  /** Populated for gate steps — full GateResult so downstream traces can audit verdict + notes. */
-  gate?: GateResult;
-  /** Populated for tribunal steps — full TribunalVerdict (votes, diversity, tiebreak). */
-  tribunal?: TribunalVerdict;
-  /** Populated for governed steps — full GovernedResult (l0 + tribunal + gate verdicts). */
-  governed?: GovernedResult;
-  /** Populated for research steps — rounds, tool calls, tokens, trace path. */
-  research?: ResearchStats;
-}
-
-/** Options threaded through the step runner, extending ActionRunnerOptions */
-export interface StepRunnerOptions extends ActionRunnerOptions {
-  mode?: "local" | "cloud";
-  /** AbortSignal for cooperative cancellation (used by parallel branches) */
-  signal?: AbortSignal;
-  /** Gate input source. Defaults to StdinGateProvider when omitted. */
-  gateProvider?: GateProvider;
-  /** Optional sink for plain-action step lifecycle events. Hosts can pipe to traces, dashboards, chat threads, etc. */
-  onActionStepEvent?: (event: ActionStepEvent) => void;
-  /** Optional sink for gate lifecycle events. Hosts can pipe to traces, dashboards, etc. */
-  onGateEvent?: (event: GateEvent) => void;
-  /** Optional sink for agent lifecycle events. */
-  onAgentEvent?: (event: AgentEvent) => void;
-  /** Optional sink for tribunal lifecycle events. */
-  onTribunalEvent?: (event: TribunalEvent) => void;
-  /** Optional sink for governed-action lifecycle events. */
-  onGovernedEvent?: (event: GovernedEvent) => void;
-  /** Chat models a research step may name, keyed by the name pipelines use. */
-  models?: Record<string, ChatModel>;
-  /**
-   * Directory for research JSONL traces (tool calls, arguments, results).
-   * Absent → no trace is written. Created 0700, files 0600.
-   */
-  traceDir?: string;
-  /** Optional sink for research lifecycle events (names and counts only). */
-  onResearchEvent?: (event: ResearchEvent) => void;
-}
+export { StepFailure, MapItemFailure, renderPromptTemplate };
+export type { StepRecord, StepRunnerOptions };
 
 type ValidateStep = (step: unknown, path?: string) => PipelineStep;
 type RunSteps = (
@@ -119,28 +71,42 @@ interface PrimitiveHandler<TSpec extends PrimitiveSpec> {
     stepRecords: StepRecord[],
     runtime: PrimitiveRuntime,
   ) => Promise<Record<string, unknown>>;
+  /** The sub-pipelines this primitive runs, so a pipeline-wide walk (preflight) reaches nested steps. */
+  children?: (spec: TSpec) => PipelineStep[][];
+  /** A check over the whole pipeline before its first step runs (runPipeline); throws to refuse it. */
+  preflight?: (spec: TSpec, options: StepRunnerOptions) => Promise<void>;
 }
+
+/** The one sub-pipeline of map, filter, reduce and retry. */
+const nestedActions = (spec: { actions?: unknown }): PipelineStep[][] =>
+  Array.isArray(spec.actions) ? [spec.actions as PipelineStep[]] : [];
 
 const PRIMITIVES = {
   map: {
     validate: validateNestedActions,
     run: runMap,
+    children: nestedActions,
   },
   filter: {
     validate: validateNestedActions,
     run: runFilter,
+    children: nestedActions,
   },
   reduce: {
     validate: validateNestedActions,
     run: runReduce,
+    children: nestedActions,
   },
   parallel: {
     validate: validateParallel,
     run: runParallel,
+    children: (spec: ParallelStepSpec) =>
+      Object.values(spec.branches ?? {}).flatMap((branch) => nestedActions(branch ?? {})),
   },
   retry: {
     validate: validateNestedActions,
     run: runRetry,
+    children: nestedActions,
   },
   gate: {
     validate: validateGate,
@@ -161,12 +127,35 @@ const PRIMITIVES = {
   research: {
     validate: validateResearch,
     run: runResearch,
+    // A pipeline that would offer a model anything but a read action never
+    // starts. The manifests checked here are kept for the run's research steps.
+    preflight: async (spec: ResearchStepSpec, options: StepRunnerOptions) => {
+      options.researchTools?.set(spec, await checkResearchTools(spec, options.actionDirs));
+    },
   },
 } satisfies Record<string, PrimitiveHandler<any>>;
 
 type PrimitiveKey = keyof typeof PRIMITIVES;
 
 const KNOWN_PRIMITIVE_KEYS = new Set(Object.keys(PRIMITIVES));
+
+/**
+ * Run every primitive's preflight over a pipeline, nested steps included,
+ * before its first step runs. A step whose shape does not resolve is left to
+ * runStep, which reports it in order.
+ */
+export async function preflightSteps(steps: PipelineStep[], options: StepRunnerOptions): Promise<void> {
+  for (const step of steps) {
+    if (step === null || typeof step !== "object" || Array.isArray(step)) continue;
+    const keys = Object.keys(step).filter((k): k is PrimitiveKey => KNOWN_PRIMITIVE_KEYS.has(k));
+    if (keys.length !== 1) continue;
+    const spec = (step as Record<string, unknown>)[keys[0]];
+    if (spec === null || typeof spec !== "object" || Array.isArray(spec)) continue;
+    const handler: PrimitiveHandler<any> = PRIMITIVES[keys[0]];
+    await handler.preflight?.(spec, options);
+    for (const sub of handler.children?.(spec) ?? []) await preflightSteps(sub, options);
+  }
+}
 
 export function validatePrimitiveStep(
   step: Record<string, unknown>,
@@ -711,25 +700,6 @@ function validateAgent(spec: Record<string, unknown>, path: string): void {
       throw new Error(`${path}: 'federate.stack' must be a non-empty string when set`);
     }
   }
-}
-
-/**
- * Render `{field}` / `{dotted.path}` placeholders from payload context.
- * Object values are JSON-encoded; missing paths throw — a silently empty
- * prompt section is worse than a loud failure.
- */
-export function renderPromptTemplate(template: string, payload: Record<string, unknown>): string {
-  return template.replace(/\{([\w.]+)\}/g, (_match, pathExpr: string) => {
-    let value: unknown = payload;
-    for (const segment of pathExpr.split(".")) {
-      if (value === null || typeof value !== "object" || !(segment in (value as Record<string, unknown>))) {
-        throw new Error(`agent prompt template: payload has no field '${pathExpr}'`);
-      }
-      value = (value as Record<string, unknown>)[segment];
-    }
-    if (typeof value === "string") return value;
-    return JSON.stringify(value, null, 2);
-  });
 }
 
 async function runAgent(
