@@ -48,6 +48,18 @@ export interface ActionRunnerOptions {
    * runs argv arrays only. A research step sets it for every tool it runs.
    */
   shellArgvOnly?: boolean;
+  /**
+   * Cancels a local action's capability calls: when it fires, a running
+   * `shell` child is killed and a `fetch` aborted. Also handed to the action
+   * as `ctx.signal`.
+   */
+  signal?: AbortSignal;
+}
+
+/** An action found on disk: its directory and its manifest. */
+export interface ResolvedAction {
+  path: string;
+  manifest: ActionManifest;
 }
 
 /**
@@ -69,12 +81,12 @@ async function loadImplementation<TInput, TOutput>(
 }
 
 /**
- * Find and load an action manifest by name, searching actionDirs in order.
- * Returns null when no directory holds the action.
+ * Find an action by name, searching actionDirs in order, and load its
+ * manifest. Returns null when no directory holds the action.
  */
-export async function loadActionManifest(name: string, dirs: string[]): Promise<ActionManifest | null> {
-  const actionPath = await findAction(name, dirs);
-  return actionPath ? loadManifest(actionPath) : null;
+export async function resolveAction(name: string, dirs: string[]): Promise<ResolvedAction | null> {
+  const path = await findAction(name, dirs);
+  return path ? { path, manifest: await loadManifest(path) } : null;
 }
 
 /**
@@ -103,7 +115,12 @@ async function findAction(name: string, dirs: string[]): Promise<string | null> 
 export async function runAction<TInput = Record<string, unknown>, TOutput = unknown>(
   name: string,
   input: TInput,
-  options: ActionRunnerOptions & { mode?: "local" | "cloud"; traceId?: string }
+  options: ActionRunnerOptions & {
+    mode?: "local" | "cloud";
+    traceId?: string;
+    /** The action as a caller already resolved it (a research step's preflight): skips the directory scan and manifest read. */
+    resolved?: ResolvedAction;
+  }
 ): Promise<ActionResult<TOutput>> {
   const startTime = Date.now();
   const mode = options.mode || options.defaultMode || "local";
@@ -113,13 +130,13 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
   }
 
   // Local execution
-  const actionPath = await findAction(name, options.actionDirs);
+  const actionPath = options.resolved?.path ?? (await findAction(name, options.actionDirs));
   if (!actionPath) {
     return { success: false, error: `Action not found: ${name}` };
   }
 
   try {
-    const manifest = await loadManifest(actionPath);
+    const manifest = options.resolved?.manifest ?? (await loadManifest(actionPath));
     const implementation = await loadImplementation<TInput, TOutput>(actionPath);
 
     // Fill declared defaults, then validate required inputs and enums
@@ -131,6 +148,7 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
     // Create capabilities for what this action needs
     const capabilities = await createLocalCapabilities(manifest.requires, {
       shellArgvOnly: options.shellArgvOnly,
+      signal: options.signal,
     });
 
     // Agent dispatch comes from the host-configured provider, not the
@@ -159,6 +177,7 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
       trace: options.traceId
         ? { traceId: options.traceId, spanId: crypto.randomUUID().slice(0, 8) }
         : undefined,
+      signal: options.signal,
     };
 
     const output = await implementation.execute(prepared.input as TInput, ctx);

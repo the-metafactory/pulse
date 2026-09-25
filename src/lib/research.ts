@@ -15,7 +15,7 @@
 
 import { chmod, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
-import { loadActionManifest, runAction } from "./action-runner";
+import { resolveAction, runAction, type ResolvedAction } from "./action-runner";
 import { ModelError, ModelUnavailableError, type ChatMessage, type ChatModel, type ChatResponse, type ChatTool } from "./chat-model";
 import { mapWithConcurrency } from "./concurrency";
 import { StepFailure } from "./step-failure";
@@ -68,59 +68,50 @@ export function validateResearch(spec: Record<string, unknown>, path: string): v
       throw new Error(`${path}: 'bind' must be an object of field → value`);
     }
   }
-  for (const field of ["max_rounds", "result_chars", "max_tokens", "timeout_ms"] as const) {
-    if (field in spec && spec[field] !== undefined) {
-      const v = spec[field];
-      if (typeof v !== "number" || !Number.isInteger(v) || v <= 0) {
-        throw new Error(`${path}: '${field}' must be a positive integer when set`);
-      }
-    }
+  const optional = (field: string, ok: (v: unknown) => boolean, what: string) => {
+    if (spec[field] !== undefined && !ok(spec[field])) throw new Error(`${path}: '${field}' must be ${what} when set`);
+  };
+  const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
+  for (const field of ["max_rounds", "result_chars", "max_tokens", "timeout_ms"]) {
+    optional(field, (v) => isInt(v) && v > 0, "a positive integer");
   }
-  if ("empty_retries" in spec && spec.empty_retries !== undefined) {
-    const v = spec.empty_retries;
-    if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
-      throw new Error(`${path}: 'empty_retries' must be a non-negative integer when set`);
-    }
+  optional("empty_retries", (v) => isInt(v) && v >= 0, "a non-negative integer");
+  for (const field of ["system", "write_prompt", "collect"]) {
+    optional(field, (v) => typeof v === "string" && v.length > 0, "a non-empty string");
   }
-  for (const field of ["system", "write_prompt", "collect"] as const) {
-    if (field in spec && spec[field] !== undefined && (typeof spec[field] !== "string" || (spec[field] as string).length === 0)) {
-      throw new Error(`${path}: '${field}' must be a non-empty string when set`);
-    }
-  }
-  if ("temperature" in spec && spec.temperature !== undefined && typeof spec.temperature !== "number") {
-    throw new Error(`${path}: 'temperature' must be a number when set`);
-  }
+  optional("temperature", (v) => typeof v === "number", "a number");
 }
 
 /**
- * Load every tool's manifest and refuse what a model must never reach: a
- * missing action, an action not declared `effect: read`, and a bind key that
- * no tool declares (a typo there would silently unpin a field).
+ * Resolve every tool and refuse what a model must never reach: a missing
+ * action, an action not declared `effect: read`, and a bind key that no tool
+ * declares (a typo there would silently unpin a field). The step runs each
+ * tool from what this returns, so the manifest checked is the one executed.
  */
 export async function checkResearchTools(
   spec: ResearchStepSpec,
   actionDirs: string[],
-): Promise<Map<string, ActionManifest>> {
-  const manifests = new Map<string, ActionManifest>();
+): Promise<Map<string, ResolvedAction>> {
+  const tools = new Map<string, ResolvedAction>();
   for (const tool of spec.tools) {
-    const manifest = await loadActionManifest(tool, actionDirs);
-    if (!manifest) {
+    const resolved = await resolveAction(tool, actionDirs);
+    if (!resolved) {
       throw new Error(`research ${spec.name}: tool ${tool} not found`);
     }
-    if (manifest.effect !== "read") {
+    if (resolved.manifest.effect !== "read") {
       throw new Error(
-        `research ${spec.name}: tool ${tool} is effect ${manifest.effect ?? "undeclared"}; a research step offers a model read actions only`,
+        `research ${spec.name}: tool ${tool} is effect ${resolved.manifest.effect ?? "undeclared"}; a research step offers a model read actions only`,
       );
     }
-    manifests.set(tool, manifest);
+    tools.set(tool, resolved);
   }
   for (const field of Object.keys(spec.bind ?? {})) {
-    const declared = [...manifests.values()].some((m) => field in (m.input ?? {}));
+    const declared = [...tools.values()].some((t) => field in (t.manifest.input ?? {}));
     if (!declared) {
       throw new Error(`research ${spec.name}: bind field '${field}' is declared by none of its tools`);
     }
   }
-  return manifests;
+  return tools;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +205,7 @@ function resultText(manifest: ActionManifest, output: unknown): string {
 }
 
 /** One tool call after screening: either the text the model gets, or the input to run. */
-type ScreenedCall = { reply: string; extra?: Record<string, unknown> } | { manifest: ActionManifest; input: Record<string, unknown> };
+type ScreenedCall = { reply: string; extra?: Record<string, unknown> } | { tool: ResolvedAction; input: Record<string, unknown> };
 
 /** One research step's run: its settings, its state, and the loop. */
 class ResearchRun {
@@ -227,11 +218,12 @@ class ResearchRun {
   private readonly resultChars: number;
   private readonly writePrompt: string;
   private readonly controller = new AbortController();
-  private manifests = new Map<string, ActionManifest>();
+  private resolved = new Map<string, ResolvedAction>();
   private readonly seen = new Set<string>();
   private readonly messages: ChatMessage[] = [];
   private tools: ChatTool[] = [];
   private writing = false;
+  private timedOut = false;
 
   constructor(
     private readonly spec: ResearchStepSpec,
@@ -263,15 +255,16 @@ class ResearchRun {
     const model = options.models?.[spec.model];
     if (!model) throw new StepFailure(this.stepName, `no model '${spec.model}' in StepRunnerOptions.models`);
     const state = runState(options);
-    // Once a model is found unreachable in this run, later steps on it (the
-    // rest of a map) fail at once instead of each waiting out a timeout.
+    // Once a model gave no answer at all in this run (no key, network failure,
+    // timeout), later steps on it (the rest of a map) fail at once instead of
+    // each waiting out a timeout. A 429 or 5xx is an answer and marks nothing.
     const down = state?.unavailableModels.get(spec.model);
     if (down !== undefined) throw new ResearchUnavailable(this.stepName, `${down} (earlier in this run)`);
 
     // runPipeline's preflight already checked this step's tools; driven any
     // other way, the step checks them itself.
-    this.manifests =
-      (state?.preflight.get(spec) as Map<string, ActionManifest> | undefined) ??
+    this.resolved =
+      (state?.preflight.get(spec) as Map<string, ResolvedAction> | undefined) ??
       (await checkResearchTools(spec, options.actionDirs));
 
     const prompt = renderPromptTemplate(spec.prompt, this.payload);
@@ -287,7 +280,7 @@ class ResearchRun {
     this.stats.transcript = this.transcript.path;
 
     this.tools = spec.tools.map((name) => {
-      const manifest = this.manifests.get(name)!;
+      const { manifest } = this.resolved.get(name)!;
       return {
         type: "function",
         function: { name, description: manifest.description ?? "", parameters: { ...toolSchema(manifest, this.bind) } },
@@ -296,7 +289,12 @@ class ResearchRun {
 
     // The runner owns the timeout: it reaches the model call and every tool
     // run, and a round ends the moment it fires.
-    const timer = spec.timeout_ms ? setTimeout(() => this.controller.abort(), spec.timeout_ms) : null;
+    const timer = spec.timeout_ms
+      ? setTimeout(() => {
+          this.timedOut = true;
+          this.controller.abort();
+        }, spec.timeout_ms)
+      : null;
     const onParentAbort = () => this.controller.abort();
     options.signal?.addEventListener("abort", onParentAbort, { once: true });
     if (options.signal?.aborted) this.controller.abort();
@@ -316,7 +314,7 @@ class ResearchRun {
   }
 
   private aborted = (): StepFailure =>
-    new StepFailure(this.stepName, this.spec.timeout_ms ? `timeout after ${this.spec.timeout_ms}ms` : "aborted");
+    new StepFailure(this.stepName, this.timedOut ? `timeout after ${this.spec.timeout_ms}ms` : "aborted");
 
   /** One model call and whatever it asks for. Returns the answer once there is one. */
   private async round(model: ChatModel): Promise<string | undefined> {
@@ -400,7 +398,7 @@ class ResearchRun {
         this.transcript.write({ type: "model_error", round: this.stats.rounds, error: err.message, detail: err.detail });
       }
       if (err instanceof ModelUnavailableError) {
-        runState(this.options)?.unavailableModels.set(this.spec.model, err.reason);
+        if (err.unreachable) runState(this.options)?.unavailableModels.set(this.spec.model, err.reason);
         throw new ResearchUnavailable(this.stepName, err.reason);
       }
       throw err;
@@ -412,8 +410,8 @@ class ResearchRun {
    * arguments are answered here; anything else comes back as the input to run.
    */
   private screen(name: string, rawArgs: string): ScreenedCall {
-    const manifest = this.manifests.get(name);
-    if (!manifest) return { reply: `unknown tool ${name}` };
+    const tool = this.resolved.get(name);
+    if (!tool) return { reply: `unknown tool ${name}` };
     const sig = `${name}:${rawArgs}`;
     if (this.seen.has(sig)) {
       this.stats.duplicates++;
@@ -432,9 +430,9 @@ class ResearchRun {
     if (!args || typeof args !== "object" || Array.isArray(args)) {
       return { reply: "tool error: arguments must be a JSON object" };
     }
-    const invalid = checkToolArgs(manifest, args as Record<string, unknown>, this.bind);
+    const invalid = checkToolArgs(tool.manifest, args as Record<string, unknown>, this.bind);
     if (invalid) return { reply: `tool error: ${invalid}` };
-    return { manifest, input: toolInput(manifest, args as Record<string, unknown>, this.bind) };
+    return { tool, input: toolInput(tool.manifest, args as Record<string, unknown>, this.bind) };
   }
 
   /** Run a screened call (unless the step has ended) and return the text the model sees. Never rejects. */
@@ -448,9 +446,16 @@ class ResearchRun {
     // A call still queued when the step times out never starts.
     if (this.controller.signal.aborted) return "tool error: the step ended before this call ran";
     try {
-      // An action takes no signal; the step's timeout ends the round around it (raceAbort).
-      const run = await runAction(fn.name, call.input, { ...this.options, shellArgvOnly: true, traceId: crypto.randomUUID() });
-      const text = run.success ? resultText(call.manifest, run.output) : `tool error: ${run.error ?? "unknown error"}`;
+      // The step's signal kills the action's shell children and aborts its
+      // fetches; raceAbort ends the round even if the action ignores it.
+      const run = await runAction(fn.name, call.input, {
+        ...this.options,
+        signal: this.controller.signal,
+        resolved: call.tool,
+        shellArgvOnly: true,
+        traceId: crypto.randomUUID(),
+      });
+      const text = run.success ? resultText(call.tool.manifest, run.output) : `tool error: ${run.error ?? "unknown error"}`;
       return reply(text, { input: call.input, ok: run.success });
     } catch (err) {
       return reply(`tool error: ${errorText(err)}`, { input: call.input, ok: false });

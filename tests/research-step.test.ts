@@ -59,6 +59,19 @@ function pipeline(research: Record<string, unknown>, before: string[] = ["A_SEED
   } as any;
 }
 
+/** A map over `items` whose sub-pipeline is `before` plus one research step. */
+function mapPipeline(opts: { before?: string[]; research?: Record<string, unknown>; onError?: string } = {}) {
+  const research = { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"], ...opts.research };
+  const map = { over: "items", as: "item", collect: "out", ...(opts.onError ? { onError: opts.onError } : {}), actions: [...(opts.before ?? []), { research }] };
+  return { name: "P", actions: [{ map }] } as any;
+}
+
+/** The JSONL lines of the one transcript in `dir`. */
+function readTranscript(dir: string): any[] {
+  const [file] = readdirSync(dir);
+  return readFileSync(join(dir, file), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+}
+
 beforeAll(() => {
   rmSync(DIR, { recursive: true, force: true });
   mkdirSync(ACTIONS, { recursive: true });
@@ -130,6 +143,19 @@ beforeAll(() => {
     }
   };`);
 
+  createAction("A_SLEEP", { effect: "read", requires: ["shell"], input: {}, output: {} }, `export default {
+    async execute(input, ctx) {
+      const started = Date.now();
+      try {
+        await ctx.capabilities.shell(["sleep", "3"]);
+        await Bun.write(${JSON.stringify(join(DIR, "sleep-result"))}, "finished");
+      } catch (err) {
+        await Bun.write(${JSON.stringify(join(DIR, "sleep-result"))}, "stopped after " + (Date.now() - started) + "ms: " + err.message);
+      }
+      return {};
+    }
+  };`);
+
   createAction("A_HANG", { effect: "read", input: {}, output: {} }, `export default {
     async execute() {
       await new Promise((r) => setTimeout(r, 2000));
@@ -186,10 +212,8 @@ describe("research step — the never-list is checked before anything runs", () 
   });
 
   test("a research step nested in map is preflighted too", async () => {
-    const nested = {
-      name: "P_NESTED",
-      actions: ["A_SEED", { map: { over: "items", as: "item", collect: "out", actions: [{ research: { name: "r", model: "m", prompt: "p", tools: ["A_SEND"] } }] } }],
-    } as any;
+    const nested = mapPipeline({ research: { tools: ["A_SEND"] } });
+    nested.actions.unshift("A_SEED");
     const result = await runPipeline(nested, { items: [1] }, { actionDirs: [ACTIONS], models: { m: model() } });
     expect(result.success).toBe(false);
     expect(existsSync(MARKER)).toBe(false);
@@ -375,6 +399,16 @@ describe("research step — tools, bind and the loop", () => {
     expect(Math.max(...spans.slice(0, 4).map((s: any) => s.start))).toBeLessThan(firstEnd);
   });
 
+  test("a step timeout kills the shell child a tool started", async () => {
+    script = [reply({ tool_calls: [toolCall("c1", "A_SLEEP", {})] }), reply({ content: "never asked" })];
+    const result = await runPipeline(pipeline({ tools: ["A_SLEEP"], timeout_ms: 150 }), {}, { actionDirs: [ACTIONS], models: { m: model() } });
+    expect(result.error).toMatch(/timeout after 150ms/);
+    await Bun.sleep(300);
+    const outcome = readFileSync(join(DIR, "sleep-result"), "utf8");
+    expect(outcome).toMatch(/^stopped after \d+ms: shell: aborted$/);
+    expect(Number(/after (\d+)ms/.exec(outcome)![1])).toBeLessThan(1000);
+  });
+
   test("timeout_ms ends the step while a tool is still running", async () => {
     script = [reply({ tool_calls: [toolCall("c1", "A_HANG", {})] }), reply({ content: "never asked" })];
     const events: ResearchEvent[] = [];
@@ -473,7 +507,7 @@ describe("research step — transcript", () => {
     const path = join(TRANSCRIPTS, files[0]);
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(statSync(TRANSCRIPTS).mode & 0o777).toBe(0o700);
-    const lines = readFileSync(path, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const lines = readTranscript(TRANSCRIPTS);
     expect(lines.map((l) => l.type)).toEqual(["start", "model", "tool", "model", "end"]);
     const tool = lines.find((l) => l.type === "tool");
     expect(tool.args).toBe(JSON.stringify({ query: "budget" }));
@@ -494,8 +528,7 @@ describe("research step — transcript", () => {
   test("a failed step still closes its transcript with an end line", async () => {
     const result = await runPipeline(pipeline({}), {}, { actionDirs: [ACTIONS], models: { m: downModel() }, transcriptDir: TRANSCRIPTS });
     expect(result.cause).toBeInstanceOf(ResearchUnavailable);
-    const [file] = readdirSync(TRANSCRIPTS);
-    const lines = readFileSync(join(TRANSCRIPTS, file), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const lines = readTranscript(TRANSCRIPTS);
     expect(lines.at(-1)).toMatchObject({ type: "end", ok: false });
     expect(lines.at(-1).error).toMatch(/model unavailable/);
   });
@@ -512,8 +545,7 @@ describe("research step — transcript", () => {
     expect(result.success).toBe(false);
     expect(JSON.stringify(events)).not.toContain("secret mail text");
     expect(result.error).not.toContain("secret mail text");
-    const [file] = readdirSync(TRANSCRIPTS);
-    const lines = readFileSync(join(TRANSCRIPTS, file), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const lines = readTranscript(TRANSCRIPTS);
     expect(lines.find((l) => l.type === "model_error")).toMatchObject({ error: "model test-alias: HTTP 400", detail: "prompt echoed: secret mail text" });
   });
 
@@ -546,11 +578,7 @@ describe("research step — model unavailable", () => {
   });
 
   test("inside map, the original error survives on MapItemFailure", async () => {
-    const p = {
-      name: "P",
-      actions: [{ map: { over: "items", as: "item", collect: "out", actions: [{ research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
-    } as any;
-    const result = await runPipeline(p, { items: [1] }, { actionDirs: [ACTIONS], models: { m: downModel() } });
+    const result = await runPipeline(mapPipeline(), { items: [1] }, { actionDirs: [ACTIONS], models: { m: downModel() } });
     expect((result.cause as any).original).toBeInstanceOf(ResearchUnavailable);
   });
 });
@@ -563,10 +591,7 @@ describe("research step — degrade per item inside map", () => {
         return input;
       }
     };`);
-    const p = {
-      name: "P",
-      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: ["A_MARK", { research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
-    } as any;
+    const p = mapPipeline({ before: ["A_MARK"], onError: "collect" });
     const result = await runPipeline(p, { items: [1, 2] }, { actionDirs: [ACTIONS], models: { m: downModel() } });
     expect(result.success).toBe(true);
     expect(existsSync(join(DIR, "mark-1"))).toBe(true);
@@ -579,34 +604,39 @@ describe("research step — degrade per item inside map", () => {
     createAction("A_DRAFT", { input: { item: { type: "number" } }, output: { draft: { type: "string" } } }, `export default {
       async execute(input) { return { ...input, draft: "draft " + input.item }; }
     };`);
-    const p = {
-      name: "P",
-      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: ["A_DRAFT", { research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
-    } as any;
+    const p = mapPipeline({ before: ["A_DRAFT"], onError: "collect" });
     const result = await runPipeline(p, { items: [1, 2] }, { actionDirs: [ACTIONS], models: { m: downModel() } });
     const out = result.output!.out as any[];
     expect(out.map((e) => e.partial?.draft)).toEqual(["draft 1", "draft 2"]);
     expect(out.every((e) => e.unavailable === true)).toBe(true);
   });
 
-  test("once the model is found unreachable, later items fail fast without calling it", async () => {
-    script = [{ status: 503, raw: "down" }];
-    const p = {
-      name: "P",
-      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: [{ research: { name: "r", model: "m", prompt: "p", tools: ["A_OTHER"] } }] } }],
-    } as any;
-    const result = await runPipeline(p, { items: [1, 2, 3] }, { actionDirs: [ACTIONS], models: { m: model() } });
+  test("once the model gave no answer at all, later items fail fast without calling it", async () => {
+    let calls = 0;
+    const unreachable = model({
+      fetch: (async () => {
+        calls++;
+        throw new TypeError("connection refused");
+      }) as unknown as typeof fetch,
+    });
+    const result = await runPipeline(mapPipeline({ onError: "collect" }), { items: [1, 2, 3] }, { actionDirs: [ACTIONS], models: { m: unreachable } });
     const out = result.output!.out as any[];
     expect(out.map((e) => e.unavailable)).toEqual([true, true, true]);
-    expect(requests.length).toBe(1);
+    expect(calls).toBe(1);
     expect(out[2].error).toMatch(/earlier in this run/);
   });
 
+  test("a 429 or 5xx is an answer: it marks nothing, and the next item calls the model again", async () => {
+    script = [{ status: 429, raw: "slow down" }, reply({ content: "second" })];
+    const result = await runPipeline(mapPipeline({ onError: "collect" }), { items: [1, 2] }, { actionDirs: [ACTIONS], models: { m: model() } });
+    const out = result.output!.out as any[];
+    expect(out[0]).toMatchObject({ _error: true, unavailable: true });
+    expect(out[1].research_r).toBe("second");
+    expect(requests.length).toBe(2);
+  });
+
   test("a failure that is not unavailability carries no flag", async () => {
-    const p = {
-      name: "P",
-      actions: [{ map: { over: "items", as: "item", collect: "out", onError: "collect", actions: [{ research: { name: "r", model: "missing", prompt: "p", tools: ["A_OTHER"] } }] } }],
-    } as any;
+    const p = mapPipeline({ research: { model: "missing" }, onError: "collect" });
     const result = await runPipeline(p, { items: [1] }, { actionDirs: [ACTIONS], models: {} });
     expect((result.output!.out as any[])[0].unavailable).toBeUndefined();
   });
@@ -643,6 +673,13 @@ describe("OpenAICompatibleChatModel", () => {
     expect(e1.message).toBe("model test-alias unavailable: HTTP 503");
     expect(e1.detail).toBe("upstream down for key [redacted]");
     expect(e3.message).toBe("model test-alias: HTTP 400");
+  });
+
+  test("a key across the 300-character cut of the detail leaves no prefix behind", async () => {
+    script = [{ status: 503, raw: "x".repeat(295) + KEY + " tail" }];
+    const err = await model().complete({ messages: [{ role: "user", content: "x" }] }).catch((e) => e);
+    expect(err.detail).toBe("x".repeat(295) + "[redacted]".slice(0, 5));
+    expect(err.detail).not.toContain(KEY.slice(0, 5));
   });
 
   test("every 5xx is unavailable, gateway codes included", async () => {

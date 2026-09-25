@@ -52,7 +52,7 @@ export interface ChatResponse {
 }
 
 export interface ChatModel {
-  /** Short label for traces and errors (never the key or a full URL). */
+  /** Short label for events, transcripts and errors (never the key or a full URL). */
   readonly label: string;
   complete(request: ChatRequest, options?: { signal?: AbortSignal }): Promise<ChatResponse>;
 }
@@ -72,13 +72,23 @@ export interface ChatModel {
  * message and out of anything forwarded to a chat surface.
  */
 export class ModelUnavailableError extends Error {
+  /** What the gateway answered, redacted and clipped; never part of the message. */
+  readonly detail?: string;
+  /**
+   * True when no answer came at all (missing key, network failure, timeout),
+   * false when the gateway answered with a transient status (408/425/429/5xx).
+   */
+  readonly unreachable: boolean;
+
   constructor(
     public readonly model: string,
     public readonly reason: string,
-    public readonly detail?: string,
+    extra: { detail?: string; unreachable?: boolean } = {},
   ) {
     super(`model ${model} unavailable: ${reason}`);
     this.name = "ModelUnavailableError";
+    this.detail = extra.detail;
+    this.unreachable = extra.unreachable ?? false;
   }
 }
 
@@ -107,7 +117,7 @@ export interface OpenAICompatibleConfig {
   apiKeyEnv: string;
   /** Environment to read the key from (default: process.env). */
   env?: Record<string, string | undefined>;
-  /** Label for traces and errors (default: the model name). */
+  /** Label for events, transcripts and errors (default: the model name). */
   label?: string;
   /** Per-request timeout in ms (default: 300000). */
   timeoutMs?: number;
@@ -138,7 +148,7 @@ export class OpenAICompatibleChatModel implements ChatModel {
     const env = this.config.env ?? process.env;
     const key = env[this.config.apiKeyEnv];
     if (!key) {
-      throw new ModelUnavailableError(this.label, `no key in ${this.config.apiKeyEnv}`);
+      throw new ModelUnavailableError(this.label, `no key in ${this.config.apiKeyEnv}`, { unreachable: true });
     }
 
     const body: Record<string, unknown> = {
@@ -173,14 +183,15 @@ export class OpenAICompatibleChatModel implements ChatModel {
     } catch (err) {
       if (options.signal?.aborted) throw err;
       const reason = timeout.aborted ? "timeout" : err instanceof Error ? err.name : "network error";
-      throw new ModelUnavailableError(this.label, this.redact(reason, key));
+      throw new ModelUnavailableError(this.label, this.redact(reason, key), { unreachable: true });
     }
 
     if (!res.ok) {
       // An unreadable error body leaves the status alone to report.
-      const detail = this.redact((await res.text().catch(() => "")).slice(0, 300), key) || undefined;
+      // Redact before clipping, so a key across the cut cannot leave a prefix behind.
+      const detail = this.redact(await res.text().catch(() => ""), key).slice(0, 300) || undefined;
       if (res.status >= 500 || TRANSIENT_STATUS.has(res.status)) {
-        throw new ModelUnavailableError(this.label, `HTTP ${res.status}`, detail);
+        throw new ModelUnavailableError(this.label, `HTTP ${res.status}`, { detail });
       }
       throw new ModelError(this.label, `HTTP ${res.status}`, detail);
     }
@@ -191,7 +202,7 @@ export class OpenAICompatibleChatModel implements ChatModel {
     } catch (err) {
       // The body is read under the same signals as the request.
       if (options.signal?.aborted) throw err;
-      if (timeout.aborted) throw new ModelUnavailableError(this.label, "timeout");
+      if (timeout.aborted) throw new ModelUnavailableError(this.label, "timeout", { unreachable: true });
       // A 200 with a non-JSON body is a gateway fault, not a model answer.
       throw new ModelError(this.label, "response body is not JSON");
     }

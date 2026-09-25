@@ -74,6 +74,15 @@ describe("shell — argv form", () => {
     expect(r.stdout.trim().split("\n")).toEqual(["a", "b"]);
   });
 
+  test("an abort kills the running child and rejects", async () => {
+    const controller = new AbortController();
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 50);
+    await expect(createLocalShell(false, controller.signal)(["sleep", "3"])).rejects.toThrow(/shell: aborted/);
+    expect(Date.now() - started).toBeLessThan(1000);
+    await expect(createLocalShell(false, controller.signal)(["echo", "late"])).rejects.toThrow(/shell: aborted/);
+  });
+
   test("argvOnly refuses the string form; empty argv is refused", async () => {
     const shell = createLocalShell(true);
     await expect(shell("echo hi")).rejects.toThrow(/string form \(sh -c\) is refused/);
@@ -150,6 +159,18 @@ describe("checkToolArgs — model arguments against the schema it was shown", ()
     expect(checkToolArgs(n, { ranges: [{ days: 7 }] })).toBe("ranges[0].from is required");
     expect(checkToolArgs(n, { ranges: [{ from: "x", days: 90 }] })).toBe("ranges[0].days must be <= 30");
     expect(checkToolArgs(n, { bad: "x" })).toBe("bad: the manifest's pattern is not a valid regular expression");
+  });
+
+  test("a nested object may not carry keys its properties do not declare", () => {
+    const n = manifest({
+      filter: { type: "array", items: { type: "object", properties: { from: { type: "string" } } } },
+      open: { type: "array", items: { type: "object", properties: { a: { type: "string" } }, additionalProperties: true } },
+      typed: { type: "array", items: { type: "object", properties: {}, additionalProperties: { type: "integer" } } },
+    });
+    expect(checkToolArgs(n, { filter: [{ from: "x", smuggled: "--output=/tmp/x" }] })).toBe("filter[0].smuggled is not a declared property");
+    expect(checkToolArgs(n, { open: [{ a: "x", anything: 1 }] })).toBeUndefined();
+    expect(checkToolArgs(n, { typed: [{ k: 1 }] })).toBeUndefined();
+    expect(checkToolArgs(n, { typed: [{ k: "one" }] })).toBe("typed[0].k must be integer");
   });
 
   test("a bound field is not the model's to set, so it is not checked", () => {

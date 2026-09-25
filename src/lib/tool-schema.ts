@@ -100,58 +100,79 @@ function enumError(label: string, value: unknown, allowed: unknown): string | un
 
 const isSchema = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 
-/**
- * Check one value against a (field) schema: type, enum, minimum / maximum,
- * minLength / maxLength, pattern, minItems / maxItems, and items, properties
- * and required recursively. Returns an error or undefined.
- */
-function checkValue(name: string, value: unknown, schema: Record<string, unknown>): string | undefined {
-  const type = schema.type;
-  if (typeof type === "string" && !matchesType(value, type)) return `${name} must be ${type}`;
-  if (typeof value === "number") {
-    if (typeof schema.minimum === "number" && value < schema.minimum) return `${name} must be >= ${schema.minimum}`;
-    if (typeof schema.maximum === "number" && value > schema.maximum) return `${name} must be <= ${schema.maximum}`;
+type Check = (name: string, value: unknown, schema: Record<string, unknown>) => string | undefined;
+
+const checkNumber: Check = (name, value, schema) => {
+  if (typeof value !== "number") return undefined;
+  if (typeof schema.minimum === "number" && value < schema.minimum) return `${name} must be >= ${schema.minimum}`;
+  if (typeof schema.maximum === "number" && value > schema.maximum) return `${name} must be <= ${schema.maximum}`;
+  return undefined;
+};
+
+const checkString: Check = (name, value, schema) => {
+  if (typeof value !== "string") return undefined;
+  if (typeof schema.minLength === "number" && value.length < schema.minLength) return `${name} must have at least ${schema.minLength} characters`;
+  if (typeof schema.maxLength === "number" && value.length > schema.maxLength) return `${name} must have at most ${schema.maxLength} characters`;
+  if (typeof schema.pattern !== "string") return undefined;
+  let re: RegExp;
+  try {
+    re = new RegExp(schema.pattern);
+  } catch (_err) {
+    // A pattern that does not compile guards nothing; refuse rather than pass.
+    return `${name}: the manifest's pattern is not a valid regular expression`;
   }
-  if (typeof value === "string") {
-    if (typeof schema.minLength === "number" && value.length < schema.minLength) return `${name} must have at least ${schema.minLength} characters`;
-    if (typeof schema.maxLength === "number" && value.length > schema.maxLength) return `${name} must have at most ${schema.maxLength} characters`;
-    if (typeof schema.pattern === "string") {
-      let re: RegExp;
-      try {
-        re = new RegExp(schema.pattern);
-      } catch (_err) {
-        // A pattern that does not compile guards nothing; refuse rather than pass.
-        return `${name}: the manifest's pattern is not a valid regular expression`;
-      }
-      if (!re.test(value)) return `${name} must match ${schema.pattern}`;
-    }
-  }
-  const badEnum = enumError(name, value, schema.enum);
-  if (badEnum) return badEnum;
-  if (Array.isArray(value)) {
-    if (typeof schema.minItems === "number" && value.length < schema.minItems) return `${name} must have at least ${schema.minItems} items`;
-    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) return `${name} must have at most ${schema.maxItems} items`;
-    if (isSchema(schema.items)) {
-      for (let i = 0; i < value.length; i++) {
-        const error = checkValue(`${name}[${i}]`, value[i], schema.items);
-        if (error) return error;
-      }
-    }
-  }
-  if (isSchema(value)) {
-    const required = Array.isArray(schema.required) ? schema.required : [];
-    for (const key of required) {
-      if (typeof key === "string" && !(key in value)) return `${name}.${key} is required`;
-    }
-    if (isSchema(schema.properties)) {
-      for (const [key, sub] of Object.entries(schema.properties)) {
-        if (!(key in value) || !isSchema(sub)) continue;
-        const error = checkValue(`${name}.${key}`, value[key], sub);
-        if (error) return error;
-      }
-    }
+  return re.test(value) ? undefined : `${name} must match ${schema.pattern}`;
+};
+
+const checkArray: Check = (name, value, schema) => {
+  if (!Array.isArray(value)) return undefined;
+  if (typeof schema.minItems === "number" && value.length < schema.minItems) return `${name} must have at least ${schema.minItems} items`;
+  if (typeof schema.maxItems === "number" && value.length > schema.maxItems) return `${name} must have at most ${schema.maxItems} items`;
+  if (!isSchema(schema.items)) return undefined;
+  for (let i = 0; i < value.length; i++) {
+    const error = checkValue(`${name}[${i}]`, value[i], schema.items);
+    if (error) return error;
   }
   return undefined;
+};
+
+/**
+ * With `properties` declared, a key it does not name is refused (the same
+ * rule as a tool's top level), unless `additionalProperties` is true or a
+ * schema the extra keys are checked against.
+ */
+const checkObject: Check = (name, value, schema) => {
+  if (!isSchema(value)) return undefined;
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  for (const key of required) {
+    if (typeof key === "string" && !(key in value)) return `${name}.${key} is required`;
+  }
+  if (!isSchema(schema.properties)) return undefined;
+  const properties = schema.properties;
+  const extra = schema.additionalProperties;
+  for (const [key, v] of Object.entries(value)) {
+    const sub = key in properties ? properties[key] : extra;
+    if (sub === true) continue;
+    if (!isSchema(sub)) return `${name}.${key} is not a declared property`;
+    const error = checkValue(`${name}.${key}`, v, sub);
+    if (error) return error;
+  }
+  return undefined;
+};
+
+/**
+ * Check one value against a (field) schema: type, enum, minimum / maximum,
+ * minLength / maxLength, pattern, minItems / maxItems, and items, properties,
+ * required and additionalProperties recursively. Returns the first error or
+ * undefined.
+ */
+function checkValue(name: string, value: unknown, schema: Record<string, unknown>): string | undefined {
+  if (typeof schema.type === "string" && !matchesType(value, schema.type)) return `${name} must be ${schema.type}`;
+  for (const check of [checkNumber, checkString, checkArray, checkObject]) {
+    const error = check(name, value, schema);
+    if (error) return error;
+  }
+  return enumError(name, value, schema.enum);
 }
 
 /**

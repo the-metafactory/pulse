@@ -18,6 +18,8 @@ import type { ActionCapabilities, CapabilityName, LLMOptions, LLMResponse } from
 export interface LocalCapabilityOptions {
   /** Shell refuses the string (`sh -c`) form and runs argv arrays only. */
   shellArgvOnly?: boolean;
+  /** When it fires, a running shell child is killed and a fetch aborted. */
+  signal?: AbortSignal;
 }
 
 export async function createLocalCapabilities(
@@ -32,10 +34,10 @@ export async function createLocalCapabilities(
         capabilities.llm = createLocalLLM();
         break;
       case "fetch":
-        capabilities.fetch = globalThis.fetch;
+        capabilities.fetch = options.signal ? abortableFetch(options.signal) : globalThis.fetch;
         break;
       case "shell":
-        capabilities.shell = createLocalShell(options.shellArgvOnly === true);
+        capabilities.shell = createLocalShell(options.shellArgvOnly === true, options.signal);
         break;
       case "readFile":
         capabilities.readFile = async (path: string) => Bun.file(path).text();
@@ -305,13 +307,22 @@ function extractClaudeOutput(raw: string): { text: string; isError: boolean } {
   }
 }
 
+/** fetch that also aborts when `signal` fires, alongside any signal the caller passes. */
+function abortableFetch(signal: AbortSignal): typeof globalThis.fetch {
+  const wrapped = (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) =>
+    globalThis.fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal });
+  return Object.assign(wrapped, { preconnect: globalThis.fetch.preconnect }) as typeof globalThis.fetch;
+}
+
 /**
  * Local shell provider. A string command runs through `sh -c`; an argv
  * array spawns argv[0] directly, so no argument is ever parsed by a shell.
- * With argvOnly the string form is refused — the promise rejects.
+ * With argvOnly the string form is refused — the promise rejects. When
+ * `signal` fires, the child is killed and the promise rejects.
  */
 export function createLocalShell(
   argvOnly = false,
+  signal?: AbortSignal,
 ): (cmd: string | string[]) => Promise<{ stdout: string; stderr: string; code: number }> {
   return async (cmd: string | string[]) => {
     let argv: string[];
@@ -326,16 +337,24 @@ export function createLocalShell(
       }
       argv = ["sh", "-c", cmd];
     }
+    if (signal?.aborted) throw new Error("shell: aborted");
     const proc = Bun.spawn(argv, {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const code = await proc.exited;
-    return { stdout, stderr, code };
+    const kill = () => proc.kill();
+    signal?.addEventListener("abort", kill, { once: true });
+    try {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      const code = await proc.exited;
+      if (signal?.aborted) throw new Error("shell: aborted");
+      return { stdout, stderr, code };
+    } finally {
+      signal?.removeEventListener("abort", kill);
+    }
   };
 }
 

@@ -172,6 +172,9 @@ export interface ActionContext {
     spanId: string;
   };
 
+  /** Fires when the caller cancels the run (a step timeout, a failing parallel sibling). */
+  signal?: AbortSignal;
+
   /** Pipeline context when running inside a pipeline */
   pipeline?: {
     name: string;

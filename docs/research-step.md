@@ -59,9 +59,12 @@ actions:
    malformed arguments and arguments outside the schema the model was shown
    are answered with an error text, not run.
 5. `timeout_ms` bounds the whole step. It ends a round the moment it fires,
-   whether the model or a tool is still working; a tool that is still running
-   is left to finish on its own, its result is dropped, and calls still
-   queued never start.
+   whether the model or a tool is still working. The step's signal kills a
+   tool's running `shell` children and aborts its `fetch` calls (actions
+   also see it as `ctx.signal`); whatever an action does without those
+   capabilities is left to finish, its result dropped. Calls still queued
+   never start. A step aborted from outside (a failing `parallel` sibling)
+   reports "aborted", not a timeout.
 
 ## What limits a manipulated model
 
@@ -84,8 +87,10 @@ narrow what its arguments can do:
   against these keywords of the schema it was shown: `type`, `enum`,
   `minimum` / `maximum`, `minLength` / `maxLength`, `pattern`,
   `minItems` / `maxItems`, and `items`, `properties` and `required` in
-  nested schemas. Other keywords (`format`, `uniqueItems`, …) are shown to
-  the model but not checked; the action checks those itself.
+  nested schemas. A nested object with `properties` may not carry other keys
+  unless `additionalProperties` allows them. Other keywords (`format`,
+  `uniqueItems`, …) are shown to the model but not checked; the action checks
+  those itself.
 - **Argv shell.** `shell` takes an argv array and spawns the program with no
   `sh -c`, so a model-chosen query cannot become shell syntax. Tools run
   inside a research step get a shell that refuses the string form.
@@ -150,12 +155,15 @@ any `_error` without `unavailable` as a real failure. With `stop`,
 `PipelineResult.cause` is the `MapItemFailure` and its `original` holds the
 `ResearchUnavailable`.
 
-Within one `runPipeline` run, once a model is found unreachable, every later
-research step on it fails at once with `ResearchUnavailable` (its message
-ends "earlier in this run") instead of calling the model again. A network
-that drops packets (off VPN, say) does not refuse the connection, so the
-first call waits out `timeoutMs` (default 300 s, since long generations take
-minutes); the rest of the run does not.
+Within one `runPipeline` run, once a model gives no answer at all (no key,
+network failure, timeout), every later research step on it fails at once
+with `ResearchUnavailable` (its message ends "earlier in this run") instead
+of calling the model again. That includes a `retry:` around the step: the
+run treats the model as absent, and the host queues the work. A 429 or 5xx
+is an answer from the gateway and marks nothing; the next step calls again.
+A network that drops packets (off VPN, say) does not refuse the connection,
+so the first call waits out `timeoutMs` (default 300 s, since long
+generations take minutes); the rest of the run does not.
 
 ## Transcript
 
