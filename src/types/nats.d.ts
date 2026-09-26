@@ -5,5 +5,6 @@
  */
 declare module "nats" {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  export function connect(opts?: { servers?: string }): Promise<any>;
+  export function connect(opts?: { servers?: string; name?: string; authenticator?: unknown }): Promise<any>;
+  export function credsAuthenticator(creds: Uint8Array): unknown;
 }

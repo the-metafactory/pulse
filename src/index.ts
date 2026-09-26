@@ -60,7 +60,7 @@ export {
   encodeDidSegment,
   subjectMatches,
 } from "./lib/agent-provider";
-export type { AgentTransport, MyelinAgentProviderConfig, MyelinEnvelope } from "./lib/agent-provider";
+export type { AgentTransport, MyelinAgentProviderConfig, MyelinEnvelope, NatsAgentTransportOptions } from "./lib/agent-provider";
 export { renderPromptTemplate } from "./lib/primitive-runner";
 export { createLocalCapabilities, createCloudCapabilities, createLocalShell } from "./lib/capabilities";
 export type { LocalCapabilityOptions } from "./lib/capabilities";
