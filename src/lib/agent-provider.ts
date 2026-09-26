@@ -13,6 +13,7 @@
  * correlation_id = task_id — that is the contract this provider awaits.
  */
 
+import { readFileSync } from "node:fs";
 import type { AgentProvider, AgentTaskSpec, AgentTaskResult, AgentSovereignty, AgentDispatchOptions } from "../types/agent";
 
 export type { AgentProvider, AgentTaskSpec, AgentTaskResult, AgentSovereignty, AgentDispatchOptions } from "../types/agent";
@@ -94,20 +95,63 @@ interface NatsConnectionLike {
   drain: () => Promise<void>;
 }
 
+/** Options for `NatsAgentTransport.connect`. */
+export interface NatsAgentTransportOptions {
+  /** NATS server URL(s). Default: `localhost:4222`. */
+  servers?: string;
+  /**
+   * Path to a NATS `.creds` file (user JWT + NKey seed) for a server in
+   * operator mode. Falls back to `PULSE_NATS_CREDS`. Unset in both places →
+   * anonymous connect. Set but unreadable → throws, never falls back to
+   * anonymous: a typo must not silently drop auth.
+   */
+  credentials?: string;
+  /** Connection name, shown in the server's connz and logs. */
+  name?: string;
+}
+
+/** The slice of the `nats` module the transport uses. */
+interface NatsModuleLike {
+  connect: (o: { servers: string; name?: string; authenticator?: unknown }) => Promise<unknown>;
+  credsAuthenticator: (creds: Uint8Array) => unknown;
+}
+
 export class NatsAgentTransport implements AgentTransport {
   private constructor(private nc: NatsConnectionLike) {}
 
-  static async connect(opts: { servers?: string } = {}): Promise<NatsAgentTransport> {
-    let natsMod: { connect: (o: { servers: string }) => Promise<unknown> };
+  static async connect(
+    opts: NatsAgentTransportOptions = {},
+    /** Test seam: loads the `nats` module. */
+    loadNats: () => Promise<NatsModuleLike> = () => import("nats") as Promise<NatsModuleLike>,
+  ): Promise<NatsAgentTransport> {
+    // Creds first: a bad path is a more specific error than a missing package.
+    const credsPath = opts.credentials ?? process.env.PULSE_NATS_CREDS;
+    let creds: Uint8Array | undefined;
+    if (credsPath) {
+      try {
+        creds = readFileSync(credsPath);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `NATS credentials file unreadable: ${credsPath} (${detail}). ` +
+            "Fix `credentials` / PULSE_NATS_CREDS, or unset both to connect anonymously.",
+        );
+      }
+    }
+    let natsMod: NatsModuleLike;
     try {
-      natsMod = await import("nats");
+      natsMod = await loadNats();
     } catch (_err) {
       // Optional dependency absent — surface the fix, don't bury the cause.
       throw new Error(
         "NatsAgentTransport requires the 'nats' package (optional dependency). Run: bun add nats",
       );
     }
-    const nc = await natsMod.connect({ servers: opts.servers ?? "localhost:4222" });
+    const nc = await natsMod.connect({
+      servers: opts.servers ?? "localhost:4222",
+      ...(opts.name ? { name: opts.name } : {}),
+      ...(creds ? { authenticator: natsMod.credsAuthenticator(creds) } : {}),
+    });
     return new NatsAgentTransport(nc as NatsConnectionLike);
   }
 

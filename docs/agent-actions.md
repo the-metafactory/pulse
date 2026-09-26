@@ -125,7 +125,10 @@ local→sanitize→frontier→human pattern, including the refusal path (`--viol
 - `InMemoryAgentTransport` — NATS-semantics pub/sub in-process. Tests and
   offline demos run the *identical* envelope path; only the wire differs.
 - `NatsAgentTransport` — dynamic `import("nats")`; the package is an optional
-  dependency (`bun add nats`), keeping pulse core zero-dep.
+  dependency (`bun add nats`), keeping pulse core zero-dep. For a server in
+  operator mode, pass `credentials` (a `.creds` file path) or set
+  `PULSE_NATS_CREDS`; the option wins. Neither set → anonymous connect. A path
+  that is set but unreadable throws rather than falling back to anonymous.
 
 ## Out of scope (v1)
 
