@@ -20,6 +20,7 @@ import type {
   ActionResult,
 } from "../types/action";
 import type { AgentProvider } from "../types/agent";
+import type { ChatModel } from "./chat-model";
 
 export interface ActionRunnerOptions {
   /** Directories to search for actions (checked in order, first match wins) */
@@ -35,8 +36,15 @@ export interface ActionRunnerOptions {
    */
   agentProvider?: AgentProvider;
   /**
+   * The model behind the `llm` capability, for actions that declare
+   * `requires: ["llm"]`. When set, the fallback chain (`claude -p`, PAI
+   * Inference, an ambient `ANTHROPIC_API_KEY`) never runs. Absent → the
+   * fallback chain, as before.
+   */
+  llmModel?: ChatModel;
+  /**
    * Optional enforcement policy (Stage 1). When set, blast-radius capabilities
-   * (shell/fetch/writeFile/readFile) are guarded: each call passes the
+   * (shell/fetch/writeFile/readFile) and `llm` are guarded: each call passes the
    * fail-closed gate before running. Absent → capabilities run unguarded
    * (backward-compatible; opt in per host).
    */
@@ -149,6 +157,7 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
     const capabilities = await createLocalCapabilities(manifest.requires, {
       shellArgvOnly: options.shellArgvOnly,
       signal: options.signal,
+      llmModel: options.llmModel,
     });
 
     // Agent dispatch comes from the host-configured provider, not the
@@ -165,7 +174,7 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
     }
 
     // Stage 1 — enforcement gate. When a policy is configured, guard the
-    // blast-radius capabilities so each call passes the fail-closed gate
+    // blast-radius capabilities and `llm` so each call passes the fail-closed gate
     // before it runs. The manifest declares; the gate bites.
     const guardedCapabilities = options.policy
       ? guardCapabilities(capabilities, { policy: options.policy, onDecision: options.onGateDecision })

@@ -10,6 +10,9 @@
  *   fetch     → "Fetch" (match: url)
  *   writeFile → "Write" (match: path)
  *   readFile  → "Read"  (match: path)
+ *   llm       → "LLM"   (match: model — the injected model's label, or
+ *                        "fallback" for the claude -p / PAI / API chain;
+ *                        never the prompt, which the audit hook would see)
  *
  * `ask` has no host prompt at the capability layer (pulse runs autonomously),
  * so a guarded call resolving to `ask` is treated as `deny` with a clear
@@ -17,9 +20,10 @@
  * is the safe default until then.
  */
 
-import type { ActionCapabilities } from "../types/action";
+import type { ActionCapabilities, LLMOptions } from "../types/action";
 import type { GateDecision, Policy } from "../types/policy";
 import { evaluate } from "./enforcement-gate";
+import { llmModelLabel } from "./capabilities";
 
 /** A policy that denies everything — the fail-closed fallback for any load error. */
 export const DENY_ALL: Policy = { version: 1, default: "deny", rules: [] };
@@ -131,11 +135,17 @@ export function shellGateInput(cmd: string | string[]): Record<string, unknown> 
 /**
  * Wrap injected capabilities so every guarded tool call passes the gate first.
  * Only the capabilities present on the object are wrapped; absent ones stay
- * absent (an action never gains a capability it didn't request). `llm`, `agent`,
- * and `kv` are not blast-radius tools and pass through unwrapped.
+ * absent (an action never gains a capability it didn't request). `llm` is
+ * guarded by the model it reaches, so a policy can pin an action to one model
+ * and deny the fallback chain. `agent` and `kv` pass through unwrapped.
  */
 export function guardCapabilities(caps: ActionCapabilities, opts: GuardOptions): ActionCapabilities {
   const guarded: ActionCapabilities = { ...caps };
+
+  if (caps.llm) {
+    const model = llmModelLabel(caps.llm) ?? "unlabelled";
+    guarded.llm = guard("LLM", (_prompt: string, _options?: LLMOptions) => ({ model }), caps.llm, opts);
+  }
 
   if (caps.shell) {
     guarded.shell = guard("Bash", shellGateInput, caps.shell, opts);
