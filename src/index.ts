@@ -62,7 +62,7 @@ export {
 } from "./lib/agent-provider";
 export type { AgentTransport, MyelinAgentProviderConfig, MyelinEnvelope, NatsAgentTransportOptions } from "./lib/agent-provider";
 export { renderPromptTemplate } from "./lib/primitive-runner";
-export { createLocalCapabilities, createCloudCapabilities, createLocalShell } from "./lib/capabilities";
+export { createLocalCapabilities, createCloudCapabilities, createLocalShell, chatModelLLM, FALLBACK_LLM_LABEL } from "./lib/capabilities";
 export type { LocalCapabilityOptions } from "./lib/capabilities";
 
 // Research step — a model researches through read-only actions (P-900..P-905)

@@ -43,6 +43,18 @@ const result = await ctx.capabilities.llm!(prompt, {
 // result.usage?: { input: number, output: number }
 ```
 
+Which model answers is the host's choice, not the action's:
+
+- **Injected model.** A host that sets `llmModel` (a `ChatModel`, e.g. `OpenAICompatibleChatModel`) on `runAction`, the step runner or `createLocalCapabilities` gets that model and nothing else. `system` becomes the system message, `maxTokens` the request's; `tier` is ignored. An answer without text throws `ModelError`; `ModelUnavailableError` reaches the action as thrown.
+- **Fallback chain.** Without `llmModel`: `claude -p`, then PAI Inference, then `ANTHROPIC_API_KEY` from the environment or a nearby `.env`, with `tier` picking Haiku, Sonnet or Opus.
+
+Under a policy, `llm` is the gate tool `LLM`, matched on `model`: the injected model's label, or `fallback` for the chain. The prompt is never part of the gate input. A rule allowing one label, with default deny, pins an action to that model and refuses the chain:
+
+```json
+{ "version": 1, "default": "deny",
+  "rules": [{ "tool": "LLM", "match": { "model": "^longctx$" }, "decision": "allow" }] }
+```
+
 ### fetch
 
 Standard `fetch` API — same as `globalThis.fetch`.

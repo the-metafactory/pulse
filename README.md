@@ -245,7 +245,7 @@ Actions declare what they need. The runtime provides it. The action never import
 
 | Capability | Local (Bun) | Cloud (Workers) |
 |---|---|---|
-| `llm` | PAI Inference tool or Anthropic API | Workers AI or API |
+| `llm` | Host-injected `ChatModel` (`llmModel`), else `claude -p`, PAI Inference or Anthropic API | Workers AI or API |
 | `fetch` | Native fetch | Worker fetch |
 | `shell` | Bun.spawn | Not available |
 | `readFile` | Bun.file | Not available |

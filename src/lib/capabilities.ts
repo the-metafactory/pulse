@@ -8,6 +8,7 @@
  */
 
 import type { ActionCapabilities, CapabilityName, LLMOptions, LLMResponse } from "../types/action";
+import { ModelError, type ChatMessage, type ChatModel } from "./chat-model";
 
 export interface LocalCapabilityOptions {
   /** Shell refuses the string (`sh -c`) form and runs argv arrays only. */
@@ -18,6 +19,29 @@ export interface LocalCapabilityOptions {
    * command whose grandchildren hold the pipes open is not cut short.
    */
   signal?: AbortSignal;
+  /**
+   * The model behind `llm`. When set, `llm` calls this model and nothing
+   * else: the fallback chain (`claude -p`, PAI Inference, an ambient
+   * `ANTHROPIC_API_KEY`) never runs. Absent → the fallback chain.
+   */
+  llmModel?: ChatModel;
+}
+
+/** The policy label of the fallback chain, for a rule on the `LLM` tool's `model` field. */
+export const FALLBACK_LLM_LABEL = "fallback";
+
+type LLMFunction = (prompt: string, options?: LLMOptions) => Promise<LLMResponse>;
+
+/**
+ * The model label an `llm` capability carries, which the enforcement gate
+ * matches on. An `llm` function Pulse did not build carries none.
+ */
+export function llmModelLabel(llm: LLMFunction): string | undefined {
+  return (llm as { modelLabel?: string }).modelLabel;
+}
+
+function labelled(llm: LLMFunction, label: string): LLMFunction {
+  return Object.assign(llm, { modelLabel: label });
 }
 
 /**
@@ -35,7 +59,9 @@ export async function createLocalCapabilities(
   for (const cap of required) {
     switch (cap) {
       case "llm":
-        capabilities.llm = createLocalLLM();
+        capabilities.llm = options.llmModel
+          ? chatModelLLM(options.llmModel, options.signal)
+          : labelled(createLocalLLM(), FALLBACK_LLM_LABEL);
         break;
       case "fetch":
         capabilities.fetch = options.signal ? abortableFetch(options.signal) : globalThis.fetch;
@@ -58,6 +84,40 @@ export async function createLocalCapabilities(
   }
 
   return capabilities;
+}
+
+/**
+ * An `llm` capability backed by a chat model. The prompt is the user
+ * message, `system` the system message, `maxTokens` the request's; no
+ * tools are sent. `tier` is ignored: the model is the one the host chose.
+ * An answer without text is an error, never an empty response. Model errors
+ * (`ModelUnavailableError`, `ModelError`) reach the caller as thrown.
+ */
+export function chatModelLLM(model: ChatModel, signal?: AbortSignal): LLMFunction {
+  return labelled(async (prompt: string, options?: LLMOptions): Promise<LLMResponse> => {
+    const messages: ChatMessage[] = [];
+    if (options?.system) messages.push({ role: "system", content: options.system });
+    messages.push({ role: "user", content: prompt });
+    const res = await model.complete({ messages, maxTokens: options?.maxTokens }, { signal });
+    if (!res.content?.trim()) {
+      throw new ModelError(model.label, `answer has no text (finish: ${res.finishReason ?? "unknown"})`);
+    }
+    return {
+      text: res.content,
+      json: options?.json ? parseJsonText(res.content) : undefined,
+      usage: res.usage,
+    };
+  }, model.label);
+}
+
+/** Parse a model answer as JSON, stripping a Markdown code fence; undefined when it is not JSON. */
+function parseJsonText(text: string): unknown {
+  const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -151,15 +211,7 @@ function createLocalLLM(): (prompt: string, options?: LLMOptions) => Promise<LLM
     const data = await response.json() as any;
     const text = data.content?.[0]?.text || "";
 
-    let json: unknown;
-    if (options?.json) {
-      const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
-      try {
-        json = JSON.parse(cleaned);
-      } catch {
-        json = undefined;
-      }
-    }
+    const json = options?.json ? parseJsonText(text) : undefined;
 
     return {
       text,
@@ -273,16 +325,7 @@ async function tryClaudeCLI(prompt: string, options?: LLMOptions): Promise<LLMRe
       return null;
     }
 
-    let json: unknown;
-    if (options?.json) {
-      const cleaned = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
-      try {
-        json = JSON.parse(cleaned);
-      } catch (_err) {
-        // Response wasn't valid JSON despite json option — return text only
-        json = undefined;
-      }
-    }
+    const json = options?.json ? parseJsonText(text) : undefined;
 
     return { text, json };
   } catch (err) {
@@ -413,7 +456,7 @@ export async function createCloudCapabilities(
         break;
       case "llm":
         // Cloud LLM would use Workers AI binding or API key from env
-        capabilities.llm = createLocalLLM(); // Same for now; Workers can use API too
+        capabilities.llm = labelled(createLocalLLM(), FALLBACK_LLM_LABEL); // Same for now; Workers can use API too
         break;
       case "kv":
         // In a real Worker, this would use env.KV_NAMESPACE binding
