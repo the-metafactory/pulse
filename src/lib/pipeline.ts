@@ -14,6 +14,7 @@
  *   map, filter, reduce, parallel, retry.
  */
 
+import { withRunLedger } from "./run-ledger";
 import { readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { parse as parseYaml } from "yaml";
@@ -167,33 +168,35 @@ export async function runPipeline(
   initialInput: Record<string, unknown>,
   options: StepRunnerOptions
 ): Promise<PipelineResult> {
-  const startTime = Date.now();
-  const stepRecords: StepRecord[] = [];
+  return withRunLedger(pipeline.name, async () => {
+    const startTime = Date.now();
+    const stepRecords: StepRecord[] = [];
 
-  // Run steps one-by-one to preserve partial output on failure
-  let currentData = { ...initialInput };
-  try {
-    // A research step that would offer a model anything but a read action
-    // fails the pipeline here, before any step runs. The returned options
-    // carry this run's state (what the preflight checked).
-    const runOptions = await preflightSteps(pipeline.actions, options);
-    for (const step of pipeline.actions) {
-      currentData = await runStep(step, currentData, runOptions, stepRecords);
+    // Run steps one-by-one to preserve partial output on failure
+    let currentData = { ...initialInput };
+    try {
+      // A research step that would offer a model anything but a read action
+      // fails the pipeline here, before any step runs. The returned options
+      // carry this run's state (what the preflight checked).
+      const runOptions = await preflightSteps(pipeline.actions, options);
+      for (const step of pipeline.actions) {
+        currentData = await runStep(step, currentData, runOptions, stepRecords);
+      }
+      return {
+        success: true,
+        output: currentData,
+        steps: stepRecords,
+        durationMs: Date.now() - startTime,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        output: currentData,
+        error: err instanceof Error ? err.message : String(err),
+        cause: err,
+        steps: stepRecords,
+        durationMs: Date.now() - startTime,
+      };
     }
-    return {
-      success: true,
-      output: currentData,
-      steps: stepRecords,
-      durationMs: Date.now() - startTime,
-    };
-  } catch (err) {
-    return {
-      success: false,
-      output: currentData,
-      error: err instanceof Error ? err.message : String(err),
-      cause: err,
-      steps: stepRecords,
-      durationMs: Date.now() - startTime,
-    };
-  }
+  }, (result) => ({ outcome: result.success ? "succeeded" : "failed" }));
 }

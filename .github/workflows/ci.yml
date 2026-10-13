@@ -14,7 +14,7 @@ on:
 #
 # Bun is pinned so a result changes only with a commit; bump BUN_VERSION on
 # purpose. No lint job: pulse has no ESLint setup yet. No private-dependency
-# auth step: every dependency is public on npm.
+# auth step: dependencies are public on npm or GitHub (myelin).
 #
 # The suite needs no credentials, running services or tools beyond sh, echo
 # and sleep: models, agent providers, gateways and chat surfaces are local
