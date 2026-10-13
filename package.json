@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#v0.9.0",
     "commander": "^12.0.0",
     "nats": "^2.29.3",
     "yaml": "^2.8.3",

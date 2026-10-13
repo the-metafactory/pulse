@@ -239,6 +239,46 @@ stop();
 
 Source types: `inline`, `file`, `rss`, `custom` function. Destination types: `stdout`, `file` (JSON/markdown), `webhook`, `custom` function. Each stage reports failure independently via `failedStage`.
 
+### Run-finished envelopes
+
+Each top-level `runFlow`, `runPipeline`, or `PulseRunner.run` emits one
+`execution.run.finished` envelope with `producer: pulse` and `ran.kind: flow`.
+Nested calls emit nothing. Success and failure are reported, including thrown
+errors; emission failures preserve the original result or error.
+
+The Vigil contract ([soma node #787, Q22–Q24](https://github.com/the-metafactory/soma/issues/787))
+maps all three execution shapes to the bus kind `flow`. Pulse's Pipeline, Flow,
+and Tree remain distinct runtime shapes; `ran.ref` is respectively the pipeline
+name, flow name, or tree ID. This mapping is the settled ledger contract.
+
+Emission is opt-in through `PULSE_PRINCIPAL`. When unset or empty, pulse builds
+no envelope, opens no connection, and touches no spool. Configuration is read
+once at the start of each top-level run:
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `PULSE_PRINCIPAL` | Principal ID; enables emission | Disabled |
+| `PULSE_STACK` | Subject's stack segment | `default` |
+| `PULSE_NATS_URL` | NATS server URL | `localhost:4222` |
+| `PULSE_NATS_CREDS` | Path to NATS credentials file | Anonymous |
+| `MF_CORRELATION_ID` | Non-empty correlation string, passed through unchanged | Builder generates a UUID |
+| `MF_SERVES_GOAL` | Goal ID only | Omitted |
+| `MF_SERVES_NODE` | Node reference | Omitted |
+
+The myelin outbox spools to `$XDG_STATE_HOME/pulse/outbox.jsonl`, defaulting to
+`~/.local/state/pulse/outbox.jsonl`. Each run connects, awaits startup replay,
+publishes through the outbox, and closes its connection. The whole emit has a
+two-second deadline and reports failures on stderr. The NATS transport runs in a
+worker thread that is terminated at the deadline, including stalled connections.
+Overlapping runs share one main-thread outbox per spool and each use their own
+connection. Connections proceed concurrently within each run's deadline.
+The last run releases the shared outbox; the next run replays any pending spool.
+Envelopes carry IDs and timestamps; pulse keeps no run log and omits `detail_ref`.
+
+Envelopes declare the contract's fixed sovereignty defaults: classification
+`local`, data residency `CH`, `max_hop: 0`, `frontier_ok: false`, and model class
+`any`. These are routing constraints, not measurements of the host's location.
+
 ## Capability injection
 
 Actions declare what they need. The runtime provides it. The action never imports its own dependencies:

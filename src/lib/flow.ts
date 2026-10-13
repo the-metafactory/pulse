@@ -6,6 +6,7 @@
  * run it through a pipeline, and write the result to a destination.
  */
 
+import { withRunLedger } from "./run-ledger";
 import { runPipeline, loadPipeline, type PipelineDef } from "./pipeline";
 import type { ActionRunnerOptions } from "./action-runner";
 import type {
@@ -111,117 +112,129 @@ export async function runFlow(
     actionDirs?: string[];
   }
 ): Promise<FlowResult> {
-  const startTime = Date.now();
-  const result: Partial<FlowResult> = {
-    flowName: flow.name,
-    destinationWritten: false,
-  };
-
-  // Stage 1: Fetch source data
-  let sourceData: Record<string, unknown>;
-  try {
-    sourceData = await fetchSource(flow.source);
-    // Merge with static input
-    if (flow.input) {
-      sourceData = { ...sourceData, ...flow.input };
-    }
-    result.sourceData = sourceData;
-  } catch (err) {
-    return {
-      ...result,
+  return withRunLedger(flow.name, async () => {
+    const startTime = Date.now();
+    const startedAt = new Date(startTime).toISOString();
+    const result: Partial<FlowResult> = {
       flowName: flow.name,
-      success: false,
       destinationWritten: false,
-      error: err instanceof Error ? err.message : String(err),
-      failedStage: "source",
-      durationMs: Date.now() - startTime,
-      completedAt: new Date().toISOString(),
     };
-  }
 
-  // Stage 2: Resolve and run pipeline
-  let pipelineDef: PipelineDef;
-  let actionDirs = options.actionDirs || [];
-
-  if (typeof flow.pipeline === "string") {
-    // Named pipeline — try to load from YAML
-    // First check if it's a path to a pipeline.yaml
+    // Stage 1: Fetch source data
+    let sourceData: Record<string, unknown>;
     try {
-      const loaded = await loadPipeline(flow.pipeline);
-      pipelineDef = loaded.pipeline;
-      actionDirs = [loaded.baseDir, ...actionDirs];
-    } catch {
-      // Treat as a pipeline name — caller must provide actionDirs
-      pipelineDef = { name: flow.pipeline, actions: [] };
-      throw new Error(
-        `Pipeline "${flow.pipeline}" could not be loaded. Provide a path to pipeline.yaml or use an inline pipeline definition.`
-      );
-    }
-  } else {
-    // Inline pipeline definition
-    pipelineDef = { name: `${flow.name}_pipeline`, actions: flow.pipeline.actions };
-  }
-
-  try {
-    const pipelineResult = await runPipeline(pipelineDef, sourceData, {
-      ...options,
-      actionDirs,
-      mode: flow.mode,
-    });
-
-    if (!pipelineResult.success) {
+      sourceData = await fetchSource(flow.source);
+      // Merge with static input
+      if (flow.input) {
+        sourceData = { ...sourceData, ...flow.input };
+      }
+      result.sourceData = sourceData;
+    } catch (err) {
       return {
         ...result,
         flowName: flow.name,
         success: false,
         destinationWritten: false,
-        pipelineOutput: pipelineResult.output,
-        error: pipelineResult.steps.find((s) => !s.success)?.error || "Pipeline failed",
-        failedStage: "pipeline",
+        error: err instanceof Error ? err.message : String(err),
+        failedStage: "source",
         durationMs: Date.now() - startTime,
+        startedAt,
         completedAt: new Date().toISOString(),
       };
     }
 
-    result.pipelineOutput = pipelineResult.output;
-  } catch (err) {
+    // Stage 2: Resolve and run pipeline
+    let pipelineDef: PipelineDef;
+    let actionDirs = options.actionDirs || [];
+
+    if (typeof flow.pipeline === "string") {
+      // Named pipeline — try to load from YAML
+      // First check if it's a path to a pipeline.yaml
+      try {
+        const loaded = await loadPipeline(flow.pipeline);
+        pipelineDef = loaded.pipeline;
+        actionDirs = [loaded.baseDir, ...actionDirs];
+      } catch {
+        // Treat as a pipeline name — caller must provide actionDirs
+        pipelineDef = { name: flow.pipeline, actions: [] };
+        throw new Error(
+          `Pipeline "${flow.pipeline}" could not be loaded. Provide a path to pipeline.yaml or use an inline pipeline definition.`
+        );
+      }
+    } else {
+      // Inline pipeline definition
+      pipelineDef = { name: `${flow.name}_pipeline`, actions: flow.pipeline.actions };
+    }
+
+    try {
+      const pipelineResult = await runPipeline(pipelineDef, sourceData, {
+        ...options,
+        actionDirs,
+        mode: flow.mode,
+      });
+
+      if (!pipelineResult.success) {
+        return {
+          ...result,
+          flowName: flow.name,
+          success: false,
+          destinationWritten: false,
+          pipelineOutput: pipelineResult.output,
+          error: pipelineResult.steps.find((s) => !s.success)?.error || "Pipeline failed",
+          failedStage: "pipeline",
+          durationMs: Date.now() - startTime,
+          startedAt,
+          completedAt: new Date().toISOString(),
+        };
+      }
+
+      result.pipelineOutput = pipelineResult.output;
+    } catch (err) {
+      return {
+        ...result,
+        flowName: flow.name,
+        success: false,
+        destinationWritten: false,
+        error: err instanceof Error ? err.message : String(err),
+        failedStage: "pipeline",
+        durationMs: Date.now() - startTime,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    }
+
+    // Stage 3: Write to destination
+    try {
+      await writeDestination(flow.destination, result.pipelineOutput!);
+      result.destinationWritten = true;
+    } catch (err) {
+      return {
+        ...result,
+        flowName: flow.name,
+        success: false,
+        destinationWritten: false,
+        error: err instanceof Error ? err.message : String(err),
+        failedStage: "destination",
+        durationMs: Date.now() - startTime,
+        startedAt,
+        completedAt: new Date().toISOString(),
+      };
+    }
+
     return {
       ...result,
       flowName: flow.name,
-      success: false,
-      destinationWritten: false,
-      error: err instanceof Error ? err.message : String(err),
-      failedStage: "pipeline",
+      success: true,
+      destinationWritten: true,
       durationMs: Date.now() - startTime,
+      startedAt,
       completedAt: new Date().toISOString(),
     };
-  }
-
-  // Stage 3: Write to destination
-  try {
-    await writeDestination(flow.destination, result.pipelineOutput!);
-    result.destinationWritten = true;
-  } catch (err) {
-    return {
-      ...result,
-      flowName: flow.name,
-      success: false,
-      destinationWritten: false,
-      error: err instanceof Error ? err.message : String(err),
-      failedStage: "destination",
-      durationMs: Date.now() - startTime,
-      completedAt: new Date().toISOString(),
-    };
-  }
-
-  return {
-    ...result,
-    flowName: flow.name,
-    success: true,
-    destinationWritten: true,
-    durationMs: Date.now() - startTime,
-    completedAt: new Date().toISOString(),
-  };
+  }, (result) => ({
+    outcome: result.success ? "succeeded" : "failed",
+    startedAt: result.startedAt,
+    endedAt: result.completedAt,
+  }));
 }
 
 // ---------------------------------------------------------------------------

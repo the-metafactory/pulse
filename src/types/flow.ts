@@ -84,6 +84,8 @@ export interface FlowResult {
   failedStage?: "source" | "pipeline" | "destination";
   /** Timing */
   durationMs: number;
+  /** When this run started */
+  startedAt: string;
   /** When this run completed */
   completedAt: string;
 }
