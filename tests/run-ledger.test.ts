@@ -219,6 +219,40 @@ describe("run-ledger through exported run entry points", () => {
     expect(events.map(event => event.input.payload.ran.ref).sort()).toEqual(["flow-1", "flow-2"]);
   });
 
+  test("a deferred pipeline emits after its inherited outer run finishes", async () => {
+    let release!: () => void;
+    let deferred!: Promise<unknown>;
+    await runFlow(flow({ source: { type: "custom", fn: async () => {
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      deferred = gate.then(() => runPipeline({ name: "deferred-pipeline", actions: [] }, {}, options));
+      return {};
+    } } }), options);
+    release();
+    await deferred;
+    expect(events.map(event => event.input.payload.ran.ref)).toEqual(["F_LEDGER", "deferred-pipeline"]);
+  });
+
+  test("a schedule created in an outer run emits on later independent ticks", async () => {
+    let schedule: { stop(): void } | undefined;
+    let finish!: () => void;
+    let fail!: (error: Error) => void;
+    const ticks = new Promise<void>((resolve, reject) => { finish = resolve; fail = reject; });
+    try {
+      await runFlow(flow({ source: { type: "custom", fn: async () => {
+        let count = 0;
+        schedule = scheduleFlow(flow({ name: "scheduled-child", schedule: { intervalSeconds: 0.03 } }), {
+          ...options,
+          onRun: () => { if (++count === 3) { schedule!.stop(); finish(); } },
+          onError: fail,
+        });
+        return {};
+      } } }), options);
+      await ticks;
+      // The immediate child is nested; the next two ticks are top-level runs.
+      expect(events.map(event => event.input.payload.ran.ref)).toEqual(["F_LEDGER", "scheduled-child", "scheduled-child"]);
+    } finally { schedule?.stop(); }
+  });
+
   test("scheduled flow emits once per run on two ticks", async () => {
     let schedule: { stop(): void } | undefined;
     try {
@@ -378,11 +412,12 @@ describe("run-ledger through exported run entry points", () => {
     }
   });
 
-  test("concurrent production workers share the spool safely and close against a local NATS fixture", async () => {
+  test("six overlapping production runs publish without queue starvation or replay duplicates", async () => {
     restorePublisher();
     const received: MyelinEnvelope[] = [];
     let connections = 0;
     let maxConnections = 0;
+    let ackMode: "delay" | "stall" | "immediate" = "delay";
     const server = Bun.listen<{ buffer: Buffer; subscriptions: Map<string, string> }>({
       hostname: "127.0.0.1", port: 0,
       socket: {
@@ -416,7 +451,11 @@ describe("run-ledger through exported run entry points", () => {
                 const response = JSON.stringify(subject === "$JS.API.INFO"
                   ? { type: "io.nats.jetstream.api.v1.account_info_response", memory: 0, storage: 0, streams: 1, consumers: 0, limits: {} }
                   : { stream: "RUNS", seq: received.length });
-                socket.write(`MSG ${reply} ${subscription[1]} ${Buffer.byteLength(response)}\r\n${response}\r\n`);
+                const ack = `MSG ${reply} ${subscription[1]} ${Buffer.byteLength(response)}\r\n${response}\r\n`;
+                // Each run fits its deadline; serializing six runs cannot.
+                if (subject.startsWith("local.") && ackMode === "stall") continue;
+                if (subject.startsWith("local.") && ackMode === "delay") setTimeout(() => socket.write(ack), 650);
+                else socket.write(ack);
               }
             } else {
               state.buffer = state.buffer.subarray(end + 2);
@@ -432,19 +471,53 @@ describe("run-ledger through exported run entry points", () => {
     process.env.PULSE_NATS_URL = `nats://127.0.0.1:${server.port}`;
     process.env.XDG_STATE_HOME = directory;
     try {
-      const results = await Promise.all(["P_WORKER", "P_WORKER_2"].map(name =>
+      const names = Array.from({ length: 6 }, (_, index) => `P_WORKER_${index}`);
+      const start = performance.now();
+      const results = await Promise.all(names.map(name =>
         runPipeline({ name, actions: [] }, {}, options)));
+      expect(performance.now() - start).toBeLessThan(2800);
       expect(results.every(result => result.success)).toBe(true);
-      expect(received).toHaveLength(2);
-      expect(received[0]!.payload.ran).toEqual({ kind: "flow", ref: "P_WORKER" });
-      expect(received[1]!.payload.ran).toEqual({ kind: "flow", ref: "P_WORKER_2" });
-      expect(received[0]!.payload.run_id).not.toBe(received[1]!.payload.run_id);
+      expect(received).toHaveLength(names.length);
+      expect(received.map(envelope => envelope.payload.ran)).toEqual(expect.arrayContaining(
+        names.map(ref => ({ kind: "flow", ref })),
+      ));
+      expect(new Set(received.map(envelope => envelope.payload.run_id)).size).toBe(names.length);
       for (const envelope of received) expect(validateExecutionRunFinished(envelope)).toEqual({ valid: true, errors: [] });
       const rows = (await readFile(join(directory, "pulse", "outbox.jsonl"), "utf8")).trim().split("\n").map(row => JSON.parse(row));
-      expect(rows.map(row => row.op)).toEqual(["put", "ack"]);
-      expect(rows[0].id).toBe(received[1]!.id);
+      expect(rows.filter(row => row.op === "put").map(row => row.id).sort()).toEqual(received.map(envelope => envelope.id).sort());
+      expect(rows.filter(row => row.op === "ack").map(row => row.id).sort()).toEqual(received.map(envelope => envelope.id).sort());
       expect(connections).toBe(0);
-      expect(maxConnections).toBe(1);
+      expect(maxConnections).toBe(names.length);
+      // Once all leases close, the next outbox drains the acknowledged spool.
+      await runPipeline({ name: "P_LATER", actions: [] }, {}, options);
+      expect(received).toHaveLength(names.length + 1);
+      const laterRows = (await readFile(join(directory, "pulse", "outbox.jsonl"), "utf8")).trim().split("\n").map(row => JSON.parse(row));
+      expect(laterRows.map(row => row.op)).toEqual(["put", "ack"]);
+      expect(laterRows[0].id).toBe(received.at(-1)!.id);
+      expect(connections).toBe(0);
+      expect(stderr).not.toHaveBeenCalled();
+
+      ackMode = "stall";
+      const failedStart = performance.now();
+      const stalled = await Promise.all(["P_STALLED_1", "P_STALLED_2"].map(name =>
+        runPipeline({ name, actions: [] }, {}, options)));
+      expect(stalled.every(result => result.success)).toBe(true);
+      expect(performance.now() - failedStart).toBeLessThan(2800);
+      await Bun.sleep(50); // Allow worker termination and lease release to finish.
+      expect(connections).toBe(0);
+      expect(stderr).toHaveBeenCalledTimes(2);
+      for (const call of stderr.mock.calls) expect(call[0]).toContain("timed out");
+      const retained = (await readFile(join(directory, "pulse", "outbox.jsonl"), "utf8")).trim().split("\n").map(row => JSON.parse(row));
+      expect(retained.map(row => row.op)).toEqual(["put", "put"]);
+      const retainedIds = retained.map(row => row.id).sort();
+
+      ackMode = "immediate";
+      stderr.mockClear();
+      const beforeReplay = received.length;
+      await runPipeline({ name: "P_REPLAY", actions: [] }, {}, options);
+      expect(received.slice(beforeReplay, -1).map(envelope => envelope.id).sort()).toEqual(retainedIds);
+      expect(received.at(-1)!.payload.ran).toEqual({ kind: "flow", ref: "P_REPLAY" });
+      expect(connections).toBe(0);
       expect(stderr).not.toHaveBeenCalled();
     } finally {
       server.stop(true);

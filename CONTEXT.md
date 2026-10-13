@@ -106,10 +106,10 @@ The record of a Process execution. Pulse *emits* it; miner *consumes* it and *ow
 _Avoid_: using "trace" for the observability span (`traceId`/`spanId`) — that is a generic span context, not this artifact.
 
 **Envelope** (Myelin envelope):
-The universal message wrapper — "one schema for all signals." Myelin (L3) owns the schema. Pulse integration is *future* (blueprint: actions produce/consume envelopes; process events carry sovereignty) — myelin sprang up after pulse.
+The universal message wrapper — "one schema for all signals." Myelin (L3) owns the schema. Pulse emits `execution.run.finished` through myelin's outbox under the Vigil contract (soma node #787). Action-level envelope integration remains future work.
 
 **Sovereignty**:
-Metadata declared in the Envelope that travels with the message. Myelin-owned. Pulse will attach it to process events (future).
+Metadata declared in the Envelope that travels with the message. Myelin-owned. Pulse's run-finished envelopes attach the fixed sovereignty defaults specified by the Vigil contract.
 
 ## Relationships
 
@@ -129,4 +129,4 @@ Metadata declared in the Envelope that travels with the message. Myelin-owned. P
 - "Trigger" was used loosely for Cue, Binding, and the event — resolved: banned as a noun; use **Cue** / **Binding** / **cue.fired**.
 - A **Tree** is really a DAG (cycle detection exists) — "Tree" is historical; resolved: keep the name **Tree** / **Tree Runner** rather than renaming to Graph.
 - "A Primitive is a Composition primitive or a Control primitive" no longer covers every Primitive: agent, tribunal, governed and research neither wrap a sub-pipeline nor only alter control flow — they do work through a model or the fleet. UNRESOLVED — a third kind (model-backed primitive?) is not named yet.
-- **Transport** has two candidate owners: pulse's `packages/transport/` (2026-04-04 decision, predates myelin) vs myelin's L2 Transport layer. UNRESOLVED — pending ADR. Pulse owns its abstraction today; may converge on myelin later.
+- **Transport** has two candidate owners: pulse's `packages/transport/` (2026-04-04 decision, predates myelin) vs myelin's L2 Transport layer. UNRESOLVED — pending ADR. Pulse owns its abstraction today; may converge on myelin later. The scoped exception is run-finished delivery: soma node #787 (Q15, Q28) and pulse node #84 explicitly require myelin's outbox over its NATS transport. This integration does not replace pulse's existing transport abstraction or `NatsAgentTransport`.

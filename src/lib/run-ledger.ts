@@ -9,14 +9,16 @@ import {
   NATSTransport,
   type ExecutionRunFinishedEvent,
   type ExecutionRunServes,
+  type MyelinEnvelope,
   type RunOutcome,
   type Sovereignty,
   type TransportPublisher,
   type TransportSubscriber,
 } from "@the-metafactory/myelin";
-import { createOutbox } from "@the-metafactory/myelin/outbox";
+import { createOutbox, type Outbox } from "@the-metafactory/myelin/outbox";
 
-const runs = new AsyncLocalStorage<boolean>();
+const runs = new AsyncLocalStorage<{ active: boolean }>();
+const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
 const EMIT_TIMEOUT_MS = 2000;
 const sovereignty: Sovereignty = {
   classification: "local",
@@ -81,6 +83,14 @@ export function createOutboxRunLedgerPublisher(
   log: (message: string) => void,
 ): RunLedgerPublisher {
   const outbox = createOutbox({ path: config.path, inner, log });
+  return wrapOutboxPublisher(outbox, inner, config);
+}
+
+function wrapOutboxPublisher(
+  outbox: Outbox,
+  inner: TransportPublisher & TransportSubscriber,
+  config: RunLedgerConfig,
+): RunLedgerPublisher {
   const envelopes = new EnvelopeTransport({
     publisher: outbox,
     subscriber: inner,
@@ -101,37 +111,50 @@ class RunLedgerTransport extends NATSTransport {
 
 type WorkerReply =
   | { kind: "ready" | "published" | "closed" }
-  | { kind: "log" | "error"; message: string };
+  | { kind: "error"; message: string };
 
-// Myelin tracks replay claims per process. Workers sharing our PID must use
-// the same spool serially, so one cannot adopt another worker's live claim.
-const publisherQueues = new Map<string, Promise<void>>();
+// Keep claims in one isolate and one outbox per spool while runs overlap.
+// Otherwise another outbox can replay a put that is still awaiting its ack.
+const sharedOutboxes = new Map<string, { outbox: Outbox; users: number }>();
+const deliveries = new AsyncLocalStorage<{ inner: TransportPublisher; log: (message: string) => void }>();
 
-async function acquirePublisherSlot(path: string, signal: AbortSignal): Promise<() => void> {
-  const key = resolve(path);
-  const previous = publisherQueues.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const completion = new Promise<void>(done => { release = done; });
-  const queued = previous.then(() => completion);
-  publisherQueues.set(key, queued);
-  void queued.then(() => {
-    if (publisherQueues.get(key) === queued) publisherQueues.delete(key);
-  });
-  let abort!: () => void;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    abort = () => { reject(signal.reason); };
-    signal.addEventListener("abort", abort, { once: true });
-  });
-  try {
-    await Promise.race([previous, aborted]);
-    signal.throwIfAborted();
-    return release;
-  } catch (error) {
-    release();
-    throw error;
-  } finally {
-    signal.removeEventListener("abort", abort);
+function shareOutbox(
+  config: RunLedgerConfig,
+  inner: TransportPublisher & TransportSubscriber,
+  log: (message: string) => void,
+): RunLedgerPublisher {
+  const delivery = { inner, log };
+  const current = () => deliveries.getStore() ?? delivery;
+  const key = resolve(config.path);
+  let shared = sharedOutboxes.get(key);
+  if (!shared) {
+    shared = {
+      users: 0,
+      outbox: createOutbox({
+        path: key,
+        inner: {
+          publish: (subject, envelope) => current().inner.publish(subject, envelope),
+          request: (subject, envelope, options) => current().inner.request(subject, envelope, options),
+          close: () => current().inner.close(),
+        },
+        log: message => current().log(message),
+      }),
+    };
+    sharedOutboxes.set(key, shared);
   }
+  shared.users++;
+  const lease = shared;
+  const publisher = wrapOutboxPublisher(lease.outbox, inner, config);
+  return {
+    drained: publisher.drained,
+    publish: event => deliveries.run(delivery, () => publisher.publish(event)),
+    close: async () => {
+      try { await publisher.close(); }
+      finally {
+        if (--lease.users === 0) sharedOutboxes.delete(key);
+      }
+    },
+  };
 }
 
 async function connectPublisher(
@@ -140,17 +163,9 @@ async function connectPublisher(
   signal: AbortSignal,
 ): Promise<RunLedgerPublisher> {
   signal.throwIfAborted();
-  const release = await acquirePublisherSlot(config.path, signal);
-  let worker: Worker;
-  try {
-    signal.throwIfAborted();
-    worker = new Worker(new URL(import.meta.url), {
-      workerData: { pulseRunLedger: true, config },
-    });
-  } catch (error) {
-    release();
-    throw error;
-  }
+  const worker = new Worker(new URL(import.meta.url), {
+    workerData: { pulseRunLedger: true, config },
+  });
   let pending: { resolve(): void; reject(error: Error): void } | undefined;
   let workerError: Error | undefined;
   let stopped = false;
@@ -158,7 +173,7 @@ async function connectPublisher(
   const stop = () => {
     stopped = true;
     pending?.reject(new Error("run-ledger publisher stopped"));
-    return termination ??= worker.terminate().finally(release);
+    return termination ??= worker.terminate();
   };
   const abort = () => { void stop().catch(() => {}); };
   signal.addEventListener("abort", abort, { once: true });
@@ -176,8 +191,7 @@ async function connectPublisher(
   };
   const ready = wait();
   worker.on("message", (reply: WorkerReply) => {
-    if (reply.kind === "log") log(reply.message);
-    else if (reply.kind === "error") fail(new Error(reply.message));
+    if (reply.kind === "error") fail(new Error(reply.message));
     else pending?.resolve();
   });
   worker.on("error", error => {
@@ -189,11 +203,14 @@ async function connectPublisher(
   try {
     await ready;
     signal.throwIfAborted();
-    return {
-      drained: Promise.resolve(), // Worker awaits the outbox drain before ready.
-      publish: async event => {
+    const unsupported = async (): Promise<never> => { throw new Error("run-ledger transport only publishes"); };
+    return shareOutbox(config, {
+      request: unsupported,
+      subscribe: unsupported,
+      subscribeBestEffort: unsupported,
+      publish: async (subject, envelope) => {
         signal.throwIfAborted();
-        await wait({ kind: "publish", event });
+        await wait({ kind: "publish", subject, envelope });
       },
       close: async () => {
         try {
@@ -205,7 +222,7 @@ async function connectPublisher(
           await stop();
         }
       },
-    };
+    }, log);
   } catch (error) {
     signal.removeEventListener("abort", abort);
     await stop();
@@ -223,21 +240,17 @@ async function runPublisherWorker(config: RunLedgerConfig): Promise<void> {
     name: "pulse-run-ledger",
   });
   await transport.connect();
-  const publisher = createOutboxRunLedgerPublisher(transport, config, message => {
-    port.postMessage({ kind: "log", message });
-  });
-  await publisher.drained;
-  port.on("message", async (command: { kind: "publish"; event: ExecutionRunFinishedEvent } | { kind: "close" }) => {
+  port.on("message", async (command: { kind: "publish"; subject: string; envelope: MyelinEnvelope } | { kind: "close" }) => {
     try {
       if (command.kind === "publish") {
-        await publisher.publish(command.event);
+        await transport.publish(command.subject, command.envelope);
         port.postMessage({ kind: "published" });
       } else {
-        await publisher.close();
+        await transport.close();
         port.postMessage({ kind: "closed" });
       }
     } catch (error) {
-      port.postMessage({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      port.postMessage({ kind: "error", message: messageOf(error) });
     }
   });
   port.postMessage({ kind: "ready" });
@@ -245,7 +258,7 @@ async function runPublisherWorker(config: RunLedgerConfig): Promise<void> {
 
 if (!isMainThread && workerData?.pulseRunLedger) {
   void runPublisherWorker(workerData.config).catch(error => {
-    parentPort!.postMessage({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+    parentPort!.postMessage({ kind: "error", message: messageOf(error) });
   });
 }
 
@@ -255,12 +268,16 @@ interface FinishedRun {
   endedAt?: string;
 }
 
+interface RunIdentity {
+  ref: string;
+  runId: string;
+  startedAt: string;
+}
+
 async function emitFinished(
   config: RunLedgerConfig,
   factory: RunLedgerPublisherFactory,
-  ref: string,
-  runId: string,
-  startedAt: string,
+  { ref, runId, startedAt }: RunIdentity,
   finished: FinishedRun,
 ): Promise<void> {
   const controller = new AbortController();
@@ -302,13 +319,13 @@ async function emitFinished(
       controller.signal.throwIfAborted();
       await publisher.publish(event);
     } catch (error) {
-      report(`emit failed: ${error instanceof Error ? error.message : String(error)}`);
+      report(`emit failed: ${messageOf(error)}`);
     } finally {
       if (publisher) {
         try {
           await publisher.close();
         } catch (error) {
-          report(`close failed: ${error instanceof Error ? error.message : String(error)}`);
+          report(`close failed: ${messageOf(error)}`);
         }
       }
     }
@@ -334,12 +351,13 @@ export async function withRunLedger<T>(
   body: () => Promise<T>,
   summarize: (result: T) => FinishedRun,
 ): Promise<T> {
-  if (runs.getStore()) return body();
+  if (runs.getStore()?.active) return body();
   const config = readConfig();
   const factory = publisherFactory;
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
-  return runs.run(true, async () => {
+  const context = { active: true };
+  return runs.run(context, async () => {
     let finished: FinishedRun = { outcome: "failed" };
     try {
       const result = await body();
@@ -347,7 +365,11 @@ export async function withRunLedger<T>(
       return result;
     } finally {
       finished.endedAt ??= new Date().toISOString();
-      if (config) await emitFinished(config, factory, ref, runId, startedAt, finished);
+      try {
+        if (config) await emitFinished(config, factory, { ref, runId, startedAt }, finished);
+      } finally {
+        context.active = false;
+      }
     }
   });
 }
