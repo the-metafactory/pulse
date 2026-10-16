@@ -76,16 +76,6 @@ function readConfig(): RunLedgerConfig | undefined {
   };
 }
 
-/** Shared production wiring; tests use a real outbox over InMemoryTransport. */
-export function createOutboxRunLedgerPublisher(
-  inner: TransportPublisher & TransportSubscriber,
-  config: RunLedgerConfig,
-  log: (message: string) => void,
-): RunLedgerPublisher {
-  const outbox = createOutbox({ path: config.path, inner, log });
-  return wrapOutboxPublisher(outbox, inner, config);
-}
-
 function wrapOutboxPublisher(
   outbox: Outbox,
   inner: TransportPublisher & TransportSubscriber,
@@ -115,21 +105,26 @@ type WorkerReply =
 
 // Keep claims in one isolate and one outbox per spool while runs overlap.
 // Otherwise another outbox can replay a put that is still awaiting its ack.
-const sharedOutboxes = new Map<string, { outbox: Outbox; users: number }>();
-const deliveries = new AsyncLocalStorage<{ inner: TransportPublisher; log: (message: string) => void }>();
+interface Delivery { inner: TransportPublisher; log: (message: string) => void }
+const sharedOutboxes = new Map<string, { outbox: Outbox; live: Set<Delivery> }>();
+const deliveries = new AsyncLocalStorage<Delivery>();
 
-function shareOutbox(
-  config: RunLedgerConfig,
+/** The production per-spool shared outbox over any inner transport; tests pass InMemoryTransport. */
+export function createOutboxRunLedgerPublisher(
   inner: TransportPublisher & TransportSubscriber,
+  config: RunLedgerConfig,
   log: (message: string) => void,
 ): RunLedgerPublisher {
-  const delivery = { inner, log };
-  const current = () => deliveries.getStore() ?? delivery;
+  const delivery: Delivery = { inner, log };
   const key = resolve(config.path);
   let shared = sharedOutboxes.get(key);
   if (!shared) {
+    const live = new Set<Delivery>();
+    // Startup replay runs outside any publish, so it goes through a lease still open.
+    // With none left it falls to the creator's closed transport and re-spools.
+    const current = () => deliveries.getStore() ?? live.values().next().value ?? delivery;
     shared = {
-      users: 0,
+      live,
       outbox: createOutbox({
         path: key,
         inner: {
@@ -142,7 +137,7 @@ function shareOutbox(
     };
     sharedOutboxes.set(key, shared);
   }
-  shared.users++;
+  shared.live.add(delivery);
   const lease = shared;
   const publisher = wrapOutboxPublisher(lease.outbox, inner, config);
   return {
@@ -151,7 +146,8 @@ function shareOutbox(
     close: async () => {
       try { await publisher.close(); }
       finally {
-        if (--lease.users === 0) sharedOutboxes.delete(key);
+        lease.live.delete(delivery);
+        if (lease.live.size === 0) sharedOutboxes.delete(key);
       }
     },
   };
@@ -204,7 +200,7 @@ async function connectPublisher(
     await ready;
     signal.throwIfAborted();
     const unsupported = async (): Promise<never> => { throw new Error("run-ledger transport only publishes"); };
-    return shareOutbox(config, {
+    return createOutboxRunLedgerPublisher({
       request: unsupported,
       subscribe: unsupported,
       subscribeBestEffort: unsupported,
@@ -222,7 +218,7 @@ async function connectPublisher(
           await stop();
         }
       },
-    }, log);
+    }, config, log);
   } catch (error) {
     signal.removeEventListener("abort", abort);
     await stop();
