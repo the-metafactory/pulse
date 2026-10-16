@@ -1,4 +1,4 @@
-schema: pai/v1
+schema: arc/v1
 name: pulse
 type: tool
 tier: community
@@ -28,9 +28,12 @@ scripts:
 
 capabilities:
   filesystem:
-    - path: ~/.config/pai/pulse/
-      access: read-write
-      reason: Store execution traces and action cache
+    read:
+      - "~/.config/arc/pkg/repos"   # arc package discovery (src/lib/arc.ts)
+    write:
+      - "~/.local/state/pulse"      # run-ledger outbox spool, honours XDG_STATE_HOME (src/lib/run-ledger.ts)
   network:
-    - domain: "*.workers.dev"
+    - host: "*.workers.dev"
       reason: Dispatch actions to Cloudflare Workers in cloud mode
+    - host: "localhost"
+      reason: NATS bus for run-ledger events and agent dispatch, default localhost:4222 (src/lib/run-ledger.ts, src/lib/agent-provider.ts)
