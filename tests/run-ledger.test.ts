@@ -47,6 +47,16 @@ const testSovereignty: Sovereignty = {
 };
 const readSpool = async (path: string) =>
   (await readFile(path, "utf8")).trim().split("\n").map(row => JSON.parse(row));
+/** Leave one unacknowledged put in the spool, as a run that died before its ack would. */
+async function seedOldRun(path: string): Promise<{ subject: string; envelope: MyelinEnvelope }> {
+  const { subject, input } = createExecutionRunFinished({
+    principal: "jc", stack: "default", source: "jc.pulse.run", sovereignty: testSovereignty,
+    payload: { run_id: "old-run", producer: "pulse", ran: { kind: "flow", ref: "old-flow" }, outcome: "succeeded", started_at: "2026-10-13T00:00:00Z", ended_at: "2026-10-13T00:00:01Z" },
+  });
+  const envelope = createEnvelope({ ...input, sovereignty: testSovereignty });
+  await writeFile(path, `${JSON.stringify({ op: "put", id: envelope.id, subject, envelope })}\n`);
+  return { subject, envelope };
+}
 
 beforeEach(() => {
   savedEnv = Object.fromEntries(envKeys.map(key => [key, process.env[key]]));
@@ -617,13 +627,7 @@ describe("run-ledger through exported run entry points", () => {
     const inner = new InMemoryTransport();
     const received: MyelinEnvelope[] = [];
     await inner.subscribe("local.jc.default.execution.run.finished", async envelope => { received.push(envelope); });
-    const oldEvent = createExecutionRunFinished({
-      principal: "jc", stack: "default", source: "jc.pulse.run",
-      sovereignty: testSovereignty,
-      payload: { run_id: "old-run", producer: "pulse", ran: { kind: "flow", ref: "old-flow" }, outcome: "succeeded", started_at: "2026-10-13T00:00:00Z", ended_at: "2026-10-13T00:00:01Z" },
-    });
-    const oldEnvelope = createEnvelope({ ...oldEvent.input, sovereignty: testSovereignty });
-    await writeFile(path, `${JSON.stringify({ op: "put", id: oldEnvelope.id, subject: oldEvent.subject, envelope: oldEnvelope })}\n`);
+    const { subject: oldSubject, envelope: oldEnvelope } = await seedOldRun(path);
     const restore = setRunLedgerPublisher(async (config, log) => createOutboxRunLedgerPublisher(inner, { ...config, path }, log));
     try {
       const result = await runFlow(flow(), options);
@@ -636,7 +640,7 @@ describe("run-ledger through exported run entry points", () => {
       expect(rows.map(row => row.op)).toEqual(["put", "ack"]);
       expect(rows[0].envelope.id).toBe(received[1]!.id);
       expect(rows[1].id).toBe(received[1]!.id);
-      await expect(inner.publish(oldEvent.subject, oldEnvelope)).rejects.toThrow("Transport closed");
+      await expect(inner.publish(oldSubject, oldEnvelope)).rejects.toThrow("Transport closed");
       expect(stderr).not.toHaveBeenCalled();
       // A real outbox failure is logged and retained for replay, never rejected.
       expect((await runFlow(flow(), options)).success).toBe(true);
@@ -654,16 +658,11 @@ describe("run-ledger through exported run entry points", () => {
   test("startup replay outlives its creator's lease and sends through one still open", async () => {
     const directory = await mkdtemp(join(tmpdir(), "pulse-ledger-"));
     const path = join(directory, "outbox.jsonl");
-    const old = createExecutionRunFinished({
-      principal: "jc", stack: "default", source: "jc.pulse.run", sovereignty: testSovereignty,
-      payload: { run_id: "old-run", producer: "pulse", ran: { kind: "flow", ref: "old-flow" }, outcome: "succeeded", started_at: "2026-10-13T00:00:00Z", ended_at: "2026-10-13T00:00:01Z" },
-    });
-    const oldEnvelope = createEnvelope({ ...old.input, sovereignty: testSovereignty });
-    await writeFile(path, `${JSON.stringify({ op: "put", id: oldEnvelope.id, subject: old.subject, envelope: oldEnvelope })}\n`);
+    const { subject: oldSubject, envelope: oldEnvelope } = await seedOldRun(path);
     const creatorInner = new InMemoryTransport();
     const survivorInner = new InMemoryTransport();
     const received: MyelinEnvelope[] = [];
-    await survivorInner.subscribe(old.subject, async envelope => { received.push(envelope); });
+    await survivorInner.subscribe(oldSubject, async envelope => { received.push(envelope); });
     const config: RunLedgerConfig = { principal: "jc", stack: "default", servers: "unused", path };
     const logs: string[] = [];
     const creator = createOutboxRunLedgerPublisher(creatorInner, config, message => { logs.push(message); });

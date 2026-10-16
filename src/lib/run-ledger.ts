@@ -129,6 +129,7 @@ function shareOutbox(
   if (!shared) {
     const live = new Set<Delivery>();
     // Startup replay runs outside any publish, so it goes through a lease still open.
+    // With none left it falls to the creator's closed transport and re-spools.
     const current = () => deliveries.getStore() ?? live.values().next().value ?? delivery;
     shared = {
       live,
