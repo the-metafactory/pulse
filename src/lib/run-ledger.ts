@@ -76,15 +76,6 @@ function readConfig(): RunLedgerConfig | undefined {
   };
 }
 
-/** The production per-spool shared outbox over any inner transport; tests pass InMemoryTransport. */
-export function createOutboxRunLedgerPublisher(
-  inner: TransportPublisher & TransportSubscriber,
-  config: RunLedgerConfig,
-  log: (message: string) => void,
-): RunLedgerPublisher {
-  return shareOutbox(config, inner, log);
-}
-
 function wrapOutboxPublisher(
   outbox: Outbox,
   inner: TransportPublisher & TransportSubscriber,
@@ -118,9 +109,10 @@ interface Delivery { inner: TransportPublisher; log: (message: string) => void }
 const sharedOutboxes = new Map<string, { outbox: Outbox; live: Set<Delivery> }>();
 const deliveries = new AsyncLocalStorage<Delivery>();
 
-function shareOutbox(
-  config: RunLedgerConfig,
+/** The production per-spool shared outbox over any inner transport; tests pass InMemoryTransport. */
+export function createOutboxRunLedgerPublisher(
   inner: TransportPublisher & TransportSubscriber,
+  config: RunLedgerConfig,
   log: (message: string) => void,
 ): RunLedgerPublisher {
   const delivery: Delivery = { inner, log };
@@ -208,7 +200,7 @@ async function connectPublisher(
     await ready;
     signal.throwIfAborted();
     const unsupported = async (): Promise<never> => { throw new Error("run-ledger transport only publishes"); };
-    return shareOutbox(config, {
+    return createOutboxRunLedgerPublisher({
       request: unsupported,
       subscribe: unsupported,
       subscribeBestEffort: unsupported,
@@ -226,7 +218,7 @@ async function connectPublisher(
           await stop();
         }
       },
-    }, log);
+    }, config, log);
   } catch (error) {
     signal.removeEventListener("abort", abort);
     await stop();
