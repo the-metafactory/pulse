@@ -1,4 +1,4 @@
-schema: pai/v1
+schema: arc/v1
 name: pulse
 type: tool
 tier: community
@@ -28,9 +28,30 @@ scripts:
 
 capabilities:
   filesystem:
-    - path: ~/.config/pai/pulse/
-      access: read-write
-      reason: Store execution traces and action cache
+    read:
+      - "~/.config/arc/pkg/repos"   # arc package discovery (src/lib/arc.ts)
+    write:
+      - "~/.local/state/pulse"      # run-ledger outbox spool, honours XDG_STATE_HOME (src/lib/run-ledger.ts)
   network:
-    - domain: "*.workers.dev"
+    - host: "*.workers.dev"
       reason: Dispatch actions to Cloudflare Workers in cloud mode
+    - host: "localhost"
+      reason: NATS bus for run-ledger events and agent dispatch, default localhost:4222 (src/lib/run-ledger.ts, src/lib/agent-provider.ts); Ollama at localhost:11434 for local-only agent steps (examples/soc-demo/run-demo.ts)
+    - host: "api.anthropic.com"
+      reason: llm capability fallback when claude -p is unavailable (src/lib/capabilities.ts)
+    - host: "api.infomaniak.com"
+      reason: Infomaniak AI Tools (Apertus) frontier agent provider (examples/soc-demo/run-demo.ts)
+    - host: "www.virustotal.com"
+      reason: SOC demo IOC enrichment, live with VT_API_KEY (examples/soc-demo/blocks/A_FETCH_VIRUSTOTAL)
+    - host: "api.greynoise.io"
+      reason: SOC demo IP enrichment, live with GREYNOISE_API_KEY (examples/soc-demo/blocks/A_FETCH_GREYNOISE)
+    - host: "haveibeenpwned.com"
+      reason: SOC demo breach lookup, live with its API key (examples/soc-demo/blocks/A_FETCH_HIBP)
+    - host: "ipwho.is"
+      reason: SOC demo keyless GeoIP/ASN lookup (examples/soc-demo/blocks/A_LOOKUP_GEOIP_ASN)
+    - host: "rdap.org"
+      reason: SOC demo keyless RDAP owner lookup; redirects to the owning RIR's RDAP host (examples/soc-demo/blocks/A_LOOKUP_OWNER)
+    - host: "crt.sh"
+      reason: SOC demo certificate-transparency search, live with CRTSH_LIVE (examples/soc-demo/blocks/A_FETCH_CRTSH)
+    - host: "*"
+      reason: User-configured endpoints - flow RSS sources and webhook destinations, MATTERMOST_URL, RDAP redirect targets, and any action granted the fetch capability
