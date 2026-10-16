@@ -45,6 +45,8 @@ const testSovereignty: Sovereignty = {
   classification: "local", data_residency: "CH", max_hop: 0,
   frontier_ok: false, model_class: "any",
 };
+const readSpool = async (path: string) =>
+  (await readFile(path, "utf8")).trim().split("\n").map(row => JSON.parse(row));
 
 beforeEach(() => {
   savedEnv = Object.fromEntries(envKeys.map(key => [key, process.env[key]]));
@@ -92,10 +94,7 @@ describe("run-ledger through exported run entry points", () => {
     expect(events[0]!.subject).toBe("local.jc.default.execution.run.finished");
     expect(events[0]!.input.source).toBe("jc.pulse.run");
     expect(events[0]!.input.type).toBe("execution.run.finished");
-    expect(events[0]!.input.sovereignty).toEqual({
-      classification: "local", data_residency: "CH", max_hop: 0,
-      frontier_ok: false, model_class: "any",
-    });
+    expect(events[0]!.input.sovereignty).toEqual(testSovereignty);
     expect(payload().producer).toBe("pulse");
     expect(payload().ran).toEqual({ kind: "flow", ref: "F_LEDGER" });
     expect(payload().outcome).toBe("succeeded");
@@ -483,7 +482,7 @@ describe("run-ledger through exported run entry points", () => {
       ));
       expect(new Set(received.map(envelope => envelope.payload.run_id)).size).toBe(names.length);
       for (const envelope of received) expect(validateExecutionRunFinished(envelope)).toEqual({ valid: true, errors: [] });
-      const rows = (await readFile(join(directory, "pulse", "outbox.jsonl"), "utf8")).trim().split("\n").map(row => JSON.parse(row));
+      const rows = await readSpool(join(directory, "pulse", "outbox.jsonl"));
       expect(rows.filter(row => row.op === "put").map(row => row.id).sort()).toEqual(received.map(envelope => envelope.id).sort());
       expect(rows.filter(row => row.op === "ack").map(row => row.id).sort()).toEqual(received.map(envelope => envelope.id).sort());
       expect(connections).toBe(0);
@@ -491,7 +490,7 @@ describe("run-ledger through exported run entry points", () => {
       // Once all leases close, the next outbox drains the acknowledged spool.
       await runPipeline({ name: "P_LATER", actions: [] }, {}, options);
       expect(received).toHaveLength(names.length + 1);
-      const laterRows = (await readFile(join(directory, "pulse", "outbox.jsonl"), "utf8")).trim().split("\n").map(row => JSON.parse(row));
+      const laterRows = await readSpool(join(directory, "pulse", "outbox.jsonl"));
       expect(laterRows.map(row => row.op)).toEqual(["put", "ack"]);
       expect(laterRows[0].id).toBe(received.at(-1)!.id);
       expect(connections).toBe(0);
@@ -507,7 +506,7 @@ describe("run-ledger through exported run entry points", () => {
       expect(connections).toBe(0);
       expect(stderr).toHaveBeenCalledTimes(2);
       for (const call of stderr.mock.calls) expect(call[0]).toContain("timed out");
-      const retained = (await readFile(join(directory, "pulse", "outbox.jsonl"), "utf8")).trim().split("\n").map(row => JSON.parse(row));
+      const retained = await readSpool(join(directory, "pulse", "outbox.jsonl"));
       expect(retained.map(row => row.op)).toEqual(["put", "put"]);
       const retainedIds = retained.map(row => row.id).sort();
 
@@ -620,7 +619,7 @@ describe("run-ledger through exported run entry points", () => {
     await inner.subscribe("local.jc.default.execution.run.finished", async envelope => { received.push(envelope); });
     const oldEvent = createExecutionRunFinished({
       principal: "jc", stack: "default", source: "jc.pulse.run",
-      sovereignty: { classification: "local", data_residency: "CH", max_hop: 0, frontier_ok: false, model_class: "any" },
+      sovereignty: testSovereignty,
       payload: { run_id: "old-run", producer: "pulse", ran: { kind: "flow", ref: "old-flow" }, outcome: "succeeded", started_at: "2026-10-13T00:00:00Z", ended_at: "2026-10-13T00:00:01Z" },
     });
     const oldEnvelope = createEnvelope({ ...oldEvent.input, sovereignty: testSovereignty });
@@ -633,7 +632,7 @@ describe("run-ledger through exported run entry points", () => {
       expect(received[0]!.id).toBe(oldEnvelope.id);
       expect(received[1]!.payload.ran).toEqual({ kind: "flow", ref: "F_LEDGER" });
       for (const envelope of received) expect(validateExecutionRunFinished(envelope)).toEqual({ valid: true, errors: [] });
-      const rows = (await readFile(path, "utf8")).trim().split("\n").map(row => JSON.parse(row));
+      const rows = await readSpool(path);
       expect(rows.map(row => row.op)).toEqual(["put", "ack"]);
       expect(rows[0].envelope.id).toBe(received[1]!.id);
       expect(rows[1].id).toBe(received[1]!.id);
@@ -643,11 +642,39 @@ describe("run-ledger through exported run entry points", () => {
       expect((await runFlow(flow(), options)).success).toBe(true);
       expect(stderr).toHaveBeenCalledTimes(1);
       expect(stderr.mock.calls[0]![0]).toContain("publish failed");
-      const pending = (await readFile(path, "utf8")).trim().split("\n").map(row => JSON.parse(row));
+      const pending = await readSpool(path);
       expect(pending.map(row => row.op)).toEqual(["put"]);
     } finally {
       restore();
       await inner.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("startup replay outlives its creator's lease and sends through one still open", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "pulse-ledger-"));
+    const path = join(directory, "outbox.jsonl");
+    const old = createExecutionRunFinished({
+      principal: "jc", stack: "default", source: "jc.pulse.run", sovereignty: testSovereignty,
+      payload: { run_id: "old-run", producer: "pulse", ran: { kind: "flow", ref: "old-flow" }, outcome: "succeeded", started_at: "2026-10-13T00:00:00Z", ended_at: "2026-10-13T00:00:01Z" },
+    });
+    const oldEnvelope = createEnvelope({ ...old.input, sovereignty: testSovereignty });
+    await writeFile(path, `${JSON.stringify({ op: "put", id: oldEnvelope.id, subject: old.subject, envelope: oldEnvelope })}\n`);
+    const creatorInner = new InMemoryTransport();
+    const survivorInner = new InMemoryTransport();
+    const received: MyelinEnvelope[] = [];
+    await survivorInner.subscribe(old.subject, async envelope => { received.push(envelope); });
+    const config: RunLedgerConfig = { principal: "jc", stack: "default", servers: "unused", path };
+    const logs: string[] = [];
+    const creator = createOutboxRunLedgerPublisher(creatorInner, config, message => { logs.push(message); });
+    const survivor = createOutboxRunLedgerPublisher(survivorInner, config, message => { logs.push(message); });
+    try {
+      await creator.close();
+      await survivor.drained;
+      expect(received.map(envelope => envelope.id)).toEqual([oldEnvelope.id]);
+      expect(logs).toEqual([]);
+    } finally {
+      await survivor.close();
       await rm(directory, { recursive: true, force: true });
     }
   });
