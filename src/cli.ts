@@ -5,6 +5,8 @@ import { createValidateCommand } from "./commands/validate";
 import { createStatusCommand } from "./commands/status";
 import { createFlowCommand } from "./commands/flow";
 
+import { createComposeCommand } from "./commands/compose";
+
 const program = new Command();
 
 program
@@ -12,6 +14,7 @@ program
   .description("Process execution engine for the metafactory ecosystem")
   .version("0.1.0");
 
+program.addCommand(createComposeCommand());
 program.addCommand(createRunCommand());
 program.addCommand(createValidateCommand());
 program.addCommand(createStatusCommand());

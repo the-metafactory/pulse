@@ -362,3 +362,32 @@ bun run typecheck  # tsc --noEmit
 ## License
 
 Private — part of the metafactory ecosystem.
+
+## Compose a pipeline
+
+`composeFlow(request, { catalog, llm })` is exported from `src/index.ts`.
+It returns `status: complete` with a parsed `flow`, YAML and summary, a
+`no-match` refusal naming a missing capability, or an `invalid` typed failure.
+The composer validates against the supplied catalog and Pulse's pipeline parser.
+It never runs the pipeline or creates a schedule. Agent steps can provide
+judgments; they do not replace missing tools.
+
+```sh
+pulse compose --request "fetch my newsletter and add new links to sift" --json
+```
+
+The CLI loads active installed actions through `arc list --json`. Use
+`--catalog-dir <directory>` for a local action palette. Both paths validate
+manifest input/output fields. Discovery and model failures exit with code 1
+and a JSON failure; a completed composition exits with code 0.
+
+By default, the CLI uses Pulse's configured local LLM capability. To select an
+OpenAI-compatible model, set `PULSE_COMPOSE_MODEL_URL`, `PULSE_COMPOSE_MODEL`,
+and `PULSE_COMPOSE_API_KEY`, or use `--model-url` and `--model` for the first two.
+The key stays in the environment. `initialFields` defaults to `scenario,text`;
+library callers can pass their own initial fields and inject their own LLM.
+
+The SOC example and Yarrow share the library composer, catalog and scenario
+shell. `composeScenario` preserves the SOC prompt and result shape;
+`runScenario` and `runSavedFlow` require an explicit `blocksDir` from the host.
+The example's old import paths remain compatibility wrappers.

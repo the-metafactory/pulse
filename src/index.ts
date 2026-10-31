@@ -141,3 +141,8 @@ export type {
   FlowDestination,
   FlowSchedule,
 } from "./types/flow";
+
+export { composeFlow, type ComposeFlowOptions, type ComposeFlowResult } from "./lib/composer/flow";
+export { buildCatalog, loadInstalledCatalog } from "./lib/composer/catalog";
+export { validatePipeline, type CatalogEntry } from "./lib/composer/validate-pipeline";
+export { runScenario, runSavedFlow, composeScenario, makeStubLLM, makeOllamaAgentProvider } from "./lib/composer/scenario";
