@@ -58,6 +58,9 @@ jobs:
       - name: tsc --noEmit
         run: bun run typecheck
 
+      - name: Public declarations match source
+        run: bun run build:types && git diff --exit-code -- types && test -z "$(git ls-files --others --exclude-standard types)"
+
   test:
     name: Test
     runs-on: ubuntu-latest

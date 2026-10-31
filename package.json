@@ -4,12 +4,14 @@
   "description": "Process execution engine for the metafactory ecosystem",
   "type": "module",
   "main": "src/index.ts",
+  "types": "types/index.d.ts",
   "bin": {
     "pulse": "src/cli.ts"
   },
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:types": "tsc -p tsconfig.types.json"
   },
   "dependencies": {
     "@the-metafactory/myelin": "https://github.com/the-metafactory/myelin.git#v0.9.0",
