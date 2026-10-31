@@ -2,7 +2,7 @@ schema: arc/v1
 name: pulse
 type: tool
 tier: community
-version: 0.31.1
+version: 0.32.0
 description: Process execution engine — tree runner, action system with capability injection, pipeline pipe model, flow orchestration
 author:
   name: Jens-Christian Fischer
@@ -30,6 +30,7 @@ capabilities:
   filesystem:
     read:
       - "~/.config/arc/pkg/repos"   # arc package discovery (src/lib/arc.ts)
+      - "~/.local/share/metafactory/arc/repos"
     write:
       - "~/.local/state/pulse"      # run-ledger outbox spool, honours XDG_STATE_HOME (src/lib/run-ledger.ts)
   network:

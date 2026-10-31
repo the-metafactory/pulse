@@ -57,28 +57,29 @@ export async function loadPipeline(yamlPath: string): Promise<{
   }
 
   const content = await file.text();
+  return { pipeline: parsePipeline(content, yamlPath), baseDir: dirname(yamlPath) };
+}
+
+export function parsePipeline(content: string, source = "composed pipeline"): PipelineDef {
   const parsed = parseYaml(content) as Record<string, unknown>;
 
   if (!parsed || typeof parsed !== "object") {
-    throw new Error(`Pipeline YAML is not a valid document: ${yamlPath}`);
+    throw new Error(`Pipeline YAML is not a valid document: ${source}`);
   }
   if (!parsed.name || typeof parsed.name !== "string") {
-    throw new Error(`Pipeline YAML missing required 'name' field: ${yamlPath}`);
+    throw new Error(`Pipeline YAML missing required 'name' field: ${source}`);
   }
   if (!parsed.actions || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
-    throw new Error(`Pipeline YAML missing or empty 'actions' list: ${yamlPath}`);
+    throw new Error(`Pipeline YAML missing or empty 'actions' list: ${source}`);
   }
 
   // Validate step shapes at parse time (catches typos like { mapp: ... } early)
   const validatedActions = validateSteps(parsed.actions);
 
   return {
-    pipeline: {
-      name: parsed.name as string,
-      actions: validatedActions,
-      description: parsed.description as string | undefined,
-    },
-    baseDir: dirname(yamlPath),
+    name: parsed.name as string,
+    actions: validatedActions,
+    description: parsed.description as string | undefined,
   };
 }
 

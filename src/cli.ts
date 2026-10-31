@@ -1,17 +1,23 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
+import { parse } from "yaml";
+import { z } from "zod";
 import { createRunCommand } from "./commands/run";
 import { createValidateCommand } from "./commands/validate";
 import { createStatusCommand } from "./commands/status";
 import { createFlowCommand } from "./commands/flow";
 
+import { createComposeCommand } from "./commands/compose";
+
 const program = new Command();
+const release = z.object({ version: z.string() }).parse(parse(await Bun.file(new URL("../arc-manifest.yaml", import.meta.url)).text()));
 
 program
   .name("pulse")
   .description("Process execution engine for the metafactory ecosystem")
-  .version("0.1.0");
+  .version(release.version);
 
+program.addCommand(createComposeCommand());
 program.addCommand(createRunCommand());
 program.addCommand(createValidateCommand());
 program.addCommand(createStatusCommand());
