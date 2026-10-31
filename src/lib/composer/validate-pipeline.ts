@@ -125,14 +125,42 @@ function stepOutputs(step: PipelineStep, byName: Map<string, CatalogEntry>): str
         return [step.reduce.collect];
     if ("gate" in step)
         return [step.gate.collect ?? `gate_${step.gate.name}`];
-    if ("agent" in step && typeof (step.agent as {
-        collect?: string;
-    }).collect === "string") {
-        return [(step.agent as {
-                collect: string;
-            }).collect];
-    }
+    if ("agent" in step) return [step.agent.collect ?? `agent_${step.agent.name}`];
+    if ("tribunal" in step) return [step.tribunal.collect ?? `tribunal_${step.tribunal.name}`];
+    if ("governed" in step) return [step.governed.collect ?? `governed_${step.governed.name}`];
+    if ("research" in step) return [step.research.collect ?? `research_${step.research.name}`];
+    if ("parallel" in step) return Object.keys(step.parallel.branches);
     return [];
+}
+function validateStepInputs(step: PipelineStep, available: Set<string>, byName: Map<string, CatalogEntry>, findings: Finding[], index: number): void {
+    if (typeof step === "string") {
+        const entry = byName.get(step);
+        for (const [field, spec] of Object.entries(entry?.input ?? {})) {
+            if (spec.required && !available.has(field)) {
+                findings.push({
+                    rule: "missing-input", step: index,
+                    message: `\`${step}\` requires input \`${field}\` — not provided by initial input or any prior step`,
+                });
+            }
+        }
+    } else if ("retry" in step) {
+        for (const child of step.retry.actions) validateStepInputs(child, available, byName, findings, index);
+    } else if ("parallel" in step) {
+        for (const branch of Object.values(step.parallel.branches)) {
+            const scoped = new Set(available);
+            for (const child of branch.actions) validateStepInputs(child, scoped, byName, findings, index);
+        }
+    } else if ("map" in step || "filter" in step || "reduce" in step) {
+        const scoped = new Set(available);
+        const spec = "map" in step ? step.map : "filter" in step ? step.filter : step.reduce;
+        if ("as" in spec) scoped.add(spec.as);
+        else {
+            scoped.add(spec.item_as);
+            scoped.add(spec.acc_as);
+        }
+        for (const child of spec.actions) validateStepInputs(child, scoped, byName, findings, index);
+    }
+    for (const field of stepOutputs(step, byName)) available.add(field);
 }
 export function validatePipeline(rawYaml: string, catalog: CatalogEntry[], options: ValidatePipelineOptions = {}): ValidationResult {
     const findings: Finding[] = [];
@@ -185,24 +213,7 @@ export function validatePipeline(rawYaml: string, catalog: CatalogEntry[], optio
         }
     }
     const available = new Set(options.initialFields ?? []);
-    steps.forEach((step, idx) => {
-        if (typeof step === "string") {
-            const entry = byName.get(step);
-            if (entry) {
-                for (const [field, spec] of Object.entries(entry.input)) {
-                    if (spec.required && !available.has(field)) {
-                        findings.push({
-                            rule: "missing-input",
-                            step: idx,
-                            message: `\`${step}\` requires input \`${field}\` — not provided by initial input or any prior step`,
-                        });
-                    }
-                }
-            }
-        }
-        for (const out of stepOutputs(step, byName))
-            available.add(out);
-    });
+    steps.forEach((step, idx) => validateStepInputs(step, available, byName, findings, idx));
     const rawSteps = scanStepAnnotations(rawYaml);
     steps.forEach((step, idx) => {
         const raw = rawSteps[idx];
