@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RoutineFlowViewSchema, RoutinePatchSchema } from "./routine-contract";
+import { RoutineFlowViewSchema, RoutinePatchSchema, routineFieldError } from "./routine-contract";
 import { extractFence, composeTier, type ComposerLLM } from "./composer/compose";
 
 export async function proposeRoutineEdit(request: string, raw: unknown, llm: ComposerLLM) {
@@ -13,8 +13,7 @@ export async function proposeRoutineEdit(request: string, raw: unknown, llm: Com
   const result = z.object({ patches: z.array(RoutinePatchSchema).max(100) }).strict().parse(JSON.parse(extractFence(response.text, "json") ?? response.text));
   for (const patch of result.patches) {
     const item = allowed.find((f) => JSON.stringify(f.path) === JSON.stringify(patch.path));
-    if (!item || typeof patch.value !== item.field.type || (item.field.enum && !item.field.enum.includes(patch.value))) throw new Error("The proposed edit is outside the declared contract");
-    if (typeof patch.value === "number" && (!Number.isSafeInteger(patch.value) || (item.field.minimum !== undefined && patch.value < item.field.minimum) || (item.field.maximum !== undefined && patch.value > item.field.maximum))) throw new Error("The proposed value is outside its declared range");
+    if (!item || routineFieldError(item.field, patch.value)) throw new Error("The proposed edit is outside the declared contract");
   }
   return { status: "edit" as const, patches: result.patches };
 }

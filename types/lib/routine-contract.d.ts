@@ -35,6 +35,25 @@ export declare const RoutineContractInput: z.ZodObject<{
     }[] | undefined;
 }>;
 export type RoutinePatch = z.infer<typeof RoutinePatchSchema>;
+declare const field: z.ZodObject<{
+    name: z.ZodString;
+    type: z.ZodEnum<["string", "number", "boolean"]>;
+    minimum: z.ZodOptional<z.ZodNumber>;
+    maximum: z.ZodOptional<z.ZodNumber>;
+    enum: z.ZodOptional<z.ZodArray<z.ZodUnion<[z.ZodString, z.ZodNumber, z.ZodBoolean]>, "many">>;
+}, "strip", z.ZodTypeAny, {
+    type: "string" | "number" | "boolean";
+    name: string;
+    minimum?: number | undefined;
+    maximum?: number | undefined;
+    enum?: (string | number | boolean)[] | undefined;
+}, {
+    type: "string" | "number" | "boolean";
+    name: string;
+    minimum?: number | undefined;
+    maximum?: number | undefined;
+    enum?: (string | number | boolean)[] | undefined;
+}>;
 export declare const RoutineFieldSchema: z.ZodObject<{
     name: z.ZodString;
     type: z.ZodEnum<["string", "number", "boolean"]>;
@@ -54,6 +73,7 @@ export declare const RoutineFieldSchema: z.ZodObject<{
     maximum?: number | undefined;
     enum?: (string | number | boolean)[] | undefined;
 }>;
+export declare function routineFieldError(declared: z.infer<typeof field>, value: string | number | boolean): string | null;
 export declare const RoutineStepSchema: z.ZodObject<{
     path: z.ZodArray<z.ZodUnion<[z.ZodString, z.ZodNumber]>, "many">;
     action: z.ZodString;
@@ -266,3 +286,4 @@ export declare function routineContract(input: z.input<typeof RoutineContractInp
         }[];
     };
 };
+export {};

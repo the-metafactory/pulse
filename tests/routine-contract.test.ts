@@ -4,6 +4,20 @@ import { proposeRoutineEdit } from "../src/lib/routine-proposal";
 
 const yaml = "# reflex-generated-flow: test v1\nname: F_TEST\ninput: {token: secret-value}\nactions:\n  - retry:\n      attempts: 2\n      actions: [A_NOOP]\n  - agent:\n      name: review\n      capability: test.review\n      prompt: secret-prompt\n      collect: result\n";
 describe("routine contract", () => {
+  it("keeps aliased steps inspectable but refuses edits that could change shared nodes", () => {
+    const flow = "name: F_ALIAS\nactions:\n  - retry: &shared\n      attempts: 2\n      actions: [A_NOOP]\n  - retry: *shared\n";
+    const inspected = routineContract({ yaml: flow }).view;
+    expect(inspected.steps.filter((step) => step.action === "retry")).toHaveLength(2);
+    expect(inspected.steps.every((step) => step.editable.length === 0)).toBe(true);
+    for (const index of [0, 1]) expect(() => routineContract({ yaml: flow, patches: [{ path: ["actions", index, "retry", "attempts"], value: 4 }] })).toThrow("shared YAML");
+  });
+  it("hides undeclared brace strings while disclosing declared reference bindings", () => {
+    const flow = "name: F_PRIVATE\nactions:\n  - retry:\n      attempts: 2\n      private_token: '{secret_token}'\n      actions: [A_NOOP]\n  - map:\n      over: '{items}'\n      as: item\n      collect: results\n      actions: [A_NOOP]\n";
+    const view = routineContract({ yaml: flow }).view;
+    expect(JSON.stringify(view)).not.toContain("secret_token");
+    expect(view.steps[0]?.parameters).toContainEqual({ name: "private_token", kind: "redacted", value: null });
+    expect(view.steps[2]?.parameters).toContainEqual({ name: "over", kind: "binding", value: "{items}" });
+  });
   it("redacts undeclared values, shows nested order and edits only declared retry fields", () => {
     const before = routineContract({ yaml });
     expect(JSON.stringify(before)).not.toContain("secret");
