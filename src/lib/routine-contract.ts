@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { parseDocument } from "yaml";
 import { validateSteps } from "./step-runner";
-import { getPrimitiveEntry } from "./primitive-runner";
+import { inspectPrimitiveStep } from "./primitive-runner";
 import { RETRY_EDITABLE_FIELDS } from "./retry-parameters";
 
 const pathSchema = z.array(z.union([z.string(), z.number().int().nonnegative()])).min(1).max(40);
@@ -47,7 +47,7 @@ function inspect(value: unknown): RoutineFlowView {
         return;
       }
       const object = record.parse(raw);
-      const entry = getPrimitiveEntry(object, pointer(path));
+      const entry = inspectPrimitiveStep(object, pointer(path));
       const action = entry.key;
       const params = entry.spec;
       const editable = action === "retry" ? retryFields : [];

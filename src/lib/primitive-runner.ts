@@ -190,7 +190,11 @@ export async function runPrimitiveStep(
   return PRIMITIVES[key].run(spec as never, payload, options, stepRecords, runtime);
 }
 
-export function getPrimitiveEntry(
+export function inspectPrimitiveStep(step: Record<string, unknown>, path: string): { key: string; spec: Record<string, unknown> } {
+  return getPrimitiveEntry(step, path);
+}
+
+function getPrimitiveEntry(
   step: Record<string, unknown>,
   path: string,
 ): { key: PrimitiveKey; spec: Record<string, unknown> } {

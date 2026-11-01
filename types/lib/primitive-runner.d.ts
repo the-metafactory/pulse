@@ -11,3 +11,7 @@ interface PrimitiveRuntime {
 export declare function preflightSteps(steps: PipelineStep[], options: StepRunnerOptions): Promise<StepRunnerOptions>;
 export declare function validatePrimitiveStep(step: Record<string, unknown>, path: string, validateStep: ValidateStep): PipelineStep;
 export declare function runPrimitiveStep(step: Exclude<PipelineStep, string>, payload: Record<string, unknown>, options: StepRunnerOptions, stepRecords: StepRecord[], runtime: PrimitiveRuntime): Promise<Record<string, unknown>>;
+export declare function inspectPrimitiveStep(step: Record<string, unknown>, path: string): {
+    key: string;
+    spec: Record<string, unknown>;
+};
