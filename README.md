@@ -365,6 +365,8 @@ Private — part of the metafactory ecosystem.
 
 ## Compose a pipeline
 
+For inspecting installed routines and proposing confirmed parameter edits, see [Routine inspection and parameter proposals](docs/routine-editing.md).
+
 `composeFlow(request, { catalog, llm })` is exported from `src/index.ts`.
 It returns `status: complete` with a parsed `flow`, YAML and summary, a
 `no-match` refusal naming a missing capability, or an `invalid` typed failure.

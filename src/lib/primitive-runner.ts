@@ -1,4 +1,5 @@
 import { StdinGateProvider } from "./gate-provider";
+import { RetryParametersSchema } from "./retry-parameters";
 import type {
   PipelineStep,
   MapStepSpec,
@@ -109,7 +110,7 @@ const PRIMITIVES = {
       Object.values(spec.branches ?? {}).flatMap((branch) => nestedActions(branch ?? {})),
   },
   retry: {
-    validate: validateNestedActions,
+    validate: validateRetry,
     run: runRetry,
     children: nestedActions,
   },
@@ -189,6 +190,10 @@ export async function runPrimitiveStep(
   return PRIMITIVES[key].run(spec as never, payload, options, stepRecords, runtime);
 }
 
+export function inspectPrimitiveStep(step: Record<string, unknown>, path: string): { key: string; spec: Record<string, unknown> } {
+  return getPrimitiveEntry(step, path);
+}
+
 function getPrimitiveEntry(
   step: Record<string, unknown>,
   path: string,
@@ -220,6 +225,11 @@ function validateNestedActions(spec: Record<string, unknown>, path: string, vali
       validateStep(spec.actions[i], `${path}.actions[${i}]`);
     }
   }
+}
+
+function validateRetry(spec: Record<string, unknown>, path: string, validateStep: ValidateStep): void {
+  RetryParametersSchema.parse(spec);
+  validateNestedActions(spec, path, validateStep);
 }
 
 function validateParallel(spec: Record<string, unknown>, path: string, validateStep: ValidateStep): void {
@@ -477,10 +487,7 @@ async function runRetry(
   stepRecords: StepRecord[],
   runtime: PrimitiveRuntime,
 ): Promise<Record<string, unknown>> {
-  const maxAttempts = spec.attempts;
-  if (maxAttempts < 1) {
-    throw new Error("retry: attempts must be at least 1");
-  }
+  const maxAttempts = RetryParametersSchema.parse(spec).attempts;
 
   const backoff = spec.backoff ?? "exponential";
   const initialDelay = spec.initial_delay_ms ?? 500;
