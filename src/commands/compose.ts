@@ -14,11 +14,12 @@ export function createComposeCommand(): Command {
     .option("--routine-edit <json>", "Propose patches for an owner-redacted routine view without execution")
     .option("--model-url <url>", "OpenAI-compatible model base URL", process.env.PULSE_COMPOSE_MODEL_URL)
     .option("--model <name>", "Model name for --model-url", process.env.PULSE_COMPOSE_MODEL)
-    .action(async (options: { request: string; json?: boolean; catalogDir?: string; modelUrl?: string; model?: string; routineEdit?: string }) => {
+    .option("--api-key-env <name>", "Environment variable holding the configured model credential", "PULSE_COMPOSE_API_KEY")
+    .action(async (options: { request: string; json?: boolean; catalogDir?: string; modelUrl?: string; model?: string; routineEdit?: string; apiKeyEnv: string }) => {
       try {
         if (Boolean(options.modelUrl) !== Boolean(options.model)) throw new Error("--model-url and --model must be supplied together");
         const llm = options.modelUrl && options.model
-          ? chatModelLLM(new OpenAICompatibleChatModel({ baseUrl: options.modelUrl, model: options.model, apiKeyEnv: "PULSE_COMPOSE_API_KEY", label: "pulse-compose" }))
+          ? chatModelLLM(new OpenAICompatibleChatModel({ baseUrl: options.modelUrl, model: options.model, apiKeyEnv: options.apiKeyEnv, label: "pulse-compose" }))
           : (await createLocalCapabilities(["llm"])).llm;
         if (!llm) throw new Error("Composer LLM unavailable");
         if (options.routineEdit) {
