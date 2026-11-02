@@ -346,7 +346,7 @@ export class MyelinAgentProvider implements AgentProvider {
             resolve({
               task_id: taskId,
               status: state === "completed" ? "completed" : "failed",
-              output: p.output ?? p.result ?? null,
+              output: p.output ?? p.result ?? p.result_summary ?? null,
               error: state === "failed" ? String(p.error ?? p.reason ?? "agent task failed") : undefined,
               duration_ms: Date.now() - startedAt,
               agent: typeof p.agent_id === "string" ? p.agent_id : undefined,
