@@ -134,6 +134,8 @@ export type { Policy, PolicyRule, Decision, GateDecision } from "./types/policy"
 // Arc integration (iteration 3) — discover arc-installed packages
 export { discoverArcActions, discoverArcPipelines, discoverArcFlows, createArcActionDirs } from "./lib/arc";
 export type { ArcAction, ArcPipeline, ArcFlow } from "./lib/arc";
+export { saveFlow, showFlow, listFlows, defaultFlowsDir, flowContentHash, SAVED_FLOW_NAME, SAVED_FLOW_REQUEST_ID } from "./lib/saved-flows";
+export type { SaveFlowRequest, SaveFlowResult, ShowFlowResult, ListFlowsResult, ListedFlow, FlowRecord, SavedFlowProvenance, SavedFlowFinding, SavedFlowLocation } from "./lib/saved-flows";
 export type {
   FlowDef,
   FlowResult,
