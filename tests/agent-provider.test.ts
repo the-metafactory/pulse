@@ -155,6 +155,19 @@ describe("MyelinAgentProvider dispatch", () => {
     expect(result.model).toBe("llama3.2");
   });
 
+  test("reads a Cortex exec brain's text from result_summary", async () => {
+    const transport = new InMemoryAgentTransport();
+    await respondToTasks(transport, (envelope) => ({
+      state: "completed",
+      payload: { task_id: envelope.payload.task_id, result_summary: "Three articles on Swiss privacy law.", agent_id: "desk-judgment" },
+    }));
+
+    const result = await makeProvider(transport).dispatch(baseSpec);
+
+    expect(result.status).toBe("completed");
+    expect(result.output).toBe("Three articles on Swiss privacy law.");
+  });
+
   test("resolves with failed status on dispatch.task.failed", async () => {
     const transport = new InMemoryAgentTransport();
     await respondToTasks(transport, () => ({
