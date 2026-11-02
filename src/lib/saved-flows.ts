@@ -8,7 +8,6 @@ import { parsePipeline } from "./pipeline";
 
 export const SAVED_FLOW_NAME = /^F_[A-Z0-9_]{1,64}$/;
 export const SAVED_FLOW_REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
-const SAVED_FLOW_FILE = /^(F_[A-Z0-9_]{1,64})\.yaml$/;
 
 export interface SavedFlowProvenance {
   origin: "conversation" | "cli";
@@ -109,6 +108,42 @@ interface SavedFlowFile {
   provenance: SavedFlowProvenance | null;
 }
 
+async function readYamlFile(path: string, label: string): Promise<{ yaml: string; document: Record<string, unknown> }> {
+  let yaml: string;
+  let document: unknown;
+  try {
+    yaml = await readFile(path, "utf8");
+    document = parseYaml(yaml);
+  } catch (error) {
+    throw new Unreadable(`The ${label} ${path} cannot be read or parsed: ${errorText(error)}`);
+  }
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    throw new Unreadable(`The ${label} ${path} is not a YAML mapping.`);
+  }
+  return { yaml, document: document as Record<string, unknown> };
+}
+
+function toUnreadable(error: unknown): { status: "unreadable"; reason: string } {
+  return { status: "unreadable", reason: errorText(error) };
+}
+
+async function writeExclusive(dir: string, name: string, content: string): Promise<"written" | "exists"> {
+  const target = join(dir, `${name}.yaml`);
+  const temporary = join(dir, `.${name}.${randomBytes(8).toString("hex")}.tmp`);
+  try {
+    await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+    await link(temporary, target);
+    return "written";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return "exists";
+    throw error;
+  } finally {
+    await unlink(temporary).catch((error: unknown) => {
+      if (!isMissing(error)) console.error(`pulse: could not remove temporary file ${temporary}: ${errorText(error)}`);
+    });
+  }
+}
+
 async function readSavedFlows(flowsDir: string): Promise<SavedFlowFile[]> {
   let entries: string[];
   try {
@@ -119,26 +154,15 @@ async function readSavedFlows(flowsDir: string): Promise<SavedFlowFile[]> {
   }
   const flows: SavedFlowFile[] = [];
   for (const entry of entries.sort()) {
-    const match = SAVED_FLOW_FILE.exec(entry);
-    if (!match) continue;
+    const name = entry.endsWith(".yaml") ? entry.slice(0, -".yaml".length) : "";
+    if (!SAVED_FLOW_NAME.test(name)) continue;
     const path = join(flowsDir, entry);
-    let yaml: string;
-    let document: unknown;
-    try {
-      yaml = await readFile(path, "utf8");
-      document = parseYaml(yaml);
-    } catch (error) {
-      throw new Unreadable(`The saved flow ${path} cannot be read or parsed: ${errorText(error)}`);
+    const { yaml, document } = await readYamlFile(path, "saved flow");
+    if (document.name !== name) {
+      throw new Unreadable(`The saved flow ${path} names ${String(document.name)}, not ${name}.`);
     }
-    if (!document || typeof document !== "object" || Array.isArray(document)) {
-      throw new Unreadable(`The saved flow ${path} is not a YAML mapping.`);
-    }
-    const record = document as Record<string, unknown>;
-    if (record.name !== match[1]) {
-      throw new Unreadable(`The saved flow ${path} names ${String(record.name)}, not ${match[1]}.`);
-    }
-    const provenance = record.provenance && typeof record.provenance === "object" ? record.provenance as SavedFlowProvenance : null;
-    flows.push({ name: match[1], path, yaml, sha256: flowContentHash(record), provenance });
+    const provenance = document.provenance && typeof document.provenance === "object" ? document.provenance as SavedFlowProvenance : null;
+    flows.push({ name, path, yaml, sha256: flowContentHash(document), provenance });
   }
   return flows;
 }
@@ -165,7 +189,7 @@ function validateInput(yaml: string, requestId: string, flowsDir: string): { fin
   }
   const document = parsed as Record<string, unknown>;
   if (typeof document.name !== "string" || !SAVED_FLOW_NAME.test(document.name)) {
-    findings.push({ rule: "name", message: "The flow name must match ^F_[A-Z0-9_]{1,64}$." });
+    findings.push({ rule: "name", message: `The flow name must match ${SAVED_FLOW_NAME.source}.` });
   }
   if ("provenance" in document) findings.push({ rule: "provenance", message: "The input must not have a provenance key; only save writes provenance." });
   if ("schedule" in document) findings.push({ rule: "schedule", message: "The input must not have a schedule key; a saved flow is never scheduled." });
@@ -242,26 +266,16 @@ export async function saveFlow(request: SaveFlowRequest): Promise<SaveFlowResult
 
     await mkdir(flowsDir, { recursive: true, mode: 0o700 });
     const realDir = await realpath(flowsDir);
-    const target = join(realDir, `${name}.yaml`);
-    if (dirname(target) !== realDir) {
+    if (dirname(join(realDir, `${name}.yaml`)) !== realDir) {
       return { status: "invalid", findings: [{ rule: "name", message: "The flow file would land outside the flows directory." }] };
     }
-    const temporary = join(realDir, `.${name}.${randomBytes(8).toString("hex")}.tmp`);
-    try {
-      await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
-      await link(temporary, target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    if (await writeExclusive(realDir, name, content) === "exists") {
       const raced = existingOutcome(await readSavedFlows(flowsDir), request.requestId, sha256);
       return raced ?? { status: "conflict", reason: `A saved flow is already named ${name}.` };
-    } finally {
-      await unlink(temporary).catch((error: unknown) => {
-        if (!isMissing(error)) throw error;
-      });
     }
     return { status: "saved", name, path: join(flowsDir, `${name}.yaml`), sha256 };
   } catch (error) {
-    if (error instanceof Unreadable) return { status: "unreadable", reason: error.message };
+    if (error instanceof Unreadable) return toUnreadable(error);
     throw error;
   }
 }
@@ -279,23 +293,15 @@ export async function showFlow(query: SavedFlowLocation & ({ name: string } | { 
     const arc = await readArcFlowNamed(query.reposDir, query.name);
     return arc ? { status: "found", ...arc } : { status: "not-found" };
   } catch (error) {
-    if (error instanceof Unreadable) return { status: "unreadable", reason: error.message };
-    return { status: "unreadable", reason: errorText(error) };
+    return toUnreadable(error);
   }
 }
 
 async function readArcFlowNamed(reposDir: string | undefined, name: string): Promise<FlowRecord | undefined> {
   const match = (await arcFlowNames(reposDir)).find((flow) => flow.name === name);
   if (!match) return undefined;
-  let yaml: string;
-  let document: unknown;
-  try {
-    yaml = await readFile(match.path, "utf8");
-    document = parseYaml(yaml);
-  } catch (error) {
-    throw new Unreadable(`The arc flow ${match.path} cannot be read or parsed: ${errorText(error)}`);
-  }
-  return { name, path: match.path, source: "arc", sha256: flowContentHash(document as Record<string, unknown>), provenance: null, yaml };
+  const { yaml, document } = await readYamlFile(match.path, "arc flow");
+  return { name, path: match.path, source: "arc", sha256: flowContentHash(document), provenance: null, yaml };
 }
 
 export async function listFlows(location: SavedFlowLocation = {}): Promise<ListFlowsResult> {
@@ -311,7 +317,6 @@ export async function listFlows(location: SavedFlowLocation = {}): Promise<ListF
       ],
     };
   } catch (error) {
-    if (error instanceof Unreadable) return { status: "unreadable", reason: error.message };
-    return { status: "unreadable", reason: errorText(error) };
+    return toUnreadable(error);
   }
 }
