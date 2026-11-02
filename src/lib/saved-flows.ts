@@ -1,0 +1,317 @@
+import { createHash, randomBytes } from "crypto";
+import { link, mkdir, readdir, readFile, realpath, unlink, writeFile } from "fs/promises";
+import { homedir, userInfo } from "os";
+import { dirname, isAbsolute, join } from "path";
+import { isMap, parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
+import { discoverArcFlows } from "./arc";
+import { parsePipeline } from "./pipeline";
+
+export const SAVED_FLOW_NAME = /^F_[A-Z0-9_]{1,64}$/;
+export const SAVED_FLOW_REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
+const SAVED_FLOW_FILE = /^(F_[A-Z0-9_]{1,64})\.yaml$/;
+
+export interface SavedFlowProvenance {
+  origin: "conversation" | "cli";
+  conversation: string | null;
+  exchange: string | null;
+  request_id: string;
+  saved_at: string;
+  saved_by: string;
+}
+
+export interface SavedFlowFinding {
+  rule: string;
+  message: string;
+}
+
+export type SaveFlowResult =
+  | { status: "saved"; name: string; path: string; sha256: string }
+  | { status: "exists"; name: string; path: string; sha256: string }
+  | { status: "conflict"; reason: string }
+  | { status: "invalid"; findings: SavedFlowFinding[] }
+  | { status: "unreadable"; reason: string };
+
+export interface FlowRecord {
+  name: string;
+  path: string;
+  source: "saved" | "arc";
+  sha256: string;
+  provenance: SavedFlowProvenance | null;
+  yaml: string;
+}
+
+export type ShowFlowResult =
+  | ({ status: "found" } & FlowRecord)
+  | { status: "not-found" }
+  | { status: "unreadable"; reason: string };
+
+export interface ListedFlow {
+  name: string;
+  source: "saved" | "arc";
+  path: string;
+  package: string | null;
+}
+
+export type ListFlowsResult =
+  | { status: "ok"; flows: ListedFlow[] }
+  | { status: "unreadable"; reason: string };
+
+export interface SavedFlowLocation {
+  flowsDir?: string;
+  reposDir?: string;
+}
+
+export interface SaveFlowRequest extends SavedFlowLocation {
+  yaml: string;
+  requestId: string;
+  conversation?: string;
+  exchange?: string;
+  savedBy?: string;
+  now?: () => Date;
+}
+
+class Unreadable extends Error {}
+
+export function defaultFlowsDir(env: Record<string, string | undefined> = process.env): string {
+  const configHome = env.XDG_CONFIG_HOME && isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : join(homedir(), ".config");
+  return join(configHome, "pulse", "flows");
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value instanceof Date) return value.toISOString();
+  if (value && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) sorted[key] = canonical((value as Record<string, unknown>)[key]);
+    return sorted;
+  }
+  return value;
+}
+
+export function flowContentHash(document: Record<string, unknown>): string {
+  const { provenance: _provenance, ...content } = document;
+  return createHash("sha256").update(JSON.stringify(canonical(content))).digest("hex");
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
+interface SavedFlowFile {
+  name: string;
+  path: string;
+  yaml: string;
+  sha256: string;
+  provenance: SavedFlowProvenance | null;
+}
+
+async function readSavedFlows(flowsDir: string): Promise<SavedFlowFile[]> {
+  let entries: string[];
+  try {
+    entries = await readdir(flowsDir);
+  } catch (error) {
+    if (isMissing(error)) return [];
+    throw new Unreadable(`The flows directory ${flowsDir} cannot be read: ${errorText(error)}`);
+  }
+  const flows: SavedFlowFile[] = [];
+  for (const entry of entries.sort()) {
+    const match = SAVED_FLOW_FILE.exec(entry);
+    if (!match) continue;
+    const path = join(flowsDir, entry);
+    let yaml: string;
+    let document: unknown;
+    try {
+      yaml = await readFile(path, "utf8");
+      document = parseYaml(yaml);
+    } catch (error) {
+      throw new Unreadable(`The saved flow ${path} cannot be read or parsed: ${errorText(error)}`);
+    }
+    if (!document || typeof document !== "object" || Array.isArray(document)) {
+      throw new Unreadable(`The saved flow ${path} is not a YAML mapping.`);
+    }
+    const record = document as Record<string, unknown>;
+    if (record.name !== match[1]) {
+      throw new Unreadable(`The saved flow ${path} names ${String(record.name)}, not ${match[1]}.`);
+    }
+    const provenance = record.provenance && typeof record.provenance === "object" ? record.provenance as SavedFlowProvenance : null;
+    flows.push({ name: match[1], path, yaml, sha256: flowContentHash(record), provenance });
+  }
+  return flows;
+}
+
+async function arcFlowNames(reposDir: string | undefined): Promise<Array<{ name: string; packageName: string; path: string }>> {
+  const flows = reposDir === undefined ? await discoverArcFlows() : await discoverArcFlows(reposDir);
+  return flows.map((flow) => ({ name: flow.flow.name, packageName: flow.packageName, path: flow.yamlPath }));
+}
+
+function validateInput(yaml: string, requestId: string, flowsDir: string): { findings: SavedFlowFinding[]; document?: Record<string, unknown> } {
+  const findings: SavedFlowFinding[] = [];
+  if (!isAbsolute(flowsDir)) findings.push({ rule: "flows-dir", message: `The flows directory must be an absolute path: ${flowsDir}` });
+  if (!SAVED_FLOW_REQUEST_ID.test(requestId)) findings.push({ rule: "request-id", message: "The request ID must be 8 to 64 letters, digits, underscores or hyphens." });
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(yaml);
+  } catch (error) {
+    findings.push({ rule: "parse-error", message: errorText(error) });
+    return { findings };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    findings.push({ rule: "parse-error", message: "The flow is not a YAML mapping." });
+    return { findings };
+  }
+  const document = parsed as Record<string, unknown>;
+  if (typeof document.name !== "string" || !SAVED_FLOW_NAME.test(document.name)) {
+    findings.push({ rule: "name", message: "The flow name must match ^F_[A-Z0-9_]{1,64}$." });
+  }
+  if ("provenance" in document) findings.push({ rule: "provenance", message: "The input must not have a provenance key; only save writes provenance." });
+  if ("schedule" in document) findings.push({ rule: "schedule", message: "The input must not have a schedule key; a saved flow is never scheduled." });
+  try {
+    parsePipeline(yaml);
+  } catch (error) {
+    findings.push({ rule: "pipeline", message: errorText(error) });
+  }
+  return findings.length > 0 ? { findings } : { findings, document };
+}
+
+function withProvenance(yaml: string, document: Record<string, unknown>, provenance: SavedFlowProvenance): string | undefined {
+  const expected = flowContentHash(document);
+  const block = stringifyYaml({ provenance });
+  const appended = `${yaml.endsWith("\n") ? yaml : `${yaml}\n`}${block}`;
+  if (matches(appended, expected, provenance)) return appended;
+  const edited = parseDocument(yaml);
+  if (!isMap(edited.contents)) return undefined;
+  edited.set("provenance", provenance);
+  const rewritten = edited.toString();
+  return matches(rewritten, expected, provenance) ? rewritten : undefined;
+}
+
+function matches(text: string, expectedHash: string, provenance: SavedFlowProvenance): boolean {
+  try {
+    const reparsed = parseYaml(text) as Record<string, unknown>;
+    return flowContentHash(reparsed) === expectedHash && JSON.stringify(canonical(reparsed.provenance)) === JSON.stringify(canonical(provenance));
+  } catch (_err) {
+    return false;
+  }
+}
+
+function resolveSavedBy(savedBy: string | undefined): string {
+  if (savedBy) return savedBy;
+  if (process.env.PULSE_PRINCIPAL) return process.env.PULSE_PRINCIPAL;
+  return userInfo().username;
+}
+
+function existingOutcome(flows: SavedFlowFile[], requestId: string, sha256: string): SaveFlowResult | undefined {
+  const prior = flows.find((flow) => flow.provenance?.request_id === requestId);
+  if (!prior) return undefined;
+  if (prior.sha256 === sha256) return { status: "exists", name: prior.name, path: prior.path, sha256 };
+  return { status: "conflict", reason: `Request ${requestId} already saved ${prior.name} with different content.` };
+}
+
+export async function saveFlow(request: SaveFlowRequest): Promise<SaveFlowResult> {
+  const flowsDir = request.flowsDir ?? defaultFlowsDir();
+  const { findings, document } = validateInput(request.yaml, request.requestId, flowsDir);
+  if (!document) return { status: "invalid", findings };
+  const name = document.name as string;
+  const sha256 = flowContentHash(document);
+  try {
+    const saved = await readSavedFlows(flowsDir);
+    const prior = existingOutcome(saved, request.requestId, sha256);
+    if (prior) return prior;
+    if (saved.some((flow) => flow.name === name)) {
+      return { status: "conflict", reason: `A saved flow is already named ${name}.` };
+    }
+    const arc = (await arcFlowNames(request.reposDir)).find((flow) => flow.name === name);
+    if (arc) return { status: "conflict", reason: `The arc package ${arc.packageName} already installs a flow named ${name}.` };
+
+    const provenance: SavedFlowProvenance = {
+      origin: request.conversation ? "conversation" : "cli",
+      conversation: request.conversation ?? null,
+      exchange: request.exchange ?? null,
+      request_id: request.requestId,
+      saved_at: (request.now ?? (() => new Date()))().toISOString(),
+      saved_by: resolveSavedBy(request.savedBy),
+    };
+    const content = withProvenance(request.yaml, document, provenance);
+    if (content === undefined) {
+      return { status: "invalid", findings: [{ rule: "parse-error", message: "The flow cannot take a top-level provenance mapping." }] };
+    }
+
+    await mkdir(flowsDir, { recursive: true, mode: 0o700 });
+    const realDir = await realpath(flowsDir);
+    const target = join(realDir, `${name}.yaml`);
+    if (dirname(target) !== realDir) {
+      return { status: "invalid", findings: [{ rule: "name", message: "The flow file would land outside the flows directory." }] };
+    }
+    const temporary = join(realDir, `.${name}.${randomBytes(8).toString("hex")}.tmp`);
+    try {
+      await writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+      await link(temporary, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const raced = existingOutcome(await readSavedFlows(flowsDir), request.requestId, sha256);
+      return raced ?? { status: "conflict", reason: `A saved flow is already named ${name}.` };
+    } finally {
+      await unlink(temporary).catch((error: unknown) => {
+        if (!isMissing(error)) throw error;
+      });
+    }
+    return { status: "saved", name, path: join(flowsDir, `${name}.yaml`), sha256 };
+  } catch (error) {
+    if (error instanceof Unreadable) return { status: "unreadable", reason: error.message };
+    throw error;
+  }
+}
+
+export async function showFlow(query: SavedFlowLocation & ({ name: string } | { requestId: string })): Promise<ShowFlowResult> {
+  const flowsDir = query.flowsDir ?? defaultFlowsDir();
+  try {
+    const saved = await readSavedFlows(flowsDir);
+    if ("requestId" in query) {
+      const hit = saved.find((flow) => flow.provenance?.request_id === query.requestId);
+      return hit ? { status: "found", source: "saved", ...hit } : { status: "not-found" };
+    }
+    const own = saved.find((flow) => flow.name === query.name);
+    if (own) return { status: "found", source: "saved", ...own };
+    const arc = await readArcFlowNamed(query.reposDir, query.name);
+    return arc ? { status: "found", ...arc } : { status: "not-found" };
+  } catch (error) {
+    if (error instanceof Unreadable) return { status: "unreadable", reason: error.message };
+    return { status: "unreadable", reason: errorText(error) };
+  }
+}
+
+async function readArcFlowNamed(reposDir: string | undefined, name: string): Promise<FlowRecord | undefined> {
+  const match = (await arcFlowNames(reposDir)).find((flow) => flow.name === name);
+  if (!match) return undefined;
+  let yaml: string;
+  let document: unknown;
+  try {
+    yaml = await readFile(match.path, "utf8");
+    document = parseYaml(yaml);
+  } catch (error) {
+    throw new Unreadable(`The arc flow ${match.path} cannot be read or parsed: ${errorText(error)}`);
+  }
+  return { name, path: match.path, source: "arc", sha256: flowContentHash(document as Record<string, unknown>), provenance: null, yaml };
+}
+
+export async function listFlows(location: SavedFlowLocation = {}): Promise<ListFlowsResult> {
+  const flowsDir = location.flowsDir ?? defaultFlowsDir();
+  try {
+    const saved = await readSavedFlows(flowsDir);
+    const arc = await arcFlowNames(location.reposDir);
+    return {
+      status: "ok",
+      flows: [
+        ...saved.map((flow) => ({ name: flow.name, source: "saved" as const, path: flow.path, package: null })),
+        ...arc.map((flow) => ({ name: flow.name, source: "arc" as const, path: flow.path, package: flow.packageName })),
+      ],
+    };
+  } catch (error) {
+    if (error instanceof Unreadable) return { status: "unreadable", reason: error.message };
+    return { status: "unreadable", reason: errorText(error) };
+  }
+}

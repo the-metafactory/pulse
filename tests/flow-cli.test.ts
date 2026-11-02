@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { discoverArcFlows } from "../src/lib/arc";
-import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const TEST_DIR = join(import.meta.dir, ".test-flow-cli");
@@ -197,5 +197,93 @@ describe("pulse flow CLI", () => {
     expect(stderr).toContain("completed");
     // stdout should contain the pipeline output (destination: stdout)
     expect(stdout).toContain("doubled");
+  });
+});
+
+describe("pulse flow save, show and list --saved", () => {
+  const cli = join(import.meta.dir, "..", "src", "cli.ts");
+  const root = join(TEST_DIR, "saved-cli");
+  const flowsDir = join(root, "flows");
+  const flowFile = join(root, "F_CLI_SAVED.yaml");
+
+  async function pulse(args: string[], env: Record<string, string> = {}): Promise<{ code: number; stdout: string }> {
+    const proc = Bun.spawn(["bun", cli, "flow", ...args], { stdout: "pipe", stderr: "pipe", env: { ...process.env, ...env } });
+    const stdout = await new Response(proc.stdout).text();
+    return { code: await proc.exited, stdout };
+  }
+
+  beforeAll(() => {
+    mkdirSync(root, { recursive: true });
+    writeFileSync(flowFile, "name: F_CLI_SAVED\nactions:\n  - A_DOUBLE # sovereignty: D, residency: CH\n");
+  });
+
+  test("save reports saved, then exists; show answers by name and request ID", async () => {
+    const saved = await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0001", "--conversation", "probe", "--flows-dir", flowsDir, "--json"]);
+    expect(saved.code).toBe(0);
+    const first = JSON.parse(saved.stdout);
+    expect(first).toMatchObject({ status: "saved", name: "F_CLI_SAVED", path: join(flowsDir, "F_CLI_SAVED.yaml") });
+
+    const again = await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0001", "--conversation", "probe", "--flows-dir", flowsDir, "--json"]);
+    expect(again.code).toBe(0);
+    expect(JSON.parse(again.stdout)).toEqual({ ...first, status: "exists" });
+
+    const byName = await pulse(["show", "F_CLI_SAVED", "--flows-dir", flowsDir, "--json"]);
+    expect(byName.code).toBe(0);
+    const shown = JSON.parse(byName.stdout);
+    expect(Object.keys(shown).sort()).toEqual(["name", "path", "provenance", "sha256", "source", "yaml"]);
+    expect(shown).toMatchObject({ source: "saved", sha256: first.sha256, provenance: { origin: "conversation", conversation: "probe", request_id: "cli-probe-0001" } });
+
+    const byRequest = await pulse(["show", "--request-id", "cli-probe-0001", "--flows-dir", flowsDir, "--json"]);
+    expect(byRequest.code).toBe(0);
+    expect(JSON.parse(byRequest.stdout).sha256).toBe(first.sha256);
+  });
+
+  test("conflict and invalid exit 1 with their JSON shape", async () => {
+    const conflict = await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0002", "--flows-dir", flowsDir, "--json"]);
+    expect(conflict.code).toBe(1);
+    expect(JSON.parse(conflict.stdout)).toEqual({ status: "conflict", reason: "A saved flow is already named F_CLI_SAVED." });
+
+    const badFile = join(root, "bad.yaml");
+    writeFileSync(badFile, "name: f_lower\nactions:\n  - A_DOUBLE\n");
+    const invalid = await pulse(["save", "--file", badFile, "--request-id", "cli-probe-0003", "--flows-dir", flowsDir, "--json"]);
+    expect(invalid.code).toBe(1);
+    const body = JSON.parse(invalid.stdout);
+    expect(body.status).toBe("invalid");
+    expect(body.findings[0].rule).toBe("name");
+  });
+
+  test("show exits 1 with not-found, and 2 with unreadable for an unreadable directory", async () => {
+    const missing = await pulse(["show", "--request-id", "cli-missing-01", "--flows-dir", join(root, "absent"), "--json"]);
+    expect(missing.code).toBe(1);
+    expect(JSON.parse(missing.stdout)).toEqual({ status: "not-found" });
+
+    const locked = join(root, "locked");
+    mkdirSync(locked, { recursive: true });
+    chmodSync(locked, 0o000);
+    try {
+      const unreadable = await pulse(["show", "F_CLI_SAVED", "--flows-dir", locked, "--json"]);
+      expect(unreadable.code).toBe(2);
+      expect(JSON.parse(unreadable.stdout).status).toBe("unreadable");
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  });
+
+  test("list --saved marks the saved flow; plain list ignores saved flows", async () => {
+    const xdg = join(root, "xdg");
+    const saved = await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0004"], { XDG_CONFIG_HOME: xdg });
+    expect(JSON.parse(saved.stdout)).toMatchObject({ status: "saved", path: join(xdg, "pulse", "flows", "F_CLI_SAVED.yaml") });
+
+    const listed = await pulse(["list", "--saved", "--json"], { XDG_CONFIG_HOME: xdg });
+    expect(listed.code).toBe(0);
+    expect(JSON.parse(listed.stdout).flows).toContainEqual({ name: "F_CLI_SAVED", source: "saved", path: join(xdg, "pulse", "flows", "F_CLI_SAVED.yaml"), package: null });
+
+    const human = await pulse(["list", "--saved"], { XDG_CONFIG_HOME: xdg });
+    expect(human.stdout).toContain("F_CLI_SAVED  [saved]");
+
+    const plain = await pulse(["list"], { XDG_CONFIG_HOME: xdg });
+    expect(plain.code).toBe(0);
+    expect(plain.stdout).not.toContain("F_CLI_SAVED");
+    expect(plain.stdout).not.toContain("[saved]");
   });
 });

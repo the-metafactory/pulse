@@ -393,3 +393,36 @@ The SOC example and Yarrow share the library composer, catalog and scenario
 shell. `composeScenario` preserves the SOC prompt and result shape;
 `runScenario` and `runSavedFlow` require an explicit `blocksDir` from the host.
 The example's old import paths remain compatibility wrappers.
+
+## Save a composed flow
+
+`pulse flow save` stores a composed pipeline document without running,
+scheduling or enabling it. The document must pass `parsePipeline`, be named
+`F_[A-Z0-9_]{1,64}`, and have no `provenance` or `schedule` key.
+
+```sh
+pulse flow save --file flow.yaml --request-id conv-1a2b3c4d \
+  --conversation conv-1 --exchange ex-7 --json
+pulse flow show F_MY_FLOW --json
+pulse flow show --request-id conv-1a2b3c4d --json
+pulse flow list --saved --json
+```
+
+Saved flows live in `--flows-dir`, else `$XDG_CONFIG_HOME/pulse/flows`
+(`~/.config/pulse/flows`). The directory is created with mode 0700 and each
+`<name>.yaml` with mode 0600. Save writes the document as given and adds a
+top-level `provenance:` mapping (`origin`, `conversation`, `exchange`,
+`request_id`, `saved_at`, `saved_by`). `saved_by` is `--saved-by`, then
+`PULSE_PRINCIPAL`, then the OS user.
+
+A save never overwrites. The same request ID with the same content answers
+`exists`; the same request ID with other content, or a name a saved or arc
+flow already uses, answers `conflict` and exits 1. Invalid input exits 1 with
+`findings`. Content identity is the SHA-256 of the document's canonical JSON
+without `provenance`.
+
+`show` returns `{name, path, source, sha256, provenance, yaml}`. By name it
+searches saved flows, then arc flows; by request ID, saved flows only. No match
+exits 1 with `not-found`; an unreadable directory or file exits 2 with
+`unreadable`. Plain `pulse flow list` still lists arc flows only. The library
+exports `saveFlow`, `showFlow` and `listFlows`.

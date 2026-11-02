@@ -2,6 +2,8 @@ import { Command } from "commander";
 import { loadFlow, runFlow } from "../lib/flow";
 import { discoverArcFlows, createArcActionDirs } from "../lib/arc";
 import { join, resolve, dirname } from "path";
+import { readFile } from "fs/promises";
+import { listFlows, saveFlow, showFlow } from "../lib/saved-flows";
 import type { FlowDef } from "../types/flow";
 
 interface ResolvedFlow {
@@ -24,7 +26,32 @@ export function createFlowCommand(): Command {
   flow
     .command("list")
     .description("List all installed flows from arc packages")
-    .action(async () => {
+    .option("--saved", "Also list saved flows, each marked with its source")
+    .option("--flows-dir <path>", "Saved-flows directory (default $XDG_CONFIG_HOME/pulse/flows)")
+    .option("--json", "Print the list as JSON")
+    .action(async (opts: { saved?: boolean; flowsDir?: string; json?: boolean }) => {
+      if (opts.saved) {
+        const result = await listFlows({ flowsDir: opts.flowsDir });
+        if (result.status !== "ok") {
+          console.log(JSON.stringify(result));
+          process.exitCode = 2;
+          return;
+        }
+        if (opts.json) {
+          console.log(JSON.stringify(result));
+          return;
+        }
+        if (result.flows.length === 0) {
+          console.log("No saved or arc flows found.");
+          return;
+        }
+        for (const f of result.flows) {
+          console.log(`  ${f.name}  [${f.source}]`);
+          if (f.package) console.log(`    package: ${f.package}`);
+          console.log(`    path:    ${f.path}`);
+        }
+        return;
+      }
       const flows = await discoverArcFlows();
 
       if (flows.length === 0) {
@@ -42,6 +69,63 @@ export function createFlowCommand(): Command {
         console.log(`    path:    ${f.yamlPath}`);
         console.log();
       }
+    });
+
+  flow
+    .command("save")
+    .description("Save a validated composed flow without running, scheduling or enabling it")
+    .requiredOption("--file <path>", "Composed pipeline document (YAML)")
+    .requiredOption("--request-id <id>", "Idempotency key for this save")
+    .option("--conversation <id>", "Conversation that proposed the flow")
+    .option("--exchange <id>", "Exchange within the conversation")
+    .option("--saved-by <principal>", "Principal recorded in provenance")
+    .option("--flows-dir <path>", "Saved-flows directory (absolute; default $XDG_CONFIG_HOME/pulse/flows)")
+    .option("--json", "Print the result as JSON")
+    .action(async (opts: { file: string; requestId: string; conversation?: string; exchange?: string; savedBy?: string; flowsDir?: string }) => {
+      let yaml: string;
+      try {
+        yaml = await readFile(opts.file, "utf8");
+      } catch (error) {
+        console.log(JSON.stringify({ status: "invalid", findings: [{ rule: "file", message: error instanceof Error ? error.message : String(error) }] }));
+        process.exitCode = 1;
+        return;
+      }
+      const result = await saveFlow({
+        yaml,
+        requestId: opts.requestId,
+        conversation: opts.conversation,
+        exchange: opts.exchange,
+        savedBy: opts.savedBy,
+        flowsDir: opts.flowsDir,
+      });
+      console.log(JSON.stringify(result));
+      if (result.status === "unreadable") process.exitCode = 2;
+      else if (result.status !== "saved" && result.status !== "exists") process.exitCode = 1;
+    });
+
+  flow
+    .command("show")
+    .description("Read a saved or arc flow back by name, or a saved flow by request ID")
+    .argument("[name]", "Flow name")
+    .option("--request-id <id>", "Find the saved flow written by this request ID")
+    .option("--flows-dir <path>", "Saved-flows directory (default $XDG_CONFIG_HOME/pulse/flows)")
+    .option("--json", "Print the result as JSON")
+    .action(async (name: string | undefined, opts: { requestId?: string; flowsDir?: string; json?: boolean }) => {
+      if (Boolean(name) === Boolean(opts.requestId)) {
+        console.log(JSON.stringify({ status: "invalid", findings: [{ rule: "query", message: "Give either a flow name or --request-id." }] }));
+        process.exitCode = 1;
+        return;
+      }
+      const result = opts.requestId
+        ? await showFlow({ requestId: opts.requestId, flowsDir: opts.flowsDir })
+        : await showFlow({ name: name ?? "", flowsDir: opts.flowsDir });
+      if (result.status === "found") {
+        const { status: _status, ...record } = result;
+        console.log(opts.json ? JSON.stringify(record) : record.yaml);
+        return;
+      }
+      console.log(JSON.stringify(result));
+      process.exitCode = result.status === "unreadable" ? 2 : 1;
     });
 
   // --- pulse flow <name> ---
