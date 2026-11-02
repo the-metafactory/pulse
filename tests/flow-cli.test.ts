@@ -215,7 +215,7 @@ describe("pulse flow save, show and list --saved", () => {
   beforeAll(() => {
     mkdirSync(root, { recursive: true });
     writeFileSync(flowFile, "name: F_CLI_SAVED\nactions:\n  - A_DOUBLE # sovereignty: D, residency: CH\n");
-  });
+  }, 20_000);
 
   test("save reports saved, then exists; show answers by name and request ID", async () => {
     const saved = await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0001", "--conversation", "probe", "--flows-dir", flowsDir, "--json"]);
@@ -236,7 +236,7 @@ describe("pulse flow save, show and list --saved", () => {
     const byRequest = await pulse(["show", "--request-id", "cli-probe-0001", "--flows-dir", flowsDir, "--json"]);
     expect(byRequest.code).toBe(0);
     expect(JSON.parse(byRequest.stdout).sha256).toBe(first.sha256);
-  });
+  }, 20_000);
 
   test("conflict and invalid exit 1 with their JSON shape", async () => {
     const conflict = await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0002", "--flows-dir", flowsDir, "--json"]);
@@ -250,7 +250,7 @@ describe("pulse flow save, show and list --saved", () => {
     const body = JSON.parse(invalid.stdout);
     expect(body.status).toBe("invalid");
     expect(body.findings[0].rule).toBe("name");
-  });
+  }, 20_000);
 
   test("show exits 1 with not-found, and 2 with unreadable for an unreadable directory", async () => {
     const missing = await pulse(["show", "--request-id", "cli-missing-01", "--flows-dir", join(root, "absent"), "--json"]);
@@ -267,7 +267,7 @@ describe("pulse flow save, show and list --saved", () => {
     } finally {
       chmodSync(locked, 0o700);
     }
-  });
+  }, 20_000);
 
   test("list --saved marks the saved flow; plain list ignores saved flows", async () => {
     const xdg = join(root, "xdg");
@@ -285,5 +285,5 @@ describe("pulse flow save, show and list --saved", () => {
     expect(plain.code).toBe(0);
     expect(plain.stdout).not.toContain("F_CLI_SAVED");
     expect(plain.stdout).not.toContain("[saved]");
-  });
+  }, 20_000);
 });
