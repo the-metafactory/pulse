@@ -202,17 +202,42 @@ describe("showFlow and listFlows", () => {
     expect((await showFlow({ name: "F_NOWHERE", flowsDir, reposDir: REPOS })).status).toBe("unreadable");
   });
 
-  test("list marks saved and arc flows with their source", async () => {
+  test("list marks saved and arc flows with their source, and gives saved flows the hash and provenance show reports", async () => {
     const flowsDir = freshDir();
-    await saveFlow({ yaml: FLOW, requestId: "conv-req-0011", flowsDir, reposDir: REPOS });
+    await saveFlow({ yaml: FLOW, requestId: "conv-req-0011", conversation: "conv-1", flowsDir, reposDir: REPOS });
+    await saveFlow({ yaml: FLOW.replace("F_IVY_SAVED", "F_IVY_OTHER"), requestId: "conv-req-0012", flowsDir, reposDir: REPOS });
+    const shown = await Promise.all(["F_IVY_OTHER", "F_IVY_SAVED"].map((name) => showFlow({ name, flowsDir, reposDir: REPOS })));
+    const [other, saved] = shown.map((result) => {
+      if (result.status !== "found") throw new Error(`expected found, got ${result.status}`);
+      return result;
+    });
     const result = await listFlows({ flowsDir, reposDir: REPOS });
     expect(result).toEqual({
       status: "ok",
       flows: [
-        { name: "F_IVY_SAVED", source: "saved", path: join(flowsDir, "F_IVY_SAVED.yaml"), package: null },
-        { name: "F_ARC_TAKEN", source: "arc", path: join(REPOS, "arc-flow-pkg", "flow.yaml"), package: "arc-flow-pkg" },
+        { name: "F_IVY_OTHER", source: "saved", path: join(flowsDir, "F_IVY_OTHER.yaml"), package: null, sha256: other.sha256, provenance: other.provenance },
+        { name: "F_IVY_SAVED", source: "saved", path: join(flowsDir, "F_IVY_SAVED.yaml"), package: null, sha256: saved.sha256, provenance: saved.provenance },
+        { name: "F_ARC_TAKEN", source: "arc", path: join(REPOS, "arc-flow-pkg", "flow.yaml"), package: "arc-flow-pkg", sha256: null, provenance: null },
       ],
     });
+    expect(saved.provenance).toMatchObject({ origin: "conversation", conversation: "conv-1", request_id: "conv-req-0011" });
+  });
+
+  test("list gives a saved flow without a provenance key null provenance", async () => {
+    const flowsDir = freshDir();
+    mkdirSync(flowsDir);
+    writeFileSync(join(flowsDir, "F_HAND.yaml"), "name: F_HAND\nactions:\n  - A_MARK\n");
+    const result = await listFlows({ flowsDir, reposDir: REPOS });
+    if (result.status !== "ok") throw new Error(`expected ok, got ${result.status}`);
+    expect(result.flows[0]).toMatchObject({ name: "F_HAND", source: "saved", provenance: null });
+    expect(result.flows[0].sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("list is unreadable when any saved flow file does not parse, never a partial list", async () => {
+    const flowsDir = freshDir();
+    await saveFlow({ yaml: FLOW, requestId: "conv-req-0013", flowsDir, reposDir: REPOS });
+    writeFileSync(join(flowsDir, "F_BROKEN.yaml"), "name: [unclosed\n");
+    expect((await listFlows({ flowsDir, reposDir: REPOS })).status).toBe("unreadable");
   });
 
   test("the default directory follows XDG_CONFIG_HOME, else ~/.config", () => {

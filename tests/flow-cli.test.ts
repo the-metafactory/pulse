@@ -276,7 +276,15 @@ describe("pulse flow save, show and list --saved", () => {
 
     const listed = await pulse(["list", "--saved", "--json"], { XDG_CONFIG_HOME: xdg });
     expect(listed.code).toBe(0);
-    expect(JSON.parse(listed.stdout).flows).toContainEqual({ name: "F_CLI_SAVED", source: "saved", path: join(xdg, "pulse", "flows", "F_CLI_SAVED.yaml"), package: null });
+    const shown = JSON.parse((await pulse(["show", "F_CLI_SAVED", "--json"], { XDG_CONFIG_HOME: xdg })).stdout);
+    expect(JSON.parse(listed.stdout).flows).toContainEqual({
+      name: "F_CLI_SAVED",
+      source: "saved",
+      path: join(xdg, "pulse", "flows", "F_CLI_SAVED.yaml"),
+      package: null,
+      sha256: shown.sha256,
+      provenance: shown.provenance,
+    });
 
     const human = await pulse(["list", "--saved"], { XDG_CONFIG_HOME: xdg });
     expect(human.stdout).toContain("F_CLI_SAVED  [saved]");
