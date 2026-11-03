@@ -1,5 +1,6 @@
 export declare const SAVED_FLOW_NAME: RegExp;
 export declare const SAVED_FLOW_REQUEST_ID: RegExp;
+export declare const FLOW_CONTENT_SHA256: RegExp;
 export interface SavedFlowProvenance {
     origin: "conversation" | "cli";
     conversation: string | null;
@@ -67,6 +68,30 @@ export interface SavedFlowLocation {
     flowsDir?: string;
     reposDir?: string;
 }
+export type DeleteFlowResult = {
+    status: "deleted";
+    name: string;
+    sha256: string;
+} | {
+    status: "absent";
+    name: string;
+} | {
+    status: "conflict";
+    reason: string;
+} | {
+    status: "refused";
+    reason: string;
+} | {
+    status: "invalid";
+    findings: SavedFlowFinding[];
+} | {
+    status: "unreadable";
+    reason: string;
+};
+export interface DeleteFlowRequest extends SavedFlowLocation {
+    name: string;
+    expectedSha256: string;
+}
 export interface SaveFlowRequest extends SavedFlowLocation {
     yaml: string;
     requestId: string;
@@ -84,3 +109,4 @@ export declare function showFlow(query: SavedFlowLocation & ({
     requestId: string;
 })): Promise<ShowFlowResult>;
 export declare function listFlows(location?: SavedFlowLocation): Promise<ListFlowsResult>;
+export declare function deleteFlow(request: DeleteFlowRequest): Promise<DeleteFlowResult>;

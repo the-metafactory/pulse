@@ -428,4 +428,14 @@ exits 1 with `not-found`; an unreadable directory or file exits 2 with
 package, sha256, provenance}`; arc entries carry `null` for `sha256` and
 `provenance`, and one unreadable saved file makes the whole list `unreadable`
 (exit 2). Plain `pulse flow list` still lists arc flows only. The library
-exports `saveFlow`, `showFlow` and `listFlows`.
+exports `saveFlow`, `showFlow`, `listFlows` and `deleteFlow`.
+
+`pulse flow delete <name> --expected-sha256 <hash> [--flows-dir <path>] --json`
+removes one saved flow, only when its content sha256 (as `show` reports it)
+equals the expected hash. It answers `deleted`; `absent` when no saved flow
+has that name, so a retry is safe; `conflict` for another hash, leaving the
+file as it is; `refused` for an arc flow's name; `invalid` for a bad name or
+hash, or a file that is not a regular file (a symlink); and `unreadable`
+(exit 2) when the directory or file cannot be read. `deleted` and `absent`
+exit 0, the others exit 1. Delete never runs anything and never touches a
+routine's own copy of a flow.

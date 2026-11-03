@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { parse } from "yaml";
-import { defaultFlowsDir, listFlows, saveFlow, showFlow } from "../src/lib/saved-flows";
+import { defaultFlowsDir, deleteFlow, listFlows, saveFlow, showFlow } from "../src/lib/saved-flows";
 
 const ROOT = mkdtempSync(join(tmpdir(), "pulse-saved-flows-"));
 const REPOS = join(ROOT, "repos");
@@ -243,5 +243,116 @@ describe("showFlow and listFlows", () => {
   test("the default directory follows XDG_CONFIG_HOME, else ~/.config", () => {
     expect(defaultFlowsDir({ XDG_CONFIG_HOME: "/xdg" })).toBe("/xdg/pulse/flows");
     expect(defaultFlowsDir({})).toMatch(/\.config\/pulse\/flows$/);
+  });
+});
+
+describe("deleteFlow", () => {
+  let spawnSpy: ReturnType<typeof spyOn>;
+  let fetchSpy: ReturnType<typeof spyOn>;
+
+  beforeAll(() => {
+    spawnSpy = spyOn(Bun, "spawn");
+    fetchSpy = spyOn(globalThis, "fetch");
+  });
+
+  afterAll(() => {
+    spawnSpy.mockRestore();
+    fetchSpy.mockRestore();
+  });
+
+  afterEach(() => {
+    expect(spawnSpy).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(existsSync(MARKER)).toBe(false);
+  });
+
+  async function savedSha(flowsDir: string, requestId: string): Promise<string> {
+    const saved = await saveFlow({ yaml: FLOW, requestId, flowsDir, reposDir: REPOS });
+    if (saved.status !== "saved") throw new Error(`expected saved, got ${saved.status}`);
+    return saved.sha256;
+  }
+
+  test("deletes a saved flow whose content matches, then a repeat is absent", async () => {
+    const flowsDir = freshDir();
+    const sha256 = await savedSha(flowsDir, "del-req-0001");
+    expect(await deleteFlow({ name: "F_IVY_SAVED", expectedSha256: sha256, flowsDir, reposDir: REPOS })).toEqual({ status: "deleted", name: "F_IVY_SAVED", sha256 });
+    expect(existsSync(join(flowsDir, "F_IVY_SAVED.yaml"))).toBe(false);
+    expect(await showFlow({ name: "F_IVY_SAVED", flowsDir, reposDir: REPOS })).toEqual({ status: "not-found" });
+    expect(await deleteFlow({ name: "F_IVY_SAVED", expectedSha256: sha256, flowsDir, reposDir: REPOS })).toEqual({ status: "absent", name: "F_IVY_SAVED" });
+  });
+
+  test("a missing flows directory is absent", async () => {
+    expect(await deleteFlow({ name: "F_NOWHERE", expectedSha256: "a".repeat(64), flowsDir: freshDir(), reposDir: REPOS })).toEqual({ status: "absent", name: "F_NOWHERE" });
+  });
+
+  test("a stale sha256 is a conflict and leaves the file byte-identical", async () => {
+    const flowsDir = freshDir();
+    await savedSha(flowsDir, "del-req-0002");
+    const before = snapshot(flowsDir);
+    const result = await deleteFlow({ name: "F_IVY_SAVED", expectedSha256: "0".repeat(64), flowsDir, reposDir: REPOS });
+    expect(result.status).toBe("conflict");
+    expect(snapshot(flowsDir)).toEqual(before);
+  });
+
+  test("an installed arc flow's name is refused and the arc package is unchanged", async () => {
+    const arcFlow = join(REPOS, "arc-flow-pkg", "flow.yaml");
+    const before = readFileSync(arcFlow, "utf8");
+    expect(await deleteFlow({ name: "F_ARC_TAKEN", expectedSha256: "a".repeat(64), flowsDir: freshDir(), reposDir: REPOS })).toEqual({
+      status: "refused",
+      reason: "F_ARC_TAKEN is an installed arc flow; remove it with arc.",
+    });
+    expect(readFileSync(arcFlow, "utf8")).toBe(before);
+  });
+
+  test.each([
+    ["a path-like name", { name: "../x", expectedSha256: "a".repeat(64) }, "name"],
+    ["an uppercase sha256", { name: "F_IVY_SAVED", expectedSha256: "A".repeat(64) }, "expected-sha256"],
+    ["a missing sha256", { name: "F_IVY_SAVED", expectedSha256: "" }, "expected-sha256"],
+  ])("%s is invalid and deletes nothing", async (_label, input, rule) => {
+    const flowsDir = freshDir();
+    await savedSha(flowsDir, `del-req-${rule.length}${input.name.length}0`);
+    const before = snapshot(flowsDir);
+    const result = await deleteFlow({ ...input, flowsDir, reposDir: REPOS });
+    expect(result.status).toBe("invalid");
+    if (result.status === "invalid") expect(result.findings.map((finding) => finding.rule)).toContain(rule);
+    expect(snapshot(flowsDir)).toEqual(before);
+  });
+
+  test("a relative flows directory is invalid", async () => {
+    const result = await deleteFlow({ name: "F_IVY_SAVED", expectedSha256: "a".repeat(64), flowsDir: "relative/flows", reposDir: REPOS });
+    expect(result.status).toBe("invalid");
+  });
+
+  test("a symlink named like a saved flow is invalid and neither the link nor its target is removed", async () => {
+    const flowsDir = freshDir();
+    mkdirSync(flowsDir);
+    const outside = join(ROOT, `outside-${counter}.yaml`);
+    writeFileSync(outside, "name: F_LINKED\nactions:\n  - A_MARK\n");
+    symlinkSync(outside, join(flowsDir, "F_LINKED.yaml"));
+    const result = await deleteFlow({ name: "F_LINKED", expectedSha256: "a".repeat(64), flowsDir, reposDir: REPOS });
+    expect(result.status).toBe("invalid");
+    expect(lstatSync(join(flowsDir, "F_LINKED.yaml")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(outside, "utf8")).toBe("name: F_LINKED\nactions:\n  - A_MARK\n");
+  });
+
+  test("an unreadable flows directory is unreadable, never absent", async () => {
+    const flowsDir = freshDir();
+    const sha256 = await savedSha(flowsDir, "del-req-0003");
+    chmodSync(flowsDir, 0o000);
+    try {
+      expect((await deleteFlow({ name: "F_IVY_SAVED", expectedSha256: sha256, flowsDir, reposDir: REPOS })).status).toBe("unreadable");
+      expect((await deleteFlow({ name: "F_NOWHERE", expectedSha256: sha256, flowsDir, reposDir: REPOS })).status).toBe("unreadable");
+    } finally {
+      chmodSync(flowsDir, 0o700);
+    }
+    expect(existsSync(join(flowsDir, "F_IVY_SAVED.yaml"))).toBe(true);
+  });
+
+  test("a saved flow file that does not parse is unreadable and stays", async () => {
+    const flowsDir = freshDir();
+    mkdirSync(flowsDir);
+    writeFileSync(join(flowsDir, "F_BROKEN.yaml"), "name: [unclosed\n");
+    expect((await deleteFlow({ name: "F_BROKEN", expectedSha256: "a".repeat(64), flowsDir, reposDir: REPOS })).status).toBe("unreadable");
+    expect(existsSync(join(flowsDir, "F_BROKEN.yaml"))).toBe(true);
   });
 });

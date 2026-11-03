@@ -35,8 +35,8 @@ export type { GateAuditHook, GuardOptions, PolicyLoadResult } from "./lib/policy
 export type { Policy, PolicyRule, Decision, GateDecision } from "./types/policy";
 export { discoverArcActions, discoverArcPipelines, discoverArcFlows, createArcActionDirs } from "./lib/arc";
 export type { ArcAction, ArcPipeline, ArcFlow } from "./lib/arc";
-export { saveFlow, showFlow, listFlows, defaultFlowsDir, flowContentHash, SAVED_FLOW_NAME, SAVED_FLOW_REQUEST_ID } from "./lib/saved-flows";
-export type { SaveFlowRequest, SaveFlowResult, ShowFlowResult, ListFlowsResult, ListedFlow, FlowRecord, SavedFlowProvenance, SavedFlowFinding, SavedFlowLocation } from "./lib/saved-flows";
+export { saveFlow, showFlow, listFlows, deleteFlow, defaultFlowsDir, flowContentHash, SAVED_FLOW_NAME, SAVED_FLOW_REQUEST_ID, FLOW_CONTENT_SHA256 } from "./lib/saved-flows";
+export type { SaveFlowRequest, SaveFlowResult, DeleteFlowRequest, DeleteFlowResult, ShowFlowResult, ListFlowsResult, ListedFlow, FlowRecord, SavedFlowProvenance, SavedFlowFinding, SavedFlowLocation } from "./lib/saved-flows";
 export type { FlowDef, FlowResult, FlowSource, FlowDestination, FlowSchedule, } from "./types/flow";
 export { composeFlow, type ComposeFlowOptions, type ComposeFlowResult } from "./lib/composer/flow";
 export { buildCatalog, loadInstalledCatalog } from "./lib/composer/catalog";

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "crypto";
-import { link, mkdir, readdir, readFile, realpath, unlink, writeFile } from "fs/promises";
+import { link, lstat, mkdir, readdir, readFile, realpath, unlink, writeFile } from "fs/promises";
 import { homedir, userInfo } from "os";
 import { dirname, isAbsolute, join } from "path";
 import { isMap, parse as parseYaml, parseDocument, stringify as stringifyYaml } from "yaml";
@@ -8,6 +8,7 @@ import { parsePipeline } from "./pipeline";
 
 export const SAVED_FLOW_NAME = /^F_[A-Z0-9_]{1,64}$/;
 export const SAVED_FLOW_REQUEST_ID = /^[A-Za-z0-9_-]{8,64}$/;
+export const FLOW_CONTENT_SHA256 = /^[0-9a-f]{64}$/;
 
 export interface SavedFlowProvenance {
   origin: "conversation" | "cli";
@@ -60,6 +61,19 @@ export type ListFlowsResult =
 export interface SavedFlowLocation {
   flowsDir?: string;
   reposDir?: string;
+}
+
+export type DeleteFlowResult =
+  | { status: "deleted"; name: string; sha256: string }
+  | { status: "absent"; name: string }
+  | { status: "conflict"; reason: string }
+  | { status: "refused"; reason: string }
+  | { status: "invalid"; findings: SavedFlowFinding[] }
+  | { status: "unreadable"; reason: string };
+
+export interface DeleteFlowRequest extends SavedFlowLocation {
+  name: string;
+  expectedSha256: string;
 }
 
 export interface SaveFlowRequest extends SavedFlowLocation {
@@ -318,6 +332,64 @@ export async function listFlows(location: SavedFlowLocation = {}): Promise<ListF
         ...arc.map((flow) => ({ name: flow.name, source: "arc" as const, path: flow.path, package: flow.packageName, sha256: null, provenance: null })),
       ],
     };
+  } catch (error) {
+    return toUnreadable(error);
+  }
+}
+
+function validateDelete(request: DeleteFlowRequest, flowsDir: string): SavedFlowFinding[] {
+  const findings: SavedFlowFinding[] = [];
+  if (!isAbsolute(flowsDir)) findings.push({ rule: "flows-dir", message: `The flows directory must be an absolute path: ${flowsDir}` });
+  if (!SAVED_FLOW_NAME.test(request.name)) findings.push({ rule: "name", message: `The flow name must match ${SAVED_FLOW_NAME.source}.` });
+  if (!FLOW_CONTENT_SHA256.test(request.expectedSha256)) {
+    findings.push({ rule: "expected-sha256", message: "The expected sha256 must be 64 lowercase hex characters." });
+  }
+  return findings;
+}
+
+async function absentOutcome(name: string, reposDir: string | undefined): Promise<DeleteFlowResult> {
+  const arc = (await arcFlowNames(reposDir)).find((flow) => flow.name === name);
+  if (arc) return { status: "refused", reason: `${name} is an installed arc flow; remove it with arc.` };
+  return { status: "absent", name };
+}
+
+async function lstatOrMissing(path: string): Promise<Awaited<ReturnType<typeof lstat>> | undefined> {
+  try {
+    return await lstat(path);
+  } catch (error) {
+    if (isMissing(error)) return undefined;
+    throw new Unreadable(`The saved flow ${path} cannot be read: ${errorText(error)}`);
+  }
+}
+
+export async function deleteFlow(request: DeleteFlowRequest): Promise<DeleteFlowResult> {
+  const flowsDir = request.flowsDir ?? defaultFlowsDir();
+  const findings = validateDelete(request, flowsDir);
+  if (findings.length > 0) return { status: "invalid", findings };
+  const { name } = request;
+  try {
+    const dir = await lstatOrMissing(flowsDir);
+    if (!dir) return await absentOutcome(name, request.reposDir);
+    const realDir = await realpath(flowsDir);
+    const target = join(realDir, `${name}.yaml`);
+    const file = await lstatOrMissing(target);
+    if (!file) return await absentOutcome(name, request.reposDir);
+    if (!file.isFile()) {
+      return { status: "invalid", findings: [{ rule: "file", message: `${target} is not a regular file inside the flows directory; nothing was deleted.` }] };
+    }
+    const { document } = await readYamlFile(target, "saved flow");
+    if (document.name !== name) throw new Unreadable(`The saved flow ${target} names ${String(document.name)}, not ${name}.`);
+    const sha256 = flowContentHash(document);
+    if (sha256 !== request.expectedSha256) {
+      return { status: "conflict", reason: `The saved flow ${name} has content ${sha256}, not the expected ${request.expectedSha256}; nothing was deleted.` };
+    }
+    try {
+      await unlink(target);
+    } catch (error) {
+      if (isMissing(error)) return { status: "absent", name };
+      throw new Unreadable(`The saved flow ${target} cannot be removed: ${errorText(error)}`);
+    }
+    return { status: "deleted", name, sha256 };
   } catch (error) {
     return toUnreadable(error);
   }
