@@ -49,6 +49,8 @@ export interface ListedFlow {
   source: "saved" | "arc";
   path: string;
   package: string | null;
+  sha256: string | null;
+  provenance: SavedFlowProvenance | null;
 }
 
 export type ListFlowsResult =
@@ -312,8 +314,8 @@ export async function listFlows(location: SavedFlowLocation = {}): Promise<ListF
     return {
       status: "ok",
       flows: [
-        ...saved.map((flow) => ({ name: flow.name, source: "saved" as const, path: flow.path, package: null })),
-        ...arc.map((flow) => ({ name: flow.name, source: "arc" as const, path: flow.path, package: flow.packageName })),
+        ...saved.map((flow) => ({ name: flow.name, source: "saved" as const, path: flow.path, package: null, sha256: flow.sha256, provenance: flow.provenance })),
+        ...arc.map((flow) => ({ name: flow.name, source: "arc" as const, path: flow.path, package: flow.packageName, sha256: null, provenance: null })),
       ],
     };
   } catch (error) {

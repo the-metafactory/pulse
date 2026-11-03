@@ -53,6 +53,8 @@ export interface ListedFlow {
     source: "saved" | "arc";
     path: string;
     package: string | null;
+    sha256: string | null;
+    provenance: SavedFlowProvenance | null;
 }
 export type ListFlowsResult = {
     status: "ok";

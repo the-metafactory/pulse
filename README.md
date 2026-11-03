@@ -424,5 +424,8 @@ without `provenance`.
 `show` returns `{name, path, source, sha256, provenance, yaml}`. By name it
 searches saved flows, then arc flows; by request ID, saved flows only. No match
 exits 1 with `not-found`; an unreadable directory or file exits 2 with
-`unreadable`. Plain `pulse flow list` still lists arc flows only. The library
+`unreadable`. `list --saved --json` gives each entry `{name, source, path,
+package, sha256, provenance}`; arc entries carry `null` for `sha256` and
+`provenance`, and one unreadable saved file makes the whole list `unreadable`
+(exit 2). Plain `pulse flow list` still lists arc flows only. The library
 exports `saveFlow`, `showFlow` and `listFlows`.
