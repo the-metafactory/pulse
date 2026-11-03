@@ -3,7 +3,7 @@ import { loadFlow, runFlow } from "../lib/flow";
 import { discoverArcFlows, createArcActionDirs } from "../lib/arc";
 import { join, resolve, dirname } from "path";
 import { readFile } from "fs/promises";
-import { listFlows, saveFlow, showFlow } from "../lib/saved-flows";
+import { deleteFlow, listFlows, saveFlow, showFlow } from "../lib/saved-flows";
 import type { FlowDef } from "../types/flow";
 
 interface ResolvedFlow {
@@ -126,6 +126,20 @@ export function createFlowCommand(): Command {
       }
       console.log(JSON.stringify(result));
       process.exitCode = result.status === "unreadable" ? 2 : 1;
+    });
+
+  flow
+    .command("delete")
+    .description("Delete a saved flow, only when its content matches the expected sha256")
+    .argument("<name>", "Saved flow name")
+    .option("--expected-sha256 <hash>", "Content sha256 the caller expects to remove, as flow show reports it")
+    .option("--flows-dir <path>", "Saved-flows directory (absolute; default $XDG_CONFIG_HOME/pulse/flows)")
+    .option("--json", "Print the result as JSON")
+    .action(async (name: string, opts: { expectedSha256?: string; flowsDir?: string }) => {
+      const result = await deleteFlow({ name, expectedSha256: opts.expectedSha256 ?? "", flowsDir: opts.flowsDir });
+      console.log(JSON.stringify(result));
+      if (result.status === "unreadable") process.exitCode = 2;
+      else if (result.status !== "deleted" && result.status !== "absent") process.exitCode = 1;
     });
 
   // --- pulse flow <name> ---

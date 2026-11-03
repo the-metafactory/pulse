@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { discoverArcFlows } from "../src/lib/arc";
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const TEST_DIR = join(import.meta.dir, ".test-flow-cli");
@@ -293,5 +293,40 @@ describe("pulse flow save, show and list --saved", () => {
     expect(plain.code).toBe(0);
     expect(plain.stdout).not.toContain("F_CLI_SAVED");
     expect(plain.stdout).not.toContain("[saved]");
+  }, 20_000);
+
+  test("delete answers deleted, then absent, with exit 0; a wrong hash is a conflict with exit 1", async () => {
+    const dir = join(root, "delete-flows");
+    const saved = JSON.parse((await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0005", "--flows-dir", dir, "--json"])).stdout);
+    const deleted = await pulse(["delete", "F_CLI_SAVED", "--expected-sha256", saved.sha256, "--flows-dir", dir, "--json"]);
+    expect(deleted.code).toBe(0);
+    expect(JSON.parse(deleted.stdout)).toEqual({ status: "deleted", name: "F_CLI_SAVED", sha256: saved.sha256 });
+
+    const again = await pulse(["delete", "F_CLI_SAVED", "--expected-sha256", saved.sha256, "--flows-dir", dir, "--json"]);
+    expect(again.code).toBe(0);
+    expect(JSON.parse(again.stdout)).toEqual({ status: "absent", name: "F_CLI_SAVED" });
+
+    await pulse(["save", "--file", flowFile, "--request-id", "cli-probe-0006", "--flows-dir", dir, "--json"]);
+    const conflict = await pulse(["delete", "F_CLI_SAVED", "--expected-sha256", "0".repeat(64), "--flows-dir", dir, "--json"]);
+    expect(conflict.code).toBe(1);
+    expect(JSON.parse(conflict.stdout).status).toBe("conflict");
+    expect(existsSync(join(dir, "F_CLI_SAVED.yaml"))).toBe(true);
+  }, 20_000);
+
+  test("delete without --expected-sha256 is invalid with exit 1; an unreadable directory exits 2", async () => {
+    const invalid = await pulse(["delete", "F_CLI_SAVED", "--flows-dir", flowsDir, "--json"]);
+    expect(invalid.code).toBe(1);
+    expect(JSON.parse(invalid.stdout)).toMatchObject({ status: "invalid", findings: [{ rule: "expected-sha256" }] });
+
+    const locked = join(root, "delete-locked");
+    mkdirSync(locked, { recursive: true });
+    chmodSync(locked, 0o000);
+    try {
+      const unreadable = await pulse(["delete", "F_CLI_SAVED", "--expected-sha256", "a".repeat(64), "--flows-dir", locked, "--json"]);
+      expect(unreadable.code).toBe(2);
+      expect(JSON.parse(unreadable.stdout).status).toBe("unreadable");
+    } finally {
+      chmodSync(locked, 0o700);
+    }
   }, 20_000);
 });
