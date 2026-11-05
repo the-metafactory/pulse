@@ -9,6 +9,7 @@ export interface ComposeOptions {
     strictReply?: boolean;
     maxRetries?: number;
     systemPrompt?: string;
+    check?: (yaml: string) => Finding[];
 }
 export type ComposeResult = {
     ok: true;
@@ -78,7 +79,8 @@ export async function compose(scenario: string, catalog: CatalogEntry[], llm: Co
             continue;
         }
         const validation = validatePipeline(yaml, catalog, { initialFields });
-        if (validation.valid) {
+        const findings = validation.valid ? options.check?.(yaml) ?? [] : validation.findings;
+        if (findings.length === 0) {
             return {
                 ok: true,
                 yaml,
@@ -89,8 +91,8 @@ export async function compose(scenario: string, catalog: CatalogEntry[], llm: Co
             };
         }
         lastYaml = yaml;
-        lastFindings = validation.findings;
-        const findingLines = validation.findings
+        lastFindings = findings;
+        const findingLines = findings
             .map((f) => `- [${f.rule}] step ${f.step}: ${f.message}`)
             .join("\n");
         prompt =

@@ -1,9 +1,11 @@
 import { parsePipeline } from "../pipeline";
 import { compose, type ComposerLLM, type ComposeOptions } from "./compose";
+import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES } from "./delivery";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
 export interface ComposeFlowOptions extends ComposeOptions {
     catalog: CatalogEntry[];
     llm: ComposerLLM;
+    holdToDelivery?: boolean;
 }
 const instructions = `You compose Pulse pipelines from a fixed installed action catalog.
 Only use installed action names, never invent an action or silently omit a requested capability.
@@ -30,6 +32,9 @@ For map and gate primitives the annotation likewise follows the map: or gate: on
 Never move the annotation onto a nested field; that does not annotate the step.
 Connect required inputs by exact field names from earlier outputs or the initial fields listed below.
 Use agent collect fields for judgments, never to simulate a missing external tool or side effect.
+When the request names a delivery, end the flow with an installed action whose tags say it sends on that channel (send, deliver, post or publish). A formatter does not send.
+Never replace the requested channel with another. If nothing installed can send on it, use the Closest I have reply and offer the other channel there.
+A mail action reaches only the principal's own addresses: leave its to field out and never collect it. If the request mails anyone else, use the Closest I have reply.
 Emit an optional fenced mermaid diagram and a plain-language summary. Do not add schedules or execute anything.
 Installed catalog:
 `;
@@ -37,21 +42,32 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
     const initialFields = options.initialFields ?? ["scenario", "text"];
     try {
         if (!Number.isInteger(options.maxRetries ?? 2) || (options.maxRetries ?? 2) < 0 || (options.maxRetries ?? 2) > 2) throw new Error("maxRetries must be an integer between 0 and 2");
+        const hold = options.holdToDelivery ?? true;
+        const gap = hold ? deliveryGap(request, options.catalog) : null;
+        if (gap) return { status: "no-match", kind: "missing-capability", message: gap } as const;
         const result = await compose(request, options.catalog, options.llm, {
             ...options,
             initialFields,
             strictReply: options.strictReply ?? true,
+            check: hold ? (yaml) => deliveryFindings(request, yaml, options.catalog) : undefined,
             systemPrompt: options.systemPrompt ?? `${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {
             if (result.kind === "no-match") {
                 return { status: "no-match", kind: "missing-capability", message: result.message } as const;
             }
+            const undelivered = result.findings.filter((finding) => finding.rule === "missing-delivery");
+            if (undelivered.length > 0) {
+                return { status: "no-match", kind: "missing-capability", message: `I could not compose a routine that delivers as asked: ${undelivered.map((finding) => finding.message).join("; ")}.` } as const;
+            }
             const missing = result.findings.filter((finding) => finding.rule === "unknown-block");
             if (missing.length > 0) {
                 return { status: "no-match", kind: "missing-capability", message: missing.map((finding) => finding.message).join("; ") } as const;
             }
             return { status: "invalid", kind: "off-contract", findings: result.findings } as const;
+        }
+        if (hold && choosesMailRecipient(result.yaml, options.catalog)) {
+            return { status: "no-match", kind: "missing-capability", message: ONLY_OWN_ADDRESSES } as const;
         }
         const flow = parsePipeline(result.yaml);
         return { status: "complete", flow, yaml: result.yaml, summary: result.summary, mermaid: result.mermaid } as const;
