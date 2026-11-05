@@ -6,6 +6,7 @@ export interface ComposeOptions {
     strictReply?: boolean;
     maxRetries?: number;
     systemPrompt?: string;
+    check?: (yaml: string) => Finding[];
 }
 export type ComposeResult = {
     ok: true;

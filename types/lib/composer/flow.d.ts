@@ -3,6 +3,7 @@ import type { CatalogEntry, Finding } from "./validate-pipeline";
 export interface ComposeFlowOptions extends ComposeOptions {
     catalog: CatalogEntry[];
     llm: ComposerLLM;
+    holdToDelivery?: boolean;
 }
 export declare function composeFlow(request: string, options: ComposeFlowOptions): Promise<{
     readonly status: "no-match";

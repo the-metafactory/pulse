@@ -1,3 +1,4 @@
+import type { PipelineStep } from "../../types/pipeline";
 export interface CatalogEntry {
     name: string;
     description: string;
@@ -18,7 +19,7 @@ export interface StepAnnotation {
     sovereignty?: SovereigntyClass;
     residency?: string;
 }
-export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation";
+export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery";
 export interface Finding {
     rule: FindingRule;
     step: number;
@@ -32,4 +33,6 @@ export interface ValidationResult {
 export interface ValidatePipelineOptions {
     initialFields?: string[];
 }
+export declare function childActions(step: Exclude<PipelineStep, string>): PipelineStep[][];
+export declare function stepOutputs(step: PipelineStep, byName: Map<string, CatalogEntry>): string[];
 export declare function validatePipeline(rawYaml: string, catalog: CatalogEntry[], options?: ValidatePipelineOptions): ValidationResult;
