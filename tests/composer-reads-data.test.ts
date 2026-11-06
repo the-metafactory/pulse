@@ -72,7 +72,7 @@ describe("the heise flow of 2026-11-06, which would have mailed an invented summ
 describe("an output no later step reads", () => {
   test("a fetch nothing reads is named, with the fields it writes", () => {
     const yaml = flow(FEED_URL, action("A_FETCH_FEED"), agent("write", "body", "Write about {scenario}"), agent("title", "subject", "Title for {body}"), action("A_MAIL_SEND"));
-    expect(rulesOf(yaml)).toContainEqual(expect.stringContaining("`A_FETCH_FEED` writes `items`, `feedTitle`"));
+    expect(rulesOf(yaml)).toContainEqual(expect.stringContaining("`A_FETCH_FEED` writes `items`,"));
   });
 
   test("one read output is enough: a flow need not read feedTitle", () => {
@@ -85,6 +85,14 @@ describe("an output no later step reads", () => {
     expect(rulesOf(flow(action("A_PUBLISH_NOTE"), FEED_URL, action("A_FETCH_FEED")))).toEqual([]);
   });
 
+  test("a manifest's write effect exempts an action as its tags do, and a map of acting steps needs no reader", () => {
+    const untagged: CatalogEntry = { ...SYNC, name: "A_STORE", tags: [], effect: "write" };
+    const catalog = [...CATALOG, untagged];
+    expect(readsDataFindings(flow(action("A_STORE"), FEED_URL, action("A_FETCH_FEED")), catalog).filter((f) => f.rule === "unread-data")).toEqual([]);
+    const sends = "  - map: # sovereignty: D, residency: CH\n      over: items\n      as: item\n      collect: receipts\n      actions:\n        - A_MAIL_SEND\n";
+    expect(rulesOf(flow(FEED_URL, action("A_FETCH_FEED"), sends, agent("sum", "summary", "Summarize {items}")))).toEqual([]);
+  });
+
   test("a map's inner fields are its own: what the map collects is what must be read", () => {
     const map = "  - map: # sovereignty: A, residency: CH\n      over: items\n      as: item\n      collect: notes\n      actions:\n        - agent:\n            name: note\n            capability: compose.judgment\n            prompt: \"Note on {item}\"\n            collect: note\n";
     expect(rulesOf(flow(FEED_URL, action("A_FETCH_FEED"), map, agent("sum", "body", "Summarize {notes}"), agent("title", "subject", "Title for {body}"), action("A_MAIL_SEND")))).toEqual([]);
@@ -92,7 +100,7 @@ describe("an output no later step reads", () => {
   });
 });
 
-describe("an agent step that must read upstream data", () => {
+describe("an agent step that must read the Payload it works from", () => {
   test("a judgment after the data that reads only the request would invent its answer, even when another step reads the data", () => {
     const yaml = flow(FEED_URL, action("A_FETCH_FEED"), agent("title", "subject", "Title for {items}"), agent("write", "body", "Write up {scenario}"), action("A_MAIL_SEND"));
     expect(rulesOf(yaml)).toContainEqual(expect.stringContaining("`write`"));
@@ -111,6 +119,16 @@ describe("an agent step that must read upstream data", () => {
   test("a dotted read and a read through a derived field both count", () => {
     expect(rulesOf(flow(FEED_URL, action("A_FETCH_FEED"), agent("sum", "summary", "Lead with {items.0.title}")))).toEqual([]);
     expect(rulesOf(flow(FEED_URL, action("A_FETCH_FEED"), action("A_EXTRACT_ARTICLE"), agent("sum", "summary", "Summarize {articles}")))).toEqual([]);
+  });
+
+  test("a feed's title is not its articles", () => {
+    const yaml = flow(FEED_URL, action("A_FETCH_FEED"), agent("title", "subject", "Title for {items}"), agent("write", "body", "Write a summary of {feedTitle}"), action("A_MAIL_SEND"));
+    expect(rulesOf(yaml)).toContainEqual(expect.stringContaining("`write`"));
+    expect(rulesOf(flow(FEED_URL, action("A_FETCH_FEED"), agent("sum", "summary", "Summarize {feedTitle}"), agent("up", "note", "Sharpen {summary}"))).join(" ")).toContain("`items`");
+  });
+
+  test("reading what an acting step reported counts: an announcement may work from the URL it published", () => {
+    expect(rulesOf(flow(action("A_PUBLISH_NOTE"), FEED_URL, action("A_FETCH_FEED"), agent("sum", "body", "Sum {items}"), agent("say", "subject", "Announce {noteUrl}"), action("A_MAIL_SEND")))).toEqual([]);
   });
 
   test("a judgment inside a map reads the item, not the collection", () => {

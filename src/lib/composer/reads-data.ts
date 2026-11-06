@@ -33,7 +33,15 @@ function fieldsRead(step: PipelineStep, byName: Catalog): Set<string> {
   return read;
 }
 
-const actsOnTheWorld = (entry: CatalogEntry | undefined): boolean => ACTS_ON_THE_WORLD.some((tag) => entry?.tags?.includes(tag));
+const actsOnTheWorld = (entry: CatalogEntry | undefined): boolean => entry?.effect === "write" || ACTS_ON_THE_WORLD.some((tag) => entry?.tags?.includes(tag));
+
+/** What an action brought in: a collection when it has one, since a scalar beside it such as a feed's title is metadata. */
+function dataFields(step: PipelineStep, byName: Catalog): string[] {
+  if (typeof step !== "string") return stepOutputs(step, byName);
+  const output = Object.entries(byName.get(step)?.output ?? {});
+  const collections = output.filter(([, spec]) => spec.type === "array" || spec.type === "object");
+  return (collections.length > 0 ? collections : output).map(([field]) => field);
+}
 
 /** A retry hands its output on, so its children stand where it stands; other primitives keep their children's fields to themselves. */
 function inSequence(step: PipelineStep): PipelineStep[] {
@@ -48,13 +56,13 @@ function stepName(step: PipelineStep): string {
 }
 
 function mustBeRead(step: PipelineStep, byName: Catalog): boolean {
-  if (typeof step === "string") return !actsOnTheWorld(byName.get(step));
-  return "agent" in step || "research" in step || "map" in step || "filter" in step || "reduce" in step || "parallel" in step;
+  if (flatten(step).some((inner) => typeof inner === "string" && actsOnTheWorld(byName.get(inner)))) return false;
+  return typeof step === "string" || "agent" in step || "research" in step || "map" in step || "filter" in step || "reduce" in step || "parallel" in step;
 }
 
 function unreadOutputs(steps: { step: PipelineStep; index: number }[], byName: Catalog): Finding[] {
   return steps.slice(0, -1).flatMap(({ step, index }, position) => {
-    const outputs = stepOutputs(step, byName);
+    const outputs = dataFields(step, byName);
     if (outputs.length === 0 || !mustBeRead(step, byName)) return [];
     const later = steps.slice(position + 1).map((next) => fieldsRead(next.step, byName));
     if (outputs.some((field) => later.some((read) => read.has(field)))) return [];
@@ -63,7 +71,7 @@ function unreadOutputs(steps: { step: PipelineStep; index: number }[], byName: C
   });
 }
 
-/** Binds the item a collection step hands its children, when the collection itself came from the data. */
+/** The item a collection step hands its children, when the collection itself came from the data. */
 function itemFields(step: Composite, data: Set<string>): string[] {
   if (!overField(step).some((field) => data.has(field))) return [];
   if ("map" in step) return [step.map.as];
@@ -71,38 +79,44 @@ function itemFields(step: Composite, data: Set<string>): string[] {
   return "reduce" in step ? [step.reduce.item_as, step.reduce.acc_as] : [];
 }
 
-/** Walks in order, tracking which fields descend from what an action or research step brought in, and names each judgment that reads none of them. */
-function judgmentsWithoutData(steps: PipelineStep[], index: number | null, data: Set<string>, byName: Catalog, findings: Finding[]): void {
-  steps.forEach((step, position) => {
-    const at = index ?? position;
-    if (typeof step === "string") {
-      if (!actsOnTheWorld(byName.get(step))) for (const field of stepOutputs(step, byName)) data.add(field);
+class DataWalk {
+  readonly findings: Finding[] = [];
+  constructor(private readonly byName: Catalog) {}
+
+  private addOutputs(step: PipelineStep, data: Set<string>): void {
+    for (const field of dataFields(step, this.byName)) data.add(field);
+  }
+
+  private agent(step: Extract<Composite, { agent: unknown }>, at: number, data: Set<string>): void {
+    if ([...fieldsRead(step, this.byName)].some((field) => data.has(field))) {
+      this.addOutputs(step, data);
       return;
     }
-    if ("research" in step) {
-      for (const field of stepOutputs(step, byName)) data.add(field);
-      return;
+    if (data.size === 0 || TYPED_CONFIG.has(step.agent.returns ?? "")) return;
+    const fields = [...data].map((field) => `{${field}}`).join(", ");
+    this.findings.push({ rule: "unread-data", step: at, message: `agent step \`${step.agent.name}\` runs after the flow has data, but its prompt reads none of it, and it sees only its prompt, so it would invent its answer. Put what it works from in its prompt: ${fields}` });
+  }
+
+  private children(step: Composite, at: number, data: Set<string>): void {
+    const items = itemFields(step, data);
+    for (const children of childActions(step)) {
+      const inner = new Set([...data, ...items]);
+      const known = inner.size;
+      this.walk(children, at, inner);
+      if (inner.size > known || items.length > 0) this.addOutputs(step, data);
     }
-    if ("agent" in step) {
-      const reads = [...fieldsRead(step, byName)].some((field) => data.has(field));
-      if (reads) for (const field of stepOutputs(step, byName)) data.add(field);
-      else if (data.size > 0 && !TYPED_CONFIG.has(step.agent.returns ?? "")) {
-        const fields = [...data].map((field) => `{${field}}`).join(", ");
-        findings.push({ rule: "unread-data", step: at, message: `agent step \`${step.agent.name}\` runs after the flow has data, but its prompt reads none of it, and it sees only its prompt, so it would invent its answer. Put what it works from in its prompt: ${fields}` });
-      }
-      return;
-    }
-    if ("retry" in step) {
-      judgmentsWithoutData(step.retry.actions, at, data, byName, findings);
-      return;
-    }
-    childActions(step).forEach((children) => {
-      const inner = new Set([...data, ...itemFields(step, data)]);
-      const before = inner.size;
-      judgmentsWithoutData(children, at, inner, byName, findings);
-      if (inner.size > before || itemFields(step, data).length > 0) for (const field of stepOutputs(step, byName)) data.add(field);
+  }
+
+  /** Walks in order, tracking which fields descend from what an action or research step brought in. */
+  walk(steps: PipelineStep[], at: number | null, data: Set<string>): void {
+    steps.forEach((step, position) => {
+      const index = at ?? position;
+      if (typeof step === "string" || "research" in step) this.addOutputs(step, data);
+      else if ("agent" in step) this.agent(step, index, data);
+      else if ("retry" in step) this.walk(step.retry.actions, index, data);
+      else this.children(step, index, data);
     });
-  });
+  }
 }
 
 function unsetLimits(steps: PipelineStep[], input: Record<string, unknown>, byName: Catalog): Finding[] {
@@ -119,7 +133,7 @@ export function readsDataFindings(yaml: string, catalog: CatalogEntry[]): Findin
   const byName = new Map(catalog.map((entry) => [entry.name, entry]));
   const { steps, input } = readFlow(yaml);
   const sequence = steps.flatMap((step, index) => inSequence(step).map((inner) => ({ step: inner, index })));
-  const findings = [...unreadOutputs(sequence, byName), ...unsetLimits(steps, input, byName)];
-  judgmentsWithoutData(steps, null, new Set(), byName, findings);
-  return findings;
+  const walk = new DataWalk(byName);
+  walk.walk(steps, null, new Set());
+  return [...unreadOutputs(sequence, byName), ...unsetLimits(steps, input, byName), ...walk.findings];
 }
