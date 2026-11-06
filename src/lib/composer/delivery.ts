@@ -61,7 +61,9 @@ export function deliveryGap(ask: DeliveryAsk, catalog: CatalogEntry[]): string |
     return `A routine can't deliver by ${missing.label} yet: no installed action sends it.${instead}`;
   }
   if (ask.send && asked.length === 0 && !CHANNELS.some((channel) => catalog.some((entry) => sendsOn(entry, channel)))) return "A routine can't deliver this yet: no installed action sends anything.";
-  return ask.mailsSomeoneElse ? ONLY_OWN_ADDRESSES : null;
+  if (!ask.mailsSomeoneElse) return null;
+  const chats = CHANNELS.filter((channel) => channel !== EMAIL && catalog.some((entry) => sendsOn(entry, channel))).map((channel) => channel.label);
+  return chats.length > 0 ? `${ONLY_OWN_ADDRESSES} It can deliver by ${chats.join(" or ")} instead, if you ask for that.` : ONLY_OWN_ADDRESSES;
 }
 
 function flatten(step: PipelineStep): PipelineStep[] {

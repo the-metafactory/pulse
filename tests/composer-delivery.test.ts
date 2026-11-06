@@ -74,6 +74,7 @@ describe("reading the delivery a request asks for", () => {
     const result = await composeFlow("email bob@example.com a summary", { catalog: WITH_SEND, llm });
     expect(result.status).toBe("complete");
     expect(m.asked()).toBe(0);
+    expect(system).toContain("Installed catalog");
     expect(system).not.toContain("own addresses");
   });
 });
@@ -144,7 +145,10 @@ describe("a request to mail someone else", () => {
     const m = model(asks([], { send: true, mailsSomeoneElse: true }), MAILS);
     const result = await compose("send the digest to Bob", WITH_SEND, m);
     expect(result.status).toBe("no-match");
-    if (result.status === "no-match") expect(result.message).toContain("only your own");
+    if (result.status === "no-match") {
+      expect(result.message).toContain("only your own");
+      expect(result.message).toContain("Discord instead");
+    }
     expect(m.prompts).toHaveLength(0);
   });
 
