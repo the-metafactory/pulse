@@ -69,6 +69,19 @@ describe("a date-relative flow over a feed that has a window", () => {
     expect(rules("mail me last week's articles", flowOf({}))[0]).toContain("Closest I have");
   });
 
+  test("a relative day no window offers goes back even when a window is set", () => {
+    expect(rules("mail me last week's articles", flowOf({ input: WINDOW }))[0]).toContain("Closest I have");
+  });
+
+  test("the day before yesterday is not yesterday", () => {
+    expect(rules("mail me the articles from the day before yesterday", flowOf({ input: WINDOW }))[0]).toContain("Closest I have");
+  });
+
+  test("a report after the delivery comes too late", () => {
+    const late = flowOf({ input: WINDOW, notice: false }).replace("  - A_MAIL_SEND # sovereignty: D, residency: CH\n", "  - A_MAIL_SEND # sovereignty: D, residency: CH\n  - A_WINDOW_NOTICE # sovereignty: D, residency: CH\n");
+    expect(rules(YESTERDAY_REQUEST, late)[0]).toContain("A_WINDOW_NOTICE");
+  });
+
   test("a request with no relative day needs no window", () => {
     expect(rules("mail me a summary of the latest articles", flowOf({ prompt: "Summarize the newest of {items}", notice: false }))).toEqual([]);
   });
