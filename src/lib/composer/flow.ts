@@ -33,11 +33,12 @@ For map and gate primitives the annotation likewise follows the map: or gate: on
 Never move the annotation onto a nested field; that does not annotate the step.
 Connect required inputs by exact field names from earlier outputs or the initial fields listed below.
 Use agent collect fields for judgments, never to simulate a missing external tool or side effect.
-When the request names a delivery, end the flow with an installed action whose tags say it sends on that channel (send, deliver, post or publish). A formatter does not send.
-Never replace the requested channel with another. If nothing installed can send on it, use the Closest I have reply and offer the other channel there.
-A mail action reaches only the principal's own addresses: leave its to field out and never collect it. If the request mails anyone else, use the Closest I have reply.
 Emit an optional fenced mermaid diagram and a plain-language summary. Do not add schedules or execute anything.
 Installed catalog:
+`;
+const deliveryRules = `When the request names a delivery, end the flow with an installed action whose tags say it sends on that channel (send, deliver, post or publish). A formatter does not send.
+Never replace the requested channel with another. If nothing installed can send on it, use the Closest I have reply and offer the other channel there.
+A mail action reaches only the principal's own addresses: leave its to field out and never collect it. If the request mails anyone else, use the Closest I have reply.
 `;
 export async function composeFlow(request: string, options: ComposeFlowOptions) {
     const initialFields = options.initialFields ?? ["scenario", "text"];
@@ -51,7 +52,7 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
             initialFields,
             strictReply: options.strictReply ?? true,
             check: ask ? (yaml) => deliveryFindings(ask, yaml, options.catalog) : undefined,
-            systemPrompt: options.systemPrompt ?? `${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
+            systemPrompt: options.systemPrompt ?? `${ask ? deliveryRules : ""}${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {
             if (result.kind === "no-match") {

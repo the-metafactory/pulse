@@ -69,9 +69,12 @@ describe("reading the delivery a request asks for", () => {
 
   test("a caller that does not ask for the check makes no extra model call", async () => {
     const m = model(EMAIL_ME, SWAPS_TO_DISCORD);
-    const result = await composeFlow("email bob@example.com a summary", { catalog: WITH_SEND, llm: m.llm });
+    let system = "";
+    const llm: ComposerLLM = (prompt, options) => { system = options?.system ?? ""; return m.llm(prompt, options); };
+    const result = await composeFlow("email bob@example.com a summary", { catalog: WITH_SEND, llm });
     expect(result.status).toBe("complete");
     expect(m.asked()).toBe(0);
+    expect(system).not.toContain("own addresses");
   });
 });
 
@@ -137,6 +140,14 @@ describe("a request to mail someone else", () => {
     expect(m.prompts).toHaveLength(0);
   });
 
+  test("is refused when no channel is named too", async () => {
+    const m = model(asks([], { send: true, mailsSomeoneElse: true }), MAILS);
+    const result = await compose("send the digest to Bob", WITH_SEND, m);
+    expect(result.status).toBe("no-match");
+    if (result.status === "no-match") expect(result.message).toContain("only your own");
+    expect(m.prompts).toHaveLength(0);
+  });
+
   test("a flow that chooses the recipient itself is refused with no retry, so it cannot quietly mail the principal instead", async () => {
     const chooses = reply(flow(agent("to"), agent("subject"), agent("body"), action("A_MAIL_SEND")));
     const m = model(EMAIL_ME, chooses, MAILS);
@@ -190,6 +201,14 @@ describe("other readings", () => {
     expect((await compose("send me a summary", WITH_SEND, model(unnamed, MAILS))).status).toBe("complete");
     expect((await compose("send me a summary", WITH_SEND, model(unnamed, POSTS))).status).toBe("complete");
     expect((await compose("send me a summary", WITH_SEND, model(unnamed, SWAPS_TO_DISCORD))).status).toBe("no-match");
+  });
+
+  test("a send with no channel named says so when nothing installed can send", async () => {
+    const m = model(asks([], { send: true }), SWAPS_TO_DISCORD);
+    const result = await compose("send me a summary", [MAIL_READ, FORMAT_DISCORD], m);
+    expect(result.status).toBe("no-match");
+    if (result.status === "no-match") expect(result.message).toContain("no installed action sends anything");
+    expect(m.prompts).toHaveLength(0);
   });
 
   test("a request for no delivery is not held to one, and may not grow one", async () => {
