@@ -4,6 +4,7 @@ import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES
 import { frozenDateFindings } from "./frozen-dates";
 import { readsDataFindings } from "./reads-data";
 import { typedInputFindings } from "./typed-inputs";
+import { windowFindings } from "./window";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
 const noMatch = (message: string) => ({ status: "no-match", kind: "missing-capability", message }) as const;
 export interface ComposeFlowOptions extends Omit<ComposeOptions, "check"> {
@@ -39,7 +40,9 @@ For map and gate primitives the annotation likewise follows the map: or gate: on
 Never move the annotation onto a nested field; that does not annotate the step.
 Connect required inputs by exact field names from earlier outputs, the initial fields listed below, or a top-level input: map that fixes a value the request settles.
 An agent step sees only its rendered prompt: nothing reaches it unless the prompt names the field as {field}. A step that works from earlier data must name it, as in "Summarize these articles: {items}". An output no later step reads is lost.
-Do not use an agent step to filter or copy a list, because a local model takes many minutes to write a list out. Let the step that writes the result read the whole list and say what to keep, as in "Summarize yesterday's articles among these: {items}".
+Do not use an agent step to filter or copy a list, because a local model takes many minutes to write a list out. Let the step that writes the result read the whole list, as in "Summarize these articles: {items}".
+A model cannot be relied on to select by date. When an action declares an input named window, a request about yesterday's items sets window: yesterday under the top-level input: map, so that code keeps that day's items and the prompt only summarizes them. Follow that summary with the action that reads windowNote, before the delivery. If the request asks for a relative day no window offers, use the Closest I have reply.
+A step that writes a mail body writes only the text of the mail: no subject line, no greeting and no sign-off.
 An input named limit cuts off what an action returns, often at a small default, so always set it, as a fixed value under the top-level input: map. A busy news feed publishes over 100 items a day, so anything covering a day of one needs limit: 150.
 Emit the finished flow once and do not draft it in your reply.
 Every agent step is told today's and yesterday's date when it runs. Say a relative date in words such as "yesterday" and never write a calendar date unless the request names one, because this flow may run daily.
@@ -62,7 +65,7 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
             ...options,
             initialFields,
             strictReply: options.strictReply ?? true,
-            check: (yaml) => [...frozenDateFindings(request, yaml), ...typedInputFindings(yaml, options.catalog), ...readsDataFindings(yaml, options.catalog), ...(ask ? deliveryFindings(ask, yaml, options.catalog) : [])],
+            check: (yaml) => [...frozenDateFindings(request, yaml), ...typedInputFindings(yaml, options.catalog), ...readsDataFindings(yaml, options.catalog), ...windowFindings(request, yaml, options.catalog), ...(ask ? deliveryFindings(ask, yaml, options.catalog) : [])],
             systemPrompt: options.systemPrompt ?? `${ask ? deliveryRules : ""}${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {

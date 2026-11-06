@@ -1,6 +1,6 @@
 import { type GateAuditHook } from "./policy-loader";
 import type { Policy } from "../types/policy";
-import type { ActionManifest, ActionResult } from "../types/action";
+import type { ActionManifest, ActionResult, ActionRunClock } from "../types/action";
 import type { AgentProvider } from "../types/agent";
 import type { ChatModel } from "./chat-model";
 export interface ActionRunnerOptions {
@@ -13,6 +13,7 @@ export interface ActionRunnerOptions {
     onGateDecision?: GateAuditHook;
     shellArgvOnly?: boolean;
     signal?: AbortSignal;
+    run?: ActionRunClock;
 }
 export interface ResolvedAction {
     path: string;

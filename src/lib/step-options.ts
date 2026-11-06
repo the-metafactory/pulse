@@ -6,6 +6,7 @@
  */
 
 import { runDateLine } from "./run-date";
+import type { ActionRunClock } from "../types/action";
 import type { ActionRunnerOptions } from "./action-runner";
 import type { ChatModel } from "./chat-model";
 import type { ActionStepEvent, AgentEvent, GateEvent, GateProvider, GateResult } from "../types/pipeline";
@@ -90,10 +91,15 @@ export function runState(options: StepRunnerOptions): RunState | undefined {
   return (options as { [RUN_STATE]?: RunState })[RUN_STATE];
 }
 
+/** The instant and zone a run reads the day from, for its prompts and its action steps alike. */
+export function runClock(options: StepRunnerOptions): ActionRunClock {
+  return { startedAt: runState(options)?.startedAt ?? readClock(options), timeZone: options.timeZone };
+}
+
 /** A prompt as a model should get it: rendered, behind the date of the run, which the model has no other way to know. */
 export function renderRunPrompt(template: string, payload: Record<string, unknown>, options: StepRunnerOptions): string {
-  const at = runState(options)?.startedAt ?? readClock(options);
-  return runDateLine(at, options.timeZone) + renderPromptTemplate(template, payload);
+  const { startedAt, timeZone } = runClock(options);
+  return runDateLine(startedAt, timeZone) + renderPromptTemplate(template, payload);
 }
 
 /**

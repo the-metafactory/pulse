@@ -18,6 +18,7 @@ import type {
   ActionImplementation,
   ActionContext,
   ActionResult,
+  ActionRunClock,
 } from "../types/action";
 import type { AgentProvider } from "../types/agent";
 import type { ChatModel } from "./chat-model";
@@ -62,6 +63,8 @@ export interface ActionRunnerOptions {
    * as `ctx.signal`.
    */
   signal?: AbortSignal;
+  /** The clock of the run this action is a step of, handed to the action as `ctx.run`. */
+  run?: ActionRunClock;
 }
 
 /** An action found on disk: its directory and its manifest. */
@@ -187,6 +190,7 @@ export async function runAction<TInput = Record<string, unknown>, TOutput = unkn
         ? { traceId: options.traceId, spanId: crypto.randomUUID().slice(0, 8) }
         : undefined,
       signal: options.signal,
+      run: options.run,
     };
 
     const output = await implementation.execute(prepared.input as TInput, ctx);

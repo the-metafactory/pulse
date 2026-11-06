@@ -159,9 +159,19 @@ export interface ActionManifest {
 // Action Context — passed to every action at execution time
 // ---------------------------------------------------------------------------
 
+/** The clock and zone a run's prompts state as today and yesterday, so that an action reading the day agrees with them. */
+export interface ActionRunClock {
+  startedAt: Date;
+  /** IANA time zone. Absent means the host's. */
+  timeZone?: string;
+}
+
 export interface ActionContext {
   /** Injected capabilities based on action's requirements */
   capabilities: ActionCapabilities;
+
+  /** Present when the action runs as a step of a pipeline. */
+  run?: ActionRunClock;
 
   /** Execution environment */
   env: {

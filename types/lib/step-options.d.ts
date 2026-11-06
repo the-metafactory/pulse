@@ -1,3 +1,4 @@
+import type { ActionRunClock } from "../types/action";
 import type { ActionRunnerOptions } from "./action-runner";
 import type { ChatModel } from "./chat-model";
 import type { ActionStepEvent, AgentEvent, GateEvent, GateProvider, GateResult } from "../types/pipeline";
@@ -36,5 +37,6 @@ export interface RunState {
 }
 export declare function withRunState(options: StepRunnerOptions): StepRunnerOptions;
 export declare function runState(options: StepRunnerOptions): RunState | undefined;
+export declare function runClock(options: StepRunnerOptions): ActionRunClock;
 export declare function renderRunPrompt(template: string, payload: Record<string, unknown>, options: StepRunnerOptions): string;
 export declare function renderPromptTemplate(template: string, payload: Record<string, unknown>): string;

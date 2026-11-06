@@ -35,7 +35,7 @@ function fieldsRead(step: PipelineStep, byName: Catalog): Set<string> {
 }
 
 /** The manifest's declared effect decides; tags speak only for a manifest that declares none. */
-const actsOnTheWorld = (entry: CatalogEntry | undefined): boolean => entry?.effect ? entry.effect === "write" : ACTS_ON_THE_WORLD.some((tag) => entry?.tags?.includes(tag));
+export const actsOnTheWorld = (entry: CatalogEntry | undefined): boolean => entry?.effect ? entry.effect === "write" : ACTS_ON_THE_WORLD.some((tag) => entry?.tags?.includes(tag));
 
 /** What an action brought in: its lists when it has any, since a scalar beside one such as a feed's title is metadata. */
 function dataFields(step: PipelineStep, byName: Catalog): string[] {
