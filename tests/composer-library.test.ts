@@ -141,6 +141,20 @@ test("a model that drafts in its reply is held to the last fence, the answer it 
 test("a closed draft before a cut-off answer is not taken for the answer", async () => {
   const { retry } = await composeReplying({ text: `${draftThenFinal(yaml, yaml)}\n${FENCE}yaml\nname: F_LATER` });
   expect(retry).toContain("was cut off");
-  const limited = await composeReplying({ text: draftThenFinal(yaml, yaml), finishReason: "length" });
-  expect(limited.retry).toContain("was cut off");
+});
+
+test("a complete flow survives a cut-off after it: the yaml is whole when only the diagram or the summary is lost", async () => {
+  const atLimit = await composeReplying({ text: draftThenFinal(yaml, yaml), finishReason: "length" });
+  expect(atLimit.result).toMatchObject({ status: "complete", yaml });
+  expect(atLimit.retry).toBe("");
+  const inDiagram = await composeReplying({ text: `${draftThenFinal(yaml, yaml)}\n${FENCE}mermaid\ngraph TD` });
+  expect(inDiagram.result).toMatchObject({ status: "complete", yaml });
+  expect(inDiagram.retry).toBe("");
+});
+
+test("a retry after a reply with no flow restates the scenario, since the model has no history", async () => {
+  for (const first of [{ text: "partial", finishReason: "length" }, { text: "   " }, { text: "thinking" }]) {
+    const { retry } = await composeReplying(first);
+    expect(retry).toContain("fetch and add links");
+  }
 });
