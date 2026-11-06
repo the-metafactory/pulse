@@ -11,6 +11,7 @@ export interface CatalogEntry {
     }>;
     requires?: string[];
     tags?: string[];
+    effect?: "read" | "write";
 }
 export type SovereigntyClass = "D" | "A" | "H";
 export interface StepAnnotation {
@@ -19,7 +20,7 @@ export interface StepAnnotation {
     sovereignty?: SovereigntyClass;
     residency?: string;
 }
-export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery" | "untyped-input" | "frozen-date";
+export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery" | "untyped-input" | "frozen-date" | "unread-data" | "unset-limit";
 export interface Finding {
     rule: FindingRule;
     step: number;

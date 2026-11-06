@@ -13,6 +13,7 @@ export interface CatalogEntry {
     }>;
     requires?: string[];
     tags?: string[];
+    effect?: "read" | "write";
 }
 export type SovereigntyClass = "D" | "A" | "H";
 export interface StepAnnotation {
@@ -21,7 +22,7 @@ export interface StepAnnotation {
     sovereignty?: SovereigntyClass;
     residency?: string;
 }
-export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery" | "untyped-input" | "frozen-date";
+export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery" | "untyped-input" | "frozen-date" | "unread-data" | "unset-limit";
 export interface Finding {
     rule: FindingRule;
     step: number;
@@ -162,6 +163,7 @@ function validateStepInputs(step: PipelineStep, available: Set<string>, byName: 
     }
     for (const field of stepOutputs(step, byName)) available.add(field);
 }
+const fixedFields = (input: unknown): string[] => input !== null && typeof input === "object" ? Object.keys(input) : [];
 export function validatePipeline(rawYaml: string, catalog: CatalogEntry[], options: ValidatePipelineOptions = {}): ValidationResult {
     const findings: Finding[] = [];
     const annotations: StepAnnotation[] = [];
@@ -180,6 +182,7 @@ export function validatePipeline(rawYaml: string, catalog: CatalogEntry[], optio
     const doc = parsed as {
         name?: unknown;
         actions?: unknown;
+        input?: unknown;
     } | null;
     if (!doc || !Array.isArray(doc.actions) || doc.actions.length === 0) {
         findings.push({ rule: "parse-error", step: -1, message: "pipeline must declare a non-empty `actions:` list" });
@@ -212,7 +215,7 @@ export function validatePipeline(rawYaml: string, catalog: CatalogEntry[], optio
             });
         }
     }
-    const available = new Set(options.initialFields ?? []);
+    const available = new Set([...(options.initialFields ?? []), ...fixedFields(doc.input)]);
     steps.forEach((step, idx) => validateStepInputs(step, available, byName, findings, idx));
     const rawSteps = scanStepAnnotations(rawYaml);
     steps.forEach((step, idx) => {

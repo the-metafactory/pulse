@@ -35,7 +35,7 @@ The injected runtime services for an Action — capabilities, env, trace (`Actio
 The rule that an Action returns the untouched siblings of the fields it consumed, so the Payload grows monotonically down the Pipeline.
 
 **Effect**:
-What an Action declares it does to the world, in its manifest: `read` (gathers only) or `write` (sends, posts, drafts, changes state). Absent counts as not read. A research step offers a model `read` Actions only.
+What an Action declares it does to the world, in its manifest: `read` (gathers only) or `write` (sends, posts, drafts, changes state). Absent counts as not read. A research step offers a model `read` Actions only. (That gates what a research step may call. The composer's read check instead falls back to tags when a manifest declares no Effect, since most manifests declare none.)
 
 ### Runtime
 

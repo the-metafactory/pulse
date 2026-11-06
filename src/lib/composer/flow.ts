@@ -2,6 +2,7 @@ import { parsePipeline } from "../pipeline";
 import { compose, type ComposerLLM, type ComposeOptions } from "./compose";
 import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES, readDeliveryAsk } from "./delivery";
 import { frozenDateFindings } from "./frozen-dates";
+import { readsDataFindings } from "./reads-data";
 import { typedInputFindings } from "./typed-inputs";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
 const noMatch = (message: string) => ({ status: "no-match", kind: "missing-capability", message }) as const;
@@ -36,7 +37,11 @@ actions:
       sovereignty: { model_class: local-only, frontier_ok: false, data_residency: CH }
 For map and gate primitives the annotation likewise follows the map: or gate: on the list-item line.
 Never move the annotation onto a nested field; that does not annotate the step.
-Connect required inputs by exact field names from earlier outputs or the initial fields listed below.
+Connect required inputs by exact field names from earlier outputs, the initial fields listed below, or a top-level input: map that fixes a value the request settles.
+An agent step sees only its rendered prompt: nothing reaches it unless the prompt names the field as {field}. A step that works from earlier data must name it, as in "Summarize these articles: {items}". An output no later step reads is lost.
+Do not use an agent step to filter or copy a list, because a local model takes many minutes to write a list out. Let the step that writes the result read the whole list and say what to keep, as in "Summarize yesterday's articles among these: {items}".
+An input named limit cuts off what an action returns, often at a small default, so always set it, as a fixed value under the top-level input: map. A busy news feed publishes over 100 items a day, so anything covering a day of one needs limit: 150.
+Emit the finished flow once and do not draft it in your reply.
 Every agent step is told today's and yesterday's date when it runs. Say a relative date in words such as "yesterday" and never write a calendar date unless the request names one, because this flow may run daily.
 Use agent collect fields for judgments, never to simulate a missing external tool or side effect.
 Emit an optional fenced mermaid diagram and a plain-language summary. Do not add schedules or execute anything.
@@ -57,7 +62,7 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
             ...options,
             initialFields,
             strictReply: options.strictReply ?? true,
-            check: (yaml) => [...frozenDateFindings(request, yaml), ...typedInputFindings(yaml, options.catalog), ...(ask ? deliveryFindings(ask, yaml, options.catalog) : [])],
+            check: (yaml) => [...frozenDateFindings(request, yaml), ...typedInputFindings(yaml, options.catalog), ...readsDataFindings(yaml, options.catalog), ...(ask ? deliveryFindings(ask, yaml, options.catalog) : [])],
             systemPrompt: options.systemPrompt ?? `${ask ? deliveryRules : ""}${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {
