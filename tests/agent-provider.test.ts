@@ -4,6 +4,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { validateEnvelope } from "@the-metafactory/myelin";
 import {
   MyelinAgentProvider,
   MockAgentProvider,
@@ -93,7 +94,7 @@ describe("MyelinAgentProvider envelope", () => {
     expect(envelope.sovereignty.frontier_ok).toBe(false);
     expect(envelope.sovereignty.data_residency).toBe("CH");
     expect(envelope.sovereignty.classification).toBe("local");
-    expect(envelope.requirements).toEqual(["soc.triage.email"]);
+    expect(envelope.requirements).toBeUndefined();
     expect(envelope.distribution_mode).toBe("offer");
     expect(envelope.payload.prompt).toBe("Analyze this email");
     expect(envelope.deadline).toBeDefined();
@@ -139,6 +140,54 @@ describe("MyelinAgentProvider envelope", () => {
 });
 
 describe("MyelinAgentProvider dispatch", () => {
+  test("a dotted capability builds an envelope the myelin validator accepts", () => {
+    const provider = new MyelinAgentProvider({ transport: new InMemoryAgentTransport(), principal: "jc" });
+    const envelope = provider.buildEnvelope({ capability: "compose.judgment", prompt: "p", sovereignty: { data_residency: "CH" } }, crypto.randomUUID());
+    expect(validateEnvelope(envelope).valid).toBe(true);
+    expect(envelope.payload.capability).toBe("compose.judgment");
+  });
+
+  test("a single-segment capability is stated as a requirement", () => {
+    const provider = new MyelinAgentProvider({ transport: new InMemoryAgentTransport(), principal: "jc" });
+    const envelope = provider.buildEnvelope({ capability: "code-review", prompt: "p", sovereignty: { data_residency: "CH" } }, crypto.randomUUID());
+    expect(envelope.requirements).toEqual(["code-review"]);
+    expect(validateEnvelope(envelope).valid).toBe(true);
+  });
+
+  test("a task nobody starts fails plainly once the claim window ends", async () => {
+    const transport = new InMemoryAgentTransport();
+    const provider = new MyelinAgentProvider({ transport, principal: "jc", claimTimeoutMs: 10 });
+    const result = await provider.dispatch({ capability: "compose.judgment", prompt: "p" });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("nobody took this task");
+    expect(result.error).toContain("compose.judgment");
+  });
+
+  test("a started task outlives the claim window", async () => {
+    const transport = new InMemoryAgentTransport();
+    await transport.subscribe("local.jc.default.tasks.>", (_subject, data) => {
+      const { correlation_id, sovereignty } = JSON.parse(data);
+      const publish = (state: string, payload: Record<string, unknown>) =>
+        transport.publish(`local.jc.default.dispatch.task.${state}`, JSON.stringify({ correlation_id, sovereignty, payload }));
+      void publish("started", {});
+      setTimeout(() => void publish("completed", { result_summary: "done" }), 40);
+    });
+    const provider = new MyelinAgentProvider({ transport, principal: "jc", claimTimeoutMs: 10 });
+    const result = await provider.dispatch({ capability: "compose.judgment", prompt: "p" });
+    expect(result).toMatchObject({ status: "completed", output: "done" });
+  });
+
+  test("a start for another task does not hold the claim window open", async () => {
+    const transport = new InMemoryAgentTransport();
+    await transport.subscribe("local.jc.default.tasks.>", () => {
+      void transport.publish("local.jc.default.dispatch.task.started", JSON.stringify({ correlation_id: "someone-else" }));
+    });
+    const provider = new MyelinAgentProvider({ transport, principal: "jc", claimTimeoutMs: 10 });
+    const result = await provider.dispatch({ capability: "compose.judgment", prompt: "p" });
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("nobody took this task");
+  });
+
   test("resolves on dispatch.task.completed with matching correlation_id", async () => {
     const transport = new InMemoryAgentTransport();
     await respondToTasks(transport, (envelope) => ({
