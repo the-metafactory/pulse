@@ -17,7 +17,7 @@ The atomic, pure unit of work — declares required capabilities, receives them 
 The authoring shape for in-process data transformation — steps share one passthrough context; branching-in-the-small handled by composition primitives. The default unit of work.
 
 **Flow**:
-The deployment shape — binds a unit of work to a source + destination + schedule. The only shape that touches the outside world and the clock.
+The deployment shape — binds a unit of work to a source + destination + schedule. The only shape that touches the outside world and schedules against the clock. (A Pipeline run reads the clock once at its start only to tell its model prompts the date.)
 
 **Tree**:
 The orchestration shape for coarse-grained dependency graphs — independent nodes with explicit dependencies, parallel readiness, per-node retry/timeout.

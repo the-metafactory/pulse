@@ -277,7 +277,7 @@ describe("research step — tools, bind and the loop", () => {
     await runPipeline(pipeline({ system: "You prepare {topic}." }), {}, opts());
     expect(requests[0].messages).toEqual([
       { role: "system", content: "You prepare the quarterly review." },
-      { role: "user", content: "Prepare the quarterly review" },
+      { role: "user", content: expect.stringMatching(/^Today is \d{4}-\d{2}-\d{2} [\s\S]*\n\nPrepare the quarterly review$/) },
     ]);
     expect(requests[0].model).toBe("test-alias");
     expect(requests[0].tool_choice).toBe("auto");

@@ -67,6 +67,7 @@ interface AgentProvider {
 - `dispatch()` resolves with `status: "completed" | "failed"`; it rejects only
   on transport errors and aborts. The step runner raises `StepFailure` on
   `failed`, so `retry:` can wrap agent steps.
+- Every prompt a run sends to a model starts with today's and yesterday's date, read once when the run starts, in `StepRunnerOptions.timeZone` or the host's zone, since an agent step sees nothing but its prompt. The routine composer sends back a flow holding a calendar date when its request names none (`src/lib/composer/frozen-dates.ts`).
 - Omitted `collect` defaults to `agent_${name}` (collision-safe, gate precedent).
 - `returns: string|url|number|integer|boolean|array|object` declares the one value the step yields. The step asks the model for only that value, reads it as that type (`"15"` becomes `15`, JSON text becomes the array or object), and fails naming the collect field when the answer is anything else, so the next step never sees it. Without `returns` the answer is collected as it came. The routine composer requires `returns` on any agent step whose collect field is a later action input declared as one of those types (`src/lib/composer/typed-inputs.ts`); an input declared with any other type is not checked. `returns: string` asks for only the value but cannot tell a sentence from a value, so it does not catch prose in a plain text input. A stored flow without it runs as before.
 - Lifecycle events `agent.dispatched|completed|failed|timeout` flow through

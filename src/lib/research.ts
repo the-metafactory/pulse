@@ -20,7 +20,7 @@ import { ModelError, ModelUnavailableError, type ChatMessage, type ChatModel, ty
 import { mapWithConcurrency } from "./concurrency";
 import { StepFailure } from "./step-failure";
 import { checkToolArgs, toolInput, toolSchema } from "./tool-schema";
-import { renderPromptTemplate, runState, type StepRecord, type StepRunnerOptions } from "./step-options";
+import { renderPromptTemplate, renderRunPrompt, runState, type StepRecord, type StepRunnerOptions } from "./step-options";
 import type { ActionManifest } from "../types/action";
 import type { ResearchStats, ResearchStepSpec } from "../types/research";
 
@@ -271,7 +271,7 @@ class ResearchRun {
       (state?.preflight.get(spec) as Map<string, ResolvedAction> | undefined) ??
       (await checkResearchTools(spec, options.actionDirs));
 
-    const prompt = renderPromptTemplate(spec.prompt, this.payload);
+    const prompt = renderRunPrompt(spec.prompt, this.payload, options);
     const system = spec.system ? renderPromptTemplate(spec.system, this.payload) : undefined;
     if (system) this.messages.push({ role: "system", content: system });
     this.messages.push({ role: "user", content: prompt });

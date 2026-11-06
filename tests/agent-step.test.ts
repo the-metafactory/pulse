@@ -52,7 +52,7 @@ describe("agent step", () => {
 
     const result = await runSteps(steps, { email: "click here", keep: 1 }, options({ agentProvider: provider }));
 
-    expect(provider.dispatched[0].prompt).toBe("Analyze: click here");
+    expect(provider.dispatched[0].prompt).toEndWith("\n\nAnalyze: click here");
     // collect stores the agent's RESULT VALUE (result.output), not the transport
     // envelope — consistent with map/filter/reduce. Status/task_id/duration
     // travel on the onAgentEvent stream, not the data payload.

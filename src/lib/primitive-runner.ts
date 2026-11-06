@@ -36,7 +36,7 @@ import { mapWithConcurrency } from "./concurrency";
 import { ResearchUnavailable, checkResearchTools, runResearch, validateResearch } from "./research";
 import type { AgentReturnType } from "../types/agent";
 import { AGENT_RETURN_TYPES, readAgentReturn, returnInstruction } from "./agent-returns";
-import { renderPromptTemplate, runState, withRunState, type StepRecord, type StepRunnerOptions } from "./step-options";
+import { renderPromptTemplate, renderRunPrompt, runState, withRunState, type StepRecord, type StepRunnerOptions } from "./step-options";
 import type { ResearchStepSpec } from "../types/research";
 
 export { StepFailure, MapItemFailure, renderPromptTemplate };
@@ -740,7 +740,7 @@ async function runAgent(
     );
   }
 
-  const prompt = renderPromptTemplate(spec.prompt, payload) + (spec.returns ? returnInstruction(spec.returns) : "");
+  const prompt = renderRunPrompt(spec.prompt, payload, options) + (spec.returns ? returnInstruction(spec.returns) : "");
   const taskSpec = {
     capability: spec.capability,
     prompt,
@@ -951,7 +951,7 @@ async function dispatchSeat(
 ): Promise<SeatVote> {
   let prompt: string;
   try {
-    prompt = renderPromptTemplate(seat.prompt, payload) + VOTE_FORMAT_INSTRUCTION;
+    prompt = renderRunPrompt(seat.prompt, payload, options) + VOTE_FORMAT_INSTRUCTION;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     return abstainVote(seat.name, `prompt template error: ${errMsg}`);

@@ -1,6 +1,7 @@
 import { parsePipeline } from "../pipeline";
 import { compose, type ComposerLLM, type ComposeOptions } from "./compose";
 import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES, readDeliveryAsk } from "./delivery";
+import { frozenDateFindings } from "./frozen-dates";
 import { typedInputFindings } from "./typed-inputs";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
 const noMatch = (message: string) => ({ status: "no-match", kind: "missing-capability", message }) as const;
@@ -36,6 +37,7 @@ actions:
 For map and gate primitives the annotation likewise follows the map: or gate: on the list-item line.
 Never move the annotation onto a nested field; that does not annotate the step.
 Connect required inputs by exact field names from earlier outputs or the initial fields listed below.
+Every agent step is told today's and yesterday's date when it runs. Say a relative date in words such as "yesterday" and never write a calendar date unless the request names one, because this flow may run daily.
 Use agent collect fields for judgments, never to simulate a missing external tool or side effect.
 Emit an optional fenced mermaid diagram and a plain-language summary. Do not add schedules or execute anything.
 Installed catalog:
@@ -55,7 +57,7 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
             ...options,
             initialFields,
             strictReply: options.strictReply ?? true,
-            check: (yaml) => [...typedInputFindings(yaml, options.catalog), ...(ask ? deliveryFindings(ask, yaml, options.catalog) : [])],
+            check: (yaml) => [...frozenDateFindings(request, yaml), ...typedInputFindings(yaml, options.catalog), ...(ask ? deliveryFindings(ask, yaml, options.catalog) : [])],
             systemPrompt: options.systemPrompt ?? `${ask ? deliveryRules : ""}${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {

@@ -5,6 +5,7 @@
  * import it without a cycle through the primitive runner.
  */
 
+import { runDateLine } from "./run-date";
 import type { ActionRunnerOptions } from "./action-runner";
 import type { ChatModel } from "./chat-model";
 import type { ActionStepEvent, AgentEvent, GateEvent, GateProvider, GateResult } from "../types/pipeline";
@@ -54,6 +55,10 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
   transcriptDir?: string;
   /** Optional sink for research lifecycle events (names and counts only). */
   onResearchEvent?: (event: ResearchEvent) => void;
+  /** The clock a run reads its date from. Default: the system clock. */
+  now?: () => Date;
+  /** IANA time zone for the date a run gives its agents. Default: the host's. */
+  timeZone?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,17 +73,27 @@ export interface RunState {
   preflight: Map<object, unknown>;
   /** Models a research step found unreachable this run, with the reason. */
   unavailableModels: Map<string, string>;
+  /** When the run started, so that all its steps agree on the day, even across midnight. */
+  startedAt: Date;
 }
+
+const readClock = (options: StepRunnerOptions): Date => options.now?.() ?? new Date();
 
 /** The options for one run: the host's options plus fresh run state (object spread carries it into nested steps). */
 export function withRunState(options: StepRunnerOptions): StepRunnerOptions {
-  const state: RunState = { preflight: new Map(), unavailableModels: new Map() };
+  const state: RunState = { preflight: new Map(), unavailableModels: new Map(), startedAt: readClock(options) };
   return { ...options, [RUN_STATE]: state } as StepRunnerOptions;
 }
 
 /** The run state, or undefined when the steps are driven without runPipeline. */
 export function runState(options: StepRunnerOptions): RunState | undefined {
   return (options as { [RUN_STATE]?: RunState })[RUN_STATE];
+}
+
+/** A prompt as a model should get it: rendered, behind the date of the run, which the model has no other way to know. */
+export function renderRunPrompt(template: string, payload: Record<string, unknown>, options: StepRunnerOptions): string {
+  const at = runState(options)?.startedAt ?? readClock(options);
+  return runDateLine(at, options.timeZone) + renderPromptTemplate(template, payload);
 }
 
 /**
