@@ -33,7 +33,8 @@ function fieldsRead(step: PipelineStep, byName: Catalog): Set<string> {
   return read;
 }
 
-const actsOnTheWorld = (entry: CatalogEntry | undefined): boolean => entry?.effect === "write" || ACTS_ON_THE_WORLD.some((tag) => entry?.tags?.includes(tag));
+/** The manifest's declared effect decides; tags speak only for a manifest that declares none. */
+const actsOnTheWorld = (entry: CatalogEntry | undefined): boolean => entry?.effect ? entry.effect === "write" : ACTS_ON_THE_WORLD.some((tag) => entry?.tags?.includes(tag));
 
 /** What an action brought in: a collection when it has one, since a scalar beside it such as a feed's title is metadata. */
 function dataFields(step: PipelineStep, byName: Catalog): string[] {
@@ -99,12 +100,14 @@ class DataWalk {
 
   private children(step: Composite, at: number, data: Set<string>): void {
     const items = itemFields(step, data);
+    const known = new Set([...data, ...items]);
+    let broughtData = items.length > 0;
     for (const children of childActions(step)) {
-      const inner = new Set([...data, ...items]);
-      const known = inner.size;
+      const inner = new Set(known);
       this.walk(children, at, inner);
-      if (inner.size > known || items.length > 0) this.addOutputs(step, data);
+      broughtData ||= inner.size > known.size;
     }
+    if (broughtData) this.addOutputs(step, data);
   }
 
   /** Walks in order, tracking which fields descend from what an action or research step brought in. */

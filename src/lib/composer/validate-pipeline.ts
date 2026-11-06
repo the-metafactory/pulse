@@ -13,7 +13,7 @@ export interface CatalogEntry {
     }>;
     requires?: string[];
     tags?: string[];
-    effect?: string;
+    effect?: "read" | "write";
 }
 export type SovereigntyClass = "D" | "A" | "H";
 export interface StepAnnotation {

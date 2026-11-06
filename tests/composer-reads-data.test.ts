@@ -131,6 +131,13 @@ describe("an agent step that must read the Payload it works from", () => {
     expect(rulesOf(flow(action("A_PUBLISH_NOTE"), FEED_URL, action("A_FETCH_FEED"), agent("sum", "body", "Sum {items}"), agent("say", "subject", "Announce {noteUrl}"), action("A_MAIL_SEND")))).toEqual([]);
   });
 
+  test("a parallel branch does not see what a sibling branch wrote, and a declared read effect outranks a tag", () => {
+    const branches = "  - parallel: # sovereignty: A, residency: CH\n      branches:\n        one:\n          actions:\n            - A_FETCH_FEED\n        two:\n          actions:\n            - agent:\n                name: sibling\n                capability: compose.judgment\n                prompt: \"Write from {scenario}\"\n                collect: note\n";
+    expect(rulesOf(flow(FEED_URL, branches))).toEqual([]);
+    const readsWithAPostTag: CatalogEntry = { ...FETCH_FEED, name: "A_READ_POSTS", effect: "read", tags: ["post"] };
+    expect(readsDataFindings(flow(FEED_URL, action("A_READ_POSTS"), agent("a", "subject", "Up {scenario}")), [readsWithAPostTag]).map((f) => f.rule)).toContain("unread-data");
+  });
+
   test("a judgment inside a map reads the item, not the collection", () => {
     const map = (prompt: string) => `  - map: # sovereignty: A, residency: CH\n      over: items\n      as: item\n      collect: notes\n      actions:\n        - agent:\n            name: note\n            capability: compose.judgment\n            prompt: "${prompt}"\n            collect: note\n`;
     expect(rulesOf(flow(FEED_URL, action("A_FETCH_FEED"), map("Note on {item}")))).toEqual([]);
