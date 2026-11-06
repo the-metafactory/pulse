@@ -19,7 +19,6 @@ declare const DeliveryAskSchema: z.ZodObject<{
 export type DeliveryAsk = z.infer<typeof DeliveryAskSchema>;
 export declare function readDeliveryAsk(request: string, llm: ComposerLLM): Promise<DeliveryAsk>;
 export declare function deliveryGap(ask: DeliveryAsk, catalog: CatalogEntry[]): string | null;
-export declare function flatten(step: PipelineStep): PipelineStep[];
 export declare function readFlow(yaml: string): {
     steps: PipelineStep[];
     input: Record<string, unknown>;

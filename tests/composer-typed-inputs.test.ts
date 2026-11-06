@@ -206,6 +206,11 @@ describe("what the composer holds a flow to", () => {
     expect(rules(agent("draft", "items"), refill, action("A_EXTRACT_ARTICLE"))).toEqual([]);
   });
 
+  test("a step around a reader does not hide it, even when it collects the same field", () => {
+    const around = "  - map: # sovereignty: D, residency: CH\n      over: other\n      as: item\n      collect: items\n      actions: [A_EXTRACT_ARTICLE]\n";
+    expect(rules(agent("draft", "items"), around)[0]?.message).toContain("returns: array");
+  });
+
   test("a judgment nothing reads needs no type", () => {
     expect(rules(agent("muse", "thought"))).toEqual([]);
   });

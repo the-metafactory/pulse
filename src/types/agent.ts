@@ -118,12 +118,12 @@ export type AgentEvent =
 // Pipeline step spec — the declarative `agent:` surface
 // ---------------------------------------------------------------------------
 
+export type AgentReturnType = "string" | "url" | "number" | "integer" | "boolean" | "array" | "object";
+
 /**
  * Declarative agent step. Completes miner's D/A/H step taxonomy in pipeline
  * YAML: Deterministic = action, Agentic = `agent:`, Human = `gate:`.
  */
-export type AgentReturnType = "string" | "url" | "number" | "integer" | "boolean" | "array" | "object";
-
 export interface AgentStepSpec {
   /** Stable identifier for this step (used in events + traces). */
   name: string;

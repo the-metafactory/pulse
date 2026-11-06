@@ -66,7 +66,7 @@ export function deliveryGap(ask: DeliveryAsk, catalog: CatalogEntry[]): string |
   return chats.length > 0 ? `${ONLY_OWN_ADDRESSES} It can deliver by ${chats.join(" or ")} instead, if you ask for that.` : ONLY_OWN_ADDRESSES;
 }
 
-export function flatten(step: PipelineStep): PipelineStep[] {
+function flatten(step: PipelineStep): PipelineStep[] {
   return typeof step === "string" ? [step] : [step, ...childActions(step).flat().flatMap(flatten)];
 }
 const actionNames = (step: PipelineStep): string[] => flatten(step).filter((s): s is string => typeof s === "string");
