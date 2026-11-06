@@ -1,23 +1,18 @@
 import { type ComposerLLM, type ComposeOptions } from "./compose";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
-export interface ComposeFlowOptions extends ComposeOptions {
+export interface ComposeFlowOptions extends Omit<ComposeOptions, "check"> {
     catalog: CatalogEntry[];
     llm: ComposerLLM;
+    holdToDelivery?: boolean;
 }
 export declare function composeFlow(request: string, options: ComposeFlowOptions): Promise<{
     readonly status: "no-match";
     readonly kind: "missing-capability";
     readonly message: string;
-    readonly findings?: undefined;
-    readonly flow?: undefined;
-    readonly yaml?: undefined;
-    readonly summary?: undefined;
-    readonly mermaid?: undefined;
 } | {
     readonly status: "invalid";
     readonly kind: "off-contract";
     readonly findings: Finding[];
-    readonly message?: undefined;
     readonly flow?: undefined;
     readonly yaml?: undefined;
     readonly summary?: undefined;
@@ -29,13 +24,11 @@ export declare function composeFlow(request: string, options: ComposeFlowOptions
     readonly summary: string;
     readonly mermaid: string | null;
     readonly kind?: undefined;
-    readonly message?: undefined;
     readonly findings?: undefined;
 } | {
     readonly status: "invalid";
     readonly kind: "composition-failed";
     readonly findings: Finding[];
-    readonly message?: undefined;
     readonly flow?: undefined;
     readonly yaml?: undefined;
     readonly summary?: undefined;

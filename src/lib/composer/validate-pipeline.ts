@@ -21,7 +21,7 @@ export interface StepAnnotation {
     sovereignty?: SovereigntyClass;
     residency?: string;
 }
-export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation";
+export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery";
 export interface Finding {
     rule: FindingRule;
     step: number;
@@ -77,7 +77,7 @@ function scanStepAnnotations(rawYaml: string): RawStep[] {
     }
     return steps;
 }
-function childActions(step: Exclude<PipelineStep, string>): PipelineStep[][] {
+export function childActions(step: Exclude<PipelineStep, string>): PipelineStep[][] {
     if ("map" in step)
         return [step.map.actions];
     if ("filter" in step)
@@ -112,7 +112,7 @@ function stepLabel(step: PipelineStep): string {
         return step;
     return Object.keys(step)[0] ?? "unknown";
 }
-function stepOutputs(step: PipelineStep, byName: Map<string, CatalogEntry>): string[] {
+export function stepOutputs(step: PipelineStep, byName: Map<string, CatalogEntry>): string[] {
     if (typeof step === "string") {
         const entry = byName.get(step);
         return entry ? Object.keys(entry.output) : [];

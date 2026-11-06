@@ -1,9 +1,12 @@
 import { parsePipeline } from "../pipeline";
 import { compose, type ComposerLLM, type ComposeOptions } from "./compose";
+import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES, readDeliveryAsk } from "./delivery";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
-export interface ComposeFlowOptions extends ComposeOptions {
+const noMatch = (message: string) => ({ status: "no-match", kind: "missing-capability", message }) as const;
+export interface ComposeFlowOptions extends Omit<ComposeOptions, "check"> {
     catalog: CatalogEntry[];
     llm: ComposerLLM;
+    holdToDelivery?: boolean;
 }
 const instructions = `You compose Pulse pipelines from a fixed installed action catalog.
 Only use installed action names, never invent an action or silently omit a requested capability.
@@ -33,25 +36,40 @@ Use agent collect fields for judgments, never to simulate a missing external too
 Emit an optional fenced mermaid diagram and a plain-language summary. Do not add schedules or execute anything.
 Installed catalog:
 `;
+const deliveryRules = `When the request names a delivery, end the flow with an installed action whose tags say it sends on that channel (send, deliver, post or publish). A formatter does not send.
+Never replace the requested channel with another. If nothing installed can send on it, use the Closest I have reply and offer the other channel there.
+A mail action reaches only the principal's own addresses: leave its to field out and never collect it. If the request mails anyone else, use the Closest I have reply.
+`;
 export async function composeFlow(request: string, options: ComposeFlowOptions) {
     const initialFields = options.initialFields ?? ["scenario", "text"];
     try {
         if (!Number.isInteger(options.maxRetries ?? 2) || (options.maxRetries ?? 2) < 0 || (options.maxRetries ?? 2) > 2) throw new Error("maxRetries must be an integer between 0 and 2");
+        const ask = options.holdToDelivery ? await readDeliveryAsk(request, options.llm) : null;
+        const gap = ask ? deliveryGap(ask, options.catalog) : null;
+        if (gap) return noMatch(gap);
         const result = await compose(request, options.catalog, options.llm, {
             ...options,
             initialFields,
             strictReply: options.strictReply ?? true,
-            systemPrompt: options.systemPrompt ?? `${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
+            check: ask ? (yaml) => deliveryFindings(ask, yaml, options.catalog) : undefined,
+            systemPrompt: options.systemPrompt ?? `${ask ? deliveryRules : ""}${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {
             if (result.kind === "no-match") {
-                return { status: "no-match", kind: "missing-capability", message: result.message } as const;
+                return noMatch(result.message);
+            }
+            const undelivered = result.findings.filter((finding) => finding.rule === "missing-delivery");
+            if (undelivered.length > 0) {
+                return noMatch(`I could not compose a routine that delivers as asked: ${undelivered.map((finding) => finding.message).join("; ")}.`);
             }
             const missing = result.findings.filter((finding) => finding.rule === "unknown-block");
             if (missing.length > 0) {
-                return { status: "no-match", kind: "missing-capability", message: missing.map((finding) => finding.message).join("; ") } as const;
+                return noMatch(missing.map((finding) => finding.message).join("; "));
             }
             return { status: "invalid", kind: "off-contract", findings: result.findings } as const;
+        }
+        if (ask && choosesMailRecipient(result.yaml, options.catalog)) {
+            return noMatch(ONLY_OWN_ADDRESSES);
         }
         const flow = parsePipeline(result.yaml);
         return { status: "complete", flow, yaml: result.yaml, summary: result.summary, mermaid: result.mermaid } as const;
