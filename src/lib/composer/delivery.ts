@@ -41,7 +41,7 @@ const chatChannel = (label: string): Channel => ({
   label,
   asked: [
     new RegExp(`${CLAUSE_START}(?:post|send|publish|share|deliver|announce)\\b[^.;]*\\b(?:to|via)\\s+(?:the\\s+)?${label}\\b`, "i"),
-    new RegExp(`${CLAUSE_START}(?:post|publish|share|announce)\\b[^.;]*\\bon\\s+(?:the\\s+)?${label}\\b`, "i"),
+    new RegExp(`${CLAUSE_START}(?:post|publish|share|announce)\\b[^.;]*\\b(?:on|in)\\s+(?:the\\s+)?${label}\\b(?!\\s+(?:to|via|by)\\b)`, "i"),
     new RegExp(`\\b(?:to|via)\\s+(?:the\\s+)?${label}\\s*(?:[.,;!?]|$)`, "i"),
   ],
 });

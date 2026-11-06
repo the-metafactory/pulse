@@ -155,6 +155,17 @@ describe("a request that names Discord", () => {
     expect(result.status).toBe("no-match");
   });
 
+  test("reads \"in Slack\" as a destination after a posting verb, so mail cannot stand in for it", async () => {
+    const result = await composeFlow("post the summary in Slack", { catalog: WITH_SEND, llm: mustNotCallModel });
+    expect(result.status).toBe("no-match");
+    if (result.status === "no-match") expect(result.message).toContain("can't deliver by Slack");
+  });
+
+  test("a channel posted about is a source when another destination follows", async () => {
+    const result = await composeFlow("post a digest of what happened on Slack to Discord", { catalog: WITH_SEND, llm: replies(POSTS).llm });
+    expect(result.status).toBe("complete");
+  });
+
   test("names the gap when nothing can post there", async () => {
     const result = await composeFlow("post a summary to Discord", { catalog: [MAIL_SEND, FORMAT_DISCORD], llm: mustNotCallModel });
     expect(result.status).toBe("no-match");
