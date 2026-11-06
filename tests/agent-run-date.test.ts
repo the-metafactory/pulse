@@ -81,6 +81,8 @@ describe("the date a run gives its agents", () => {
 describe("what counts as a frozen date", () => {
   test.each([
     "published on 2026-11-05",
+    "published on November 5th",
+    "published on 5 May from the feed",
     "published on 05.11.2026.",
     "published on 05.11.2026",
     "published on 5.11.2026",
