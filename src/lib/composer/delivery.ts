@@ -21,9 +21,10 @@ const ASKS_EMAIL = [
   /\bsend\s+(?:(?!of\b|my\b|from\b)\S+\s+){0,3}e-?mail\b/i,
   /\bto\s+my\s+(?:inbox|e-?mail|mail)\b/i,
 ];
+const NOT_A_RECIPIENT_WORD = "(?:me|myself|it|this|that|them|these|those|a|an|the|with|from|of|about|for|in|on|to|and|or|at|by)\\b";
 const NAMES_OTHER_RECIPIENT = [
   new RegExp(`\\b${MAIL}\\s+(?:${ADDRESS}|[A-Z][\\w-]*)`),
-  new RegExp(`(?<!\\b(?:an?|the|my|our)\\s)\\b${MAIL}\\s+(?:(?:the|my|our)\\s+)?(?!(?:me|myself|it|this|that|them|these|those|a|an|the|with|from|of|about|for|in|on|to|and|or|at|by)\\b)\\w+\\s+(?:a|an|the|this|my|our)\\b`),
+  new RegExp(`(?<!\\b(?:an?|the|my|our)\\s)\\b${MAIL}\\s+(?:(?:the|my|our)\\s+)?(?!${NOT_A_RECIPIENT_WORD})\\w+\\s+(?:a|an|the|this|my|our)\\b`),
   new RegExp(`\\bto\\s+${RECIPIENT}\\s*(?:[.,;!?]|$)`),
 ];
 const SELF_AND_OTHER = new RegExp(`\\b${MAIL}\\s+${MYSELF}\\s+(?:and|und)\\s+(?:${ADDRESS}|[A-Z]|(?:the|my|our)\\s)`);
@@ -39,13 +40,15 @@ const chatChannel = (label: string): Channel => ({
   tags: [label.toLowerCase()],
   label,
   asked: [
-    new RegExp(`${CLAUSE_START}(?:post|send|publish|share|deliver|announce)\\b(?:[^.;]*\\b(?:to|via)|(?:(?!\\bof\\b)[^.;])*\\bon)\\s+(?:the\\s+)?${label}\\b`, "i"),
+    new RegExp(`${CLAUSE_START}(?:post|send|publish|share|deliver|announce)\\b[^.;]*\\b(?:to|via)\\s+(?:the\\s+)?${label}\\b`, "i"),
+    new RegExp(`${CLAUSE_START}(?:post|publish|share|announce)\\b[^.;]*\\bon\\s+(?:the\\s+)?${label}\\b`, "i"),
     new RegExp(`\\b(?:to|via)\\s+(?:the\\s+)?${label}\\s*(?:[.,;!?]|$)`, "i"),
   ],
 });
 const EMAIL: Channel = { tags: ["email", "mail"], label: "email", asked: ASKS_EMAIL };
 const CHANNELS: Channel[] = [EMAIL, ...CHAT_LABELS.map(chatChannel)];
 
+const ASKS_UNNAMED_DELIVERY = /\b(?:send|deliver)\s+(?:it\s+|this\s+|that\s+)?(?:to\s+)?me\b/i;
 const SENDS = ["send", "deliver", "post", "publish"];
 const REACHES_OUT = [...SENDS, "notify"];
 
@@ -93,16 +96,17 @@ export function deliveryFindings(request: string, yaml: string, catalog: Catalog
   const findings: Finding[] = [];
   const finding = (step: number, message: string) => findings.push({ rule: "missing-delivery", step, message });
   const named = CHANNELS.some((channel) => mentions(request, channel));
-  const wanted = (channel: Channel): boolean => asked.includes(channel) || (asked.length === 0 && (!named || mentions(request, channel)));
+  const wanted = (channel: Channel): boolean => asked.includes(channel) || (asked.length === 0 && (channel === EMAIL || !named || mentions(request, channel)));
   for (const channel of asked) {
     if (names.some((name) => sendsOn(byName.get(name), channel))) continue;
     const senders = catalog.filter((entry) => sendsOn(entry, channel)).map((entry) => entry.name);
     finding(-1, `the request asks for delivery by ${channel.label}, but no step sends it; send it with ${senders.join(" or ")}`);
   }
+  const mustEndOn = asked.length > 0 ? asked : ASKS_UNNAMED_DELIVERY.test(request) ? CHANNELS : [];
   const lastStep = steps.length - 1;
   const last = steps[lastStep];
-  const endsBySending = last !== undefined && actionNames(last).some((name) => asked.some((channel) => sendsOn(byName.get(name), channel)));
-  if (asked.length > 0 && findings.length === 0 && !endsBySending) finding(lastStep, "the flow must end with the step that sends the delivery the request asks for");
+  const endsBySending = last !== undefined && actionNames(last).some((name) => mustEndOn.some((channel) => sendsOn(byName.get(name), channel)));
+  if (mustEndOn.length > 0 && findings.length === 0 && !endsBySending) finding(lastStep, "the flow must end with the step that sends the delivery the request asks for");
   steps.forEach((step, index) => {
     for (const name of actionNames(step)) {
       const other = CHANNELS.find((channel) => !wanted(channel) && reachesOutOn(byName.get(name), channel));

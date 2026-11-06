@@ -113,6 +113,7 @@ describe("a request to mail someone else", () => {
     "email me what people post on Discord",
     "send me a summary of the Slack threads by email",
     "send me a summary of the threads on Slack by email",
+    "send me the threads on Slack by email",
     "send me an email digest this morning",
   ]) {
     test(`still composes "${request}"`, async () => {
@@ -147,6 +148,11 @@ describe("a request that names Discord", () => {
     const result = await composeFlow("post a summary to Discord", { catalog: WITH_SEND, llm: model.llm });
     expect(result.status).toBe("no-match");
     expect(model.prompts[1]).toContain("A_DELIVER");
+  });
+
+  test("reads \"on Discord\" as a destination after a posting verb", async () => {
+    const result = await composeFlow("post a summary of the week on Discord", { catalog: WITH_SEND, llm: replies(SWAPS_TO_DISCORD).llm });
+    expect(result.status).toBe("no-match");
   });
 
   test("names the gap when nothing can post there", async () => {
@@ -190,12 +196,19 @@ describe("a phrasing the request reading misses", () => {
     if (result.status === "no-match") expect(result.message).toContain("did not ask for");
   });
 
-  test("a request that mentions no channel leaves the pick to the model, in steps the card shows", async () => {
-    for (const text of [MAILS, SWAPS_TO_DISCORD]) {
-      const model = replies(text);
-      expect((await composeFlow("send me a summary", { catalog: WITH_SEND, llm: model.llm })).status).toBe("complete");
-      expect(model.prompts).toHaveLength(1);
-    }
+  test("a request that mentions no channel leaves the pick to the model, but it must send", async () => {
+    const posts = await composeFlow("send me a summary", { catalog: WITH_SEND, llm: replies(POSTS).llm });
+    expect(posts.status).toBe("complete");
+    const mails = await composeFlow("send me a summary", { catalog: WITH_SEND, llm: replies(MAILS).llm });
+    expect(mails.status).toBe("complete");
+    const formats = await composeFlow("send me a summary", { catalog: WITH_SEND, llm: replies(SWAPS_TO_DISCORD).llm });
+    expect(formats.status).toBe("no-match");
+  });
+
+  test("a channel named only as a source does not rule out mailing the principal or allow a post elsewhere", async () => {
+    const request = "send me a summary of the Slack threads";
+    expect((await composeFlow(request, { catalog: WITH_SEND, llm: replies(MAILS).llm })).status).toBe("complete");
+    expect((await composeFlow(request, { catalog: WITH_SEND, llm: replies(POSTS).llm })).status).toBe("no-match");
   });
 
   test("a channel the request names as its source may be used", async () => {
