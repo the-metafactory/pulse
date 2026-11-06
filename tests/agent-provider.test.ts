@@ -230,6 +230,21 @@ describe("MyelinAgentProvider dispatch", () => {
     expect(result.output).toBe("Three articles on Swiss privacy law.");
   });
 
+  for (const [name, payload, expected] of [
+    ["error_summary, as a Cortex brain consumer sends it", { error_summary: "wont_do: the step needs a local model", reason: { kind: "wont_do", detail: "the step needs a local model" } } as Record<string, unknown>, "wont_do: the step needs a local model"],
+    ["a structured reason alone", { reason: { kind: "not_now", detail: "the model endpoint is unreachable" } } as Record<string, unknown>, "the model endpoint is unreachable"],
+    ["a plain reason", { reason: "no agent claimed the task" } as Record<string, unknown>, "no agent claimed the task"],
+    ["nothing usable", { reason: { kind: "cant_do" } } as Record<string, unknown>, "agent task failed"],
+  ] as const) {
+    test(`a failed task reports ${name} as readable text`, async () => {
+      const transport = new InMemoryAgentTransport();
+      await respondToTasks(transport, () => ({ state: "failed", payload }));
+      const result = await makeProvider(transport).dispatch(baseSpec);
+      expect(result.status).toBe("failed");
+      expect(result.error).toBe(expected);
+    });
+  }
+
   test("resolves with failed status on dispatch.task.failed", async () => {
     const transport = new InMemoryAgentTransport();
     await respondToTasks(transport, () => ({
