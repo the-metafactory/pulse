@@ -16,16 +16,17 @@ function stringsIn(value: unknown): string[] {
   return value !== null && typeof value === "object" ? Object.values(value).flatMap(stringsIn) : [];
 }
 
-function overField(step: Composite): string[] {
-  if ("map" in step) return [step.map.over];
-  if ("filter" in step) return [step.filter.over];
-  return "reduce" in step ? [step.reduce.over] : [];
+function collectionOf(step: Composite): { over: string; items: string[] } | null {
+  if ("map" in step) return { over: step.map.over, items: [step.map.as] };
+  if ("filter" in step) return { over: step.filter.over, items: [step.filter.as] };
+  return "reduce" in step ? { over: step.reduce.over, items: [step.reduce.item_as, step.reduce.acc_as] } : null;
 }
 
 /** Every field a step may read: an action's declared inputs, and any field a primitive names or renders into a prompt. */
 function fieldsRead(step: PipelineStep, byName: Catalog): Set<string> {
   if (typeof step === "string") return new Set(Object.keys(byName.get(step)?.input ?? {}));
-  const read = new Set<string>(overField(step));
+  const over = collectionOf(step)?.over;
+  const read = new Set<string>(over === undefined ? [] : [over]);
   for (const text of stringsIn(step)) {
     for (const [, path] of text.matchAll(PLACEHOLDER)) read.add(path?.split(".")[0] ?? "");
   }
@@ -36,12 +37,12 @@ function fieldsRead(step: PipelineStep, byName: Catalog): Set<string> {
 /** The manifest's declared effect decides; tags speak only for a manifest that declares none. */
 const actsOnTheWorld = (entry: CatalogEntry | undefined): boolean => entry?.effect ? entry.effect === "write" : ACTS_ON_THE_WORLD.some((tag) => entry?.tags?.includes(tag));
 
-/** What an action brought in: a collection when it has one, since a scalar beside it such as a feed's title is metadata. */
+/** What an action brought in: its lists when it has any, since a scalar beside one such as a feed's title is metadata. */
 function dataFields(step: PipelineStep, byName: Catalog): string[] {
   if (typeof step !== "string") return stepOutputs(step, byName);
   const output = Object.entries(byName.get(step)?.output ?? {});
-  const collections = output.filter(([, spec]) => spec.type === "array" || spec.type === "object");
-  return (collections.length > 0 ? collections : output).map(([field]) => field);
+  const lists = output.filter(([, spec]) => spec.type === "array");
+  return (lists.length > 0 ? lists : output).map(([field]) => field);
 }
 
 /** A retry hands its output on, so its children stand where it stands; other primitives keep their children's fields to themselves. */
@@ -74,25 +75,32 @@ function unreadOutputs(steps: { step: PipelineStep; index: number }[], byName: C
 
 /** The item a collection step hands its children, when the collection itself came from the data. */
 function itemFields(step: Composite, data: Set<string>): string[] {
-  if (!overField(step).some((field) => data.has(field))) return [];
-  if ("map" in step) return [step.map.as];
-  if ("filter" in step) return [step.filter.as];
-  return "reduce" in step ? [step.reduce.item_as, step.reduce.acc_as] : [];
+  const collection = collectionOf(step);
+  return collection && data.has(collection.over) ? collection.items : [];
 }
 
 class DataWalk {
   readonly findings: Finding[] = [];
+  private readonly receipts = new Set<string>();
   constructor(private readonly byName: Catalog) {}
+
+  /** What an acting step reports may be read, but it does not mean the flow holds data a later step must read. */
+  private action(step: string, data: Set<string>): void {
+    if (!actsOnTheWorld(this.byName.get(step))) this.addOutputs(step, data);
+    else for (const field of stepOutputs(step, this.byName)) this.receipts.add(field);
+  }
 
   private addOutputs(step: PipelineStep, data: Set<string>): void {
     for (const field of dataFields(step, this.byName)) data.add(field);
   }
 
   private agent(step: Extract<Composite, { agent: unknown }>, at: number, data: Set<string>): void {
-    if ([...fieldsRead(step, this.byName)].some((field) => data.has(field))) {
+    const read = [...fieldsRead(step, this.byName)];
+    if (read.some((field) => data.has(field))) {
       this.addOutputs(step, data);
       return;
     }
+    if (read.some((field) => this.receipts.has(field))) return;
     if (data.size === 0 || TYPED_CONFIG.has(step.agent.returns ?? "")) return;
     const fields = [...data].map((field) => `{${field}}`).join(", ");
     this.findings.push({ rule: "unread-data", step: at, message: `agent step \`${step.agent.name}\` runs after the flow has data, but its prompt reads none of it, and it sees only its prompt, so it would invent its answer. Put what it works from in its prompt: ${fields}` });
@@ -114,7 +122,8 @@ class DataWalk {
   walk(steps: PipelineStep[], at: number | null, data: Set<string>): void {
     steps.forEach((step, position) => {
       const index = at ?? position;
-      if (typeof step === "string" || "research" in step) this.addOutputs(step, data);
+      if (typeof step === "string") this.action(step, data);
+      else if ("research" in step) this.addOutputs(step, data);
       else if ("agent" in step) this.agent(step, index, data);
       else if ("retry" in step) this.walk(step.retry.actions, index, data);
       else this.children(step, index, data);

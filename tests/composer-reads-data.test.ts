@@ -138,6 +138,12 @@ describe("an agent step that must read the Payload it works from", () => {
     expect(readsDataFindings(flow(FEED_URL, action("A_READ_POSTS"), agent("a", "subject", "Up {scenario}")), [readsWithAPostTag]).map((f) => f.rule)).toContain("unread-data");
   });
 
+  test("what an acting step reported is not data a later step must read, and an object output is data beside a scalar", () => {
+    expect(rulesOf(flow(action("A_PUBLISH_NOTE"), agent("say", "body", "Write up {scenario}"), agent("title", "subject", "Title for {body}"), action("A_MAIL_SEND")))).toEqual([]);
+    const articleWithMeta: CatalogEntry = { ...FETCH_FEED, name: "A_ARTICLE", input: {}, output: { text: { type: "string" }, metadata: { type: "object" } } };
+    expect(readsDataFindings(flow(action("A_ARTICLE"), agent("sum", "summary", "Summarize {text}")), [articleWithMeta])).toEqual([]);
+  });
+
   test("a judgment inside a map reads the item, not the collection", () => {
     const map = (prompt: string) => `  - map: # sovereignty: A, residency: CH\n      over: items\n      as: item\n      collect: notes\n      actions:\n        - agent:\n            name: note\n            capability: compose.judgment\n            prompt: "${prompt}"\n            collect: note\n`;
     expect(rulesOf(flow(FEED_URL, action("A_FETCH_FEED"), map("Note on {item}")))).toEqual([]);
