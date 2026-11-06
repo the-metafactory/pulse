@@ -60,8 +60,8 @@ const endsInsideYamlFence = (text: string): boolean => {
     const fences = [...text.matchAll(/```(\w*)/g)];
     return fences.length % 2 === 1 && fences[fences.length - 1]?.[1]?.toLowerCase() === "yaml";
 };
-function askAgainWithoutYaml(text: string, finishReason: string | undefined): string {
-    if (finishReason === "length" || endsInsideYamlFence(text)) {
+function askAgainWithoutYaml(text: string, cutOff: boolean): string {
+    if (cutOff) {
         return "Your previous reply was cut off at the token limit before its YAML ended. Emit the response again, shorter: the fenced yaml and one line of summary, with no mermaid and no explanation.";
     }
     if (text.trim().length === 0) return "Your previous reply was empty. Emit the full response (yaml + mermaid + summary) for the scenario.";
@@ -79,17 +79,17 @@ export async function compose(scenario: string, catalog: CatalogEntry[], llm: Co
         attempts++;
         const response = await llm(prompt, { system, tier: composeTier() });
         const text = response.text ?? "";
-        const cutOff = endsInsideYamlFence(text);
-        const yaml = cutOff ? null : extractFence(text, "yaml");
+        const yaml = endsInsideYamlFence(text) ? null : extractFence(text, "yaml");
         if (!yaml) {
-            if (!cutOff && response.finishReason !== "length" && text.trim().length > 0 && (!options.strictReply || /^Closest I have is [\s\S]+; the gap is [\s\S]+/i.test(text.trim()))) {
+            const cutOff = response.finishReason === "length" || endsInsideYamlFence(text);
+            if (!cutOff && text.trim().length > 0 && (!options.strictReply || /^Closest I have is [\s\S]+; the gap is [\s\S]+/i.test(text.trim()))) {
                 if (options.strictReply && lastFindings.some((finding) => finding.rule !== "unknown-block")) {
                     return { ok: false, kind: "invalid", findings: lastFindings, lastYaml, attempts };
                 }
                 return { ok: false, kind: "no-match", message: text.trim(), attempts };
             }
             lastFindings = [{ rule: "parse-error", step: -1, message: "composer reply must contain pipeline YAML or an explicit closest-match refusal" }];
-            prompt = `Scenario from the audience:\n\n${scenario}\n\n${askAgainWithoutYaml(text, response.finishReason)}`;
+            prompt = `Scenario from the audience:\n\n${scenario}\n\n${askAgainWithoutYaml(text, cutOff)}`;
             continue;
         }
         const validation = validatePipeline(yaml, catalog, { initialFields });
