@@ -65,20 +65,18 @@ describe("a date-relative flow over a feed that has a window", () => {
     expect(rules(YESTERDAY_REQUEST, flowOf({ input: WINDOW, notice: false }))[0]).toContain("A_WINDOW_NOTICE");
   });
 
-  test("a relative day no window offers is told to say so", () => {
-    expect(rules("mail me last week's articles", flowOf({}))[0]).toContain("Closest I have");
+  test("a window on a request about another day goes back, and removing it clears the finding", () => {
+    expect(rules("mail me last week's articles", flowOf({ input: WINDOW }))[0]).toContain("Remove the window");
+    expect(rules("mail me last week's articles", flowOf({ notice: false }))).toEqual([]);
   });
 
-  test("a relative day no window offers goes back even when a window is set", () => {
-    expect(rules("mail me last week's articles", flowOf({ input: WINDOW }))[0]).toContain("Closest I have");
+  test("a word about when to send never forces a refusal", () => {
+    expect(rules("mail me the latest articles today at 7", flowOf({ notice: false }))).toEqual([]);
   });
 
   test("the day before yesterday is not yesterday", () => {
-    expect(rules("mail me the articles from the day before yesterday", flowOf({ input: WINDOW }))[0]).toContain("Closest I have");
-  });
-
-  test("a relative day in a prompt counts when the request names none", () => {
-    expect(rules("mail me a daily digest", flowOf({ prompt: "Summarize today's articles among {items}" }))[0]).toContain("Closest I have");
+    expect(rules("mail me the articles from the day before yesterday", flowOf({ input: WINDOW }))[0]).toContain("Remove the window");
+    expect(rules("mail me the articles from the day before yesterday", flowOf({ notice: false }))).toEqual([]);
   });
 
   test("a word about when to send does not turn a request about yesterday away", () => {
