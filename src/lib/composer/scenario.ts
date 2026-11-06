@@ -440,7 +440,6 @@ export async function composeScenario(scenario: string, opts: {
         initialFields: opts.initialFields ?? ["scenario", "text"],
         strictReply: false,
         systemPrompt: await loadSystemPrompt(catalog),
-        holdToDelivery: false,
     });
 }
 export async function runSavedFlow(yaml: string, opts: RunScenarioOptions): Promise<RunScenarioResult> {

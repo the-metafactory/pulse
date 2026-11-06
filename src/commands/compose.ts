@@ -29,7 +29,7 @@ export function createComposeCommand(): Command {
         }
         const catalog = options.catalogDir ? await buildCatalog(options.catalogDir) : await loadInstalledCatalog();
         if (catalog.length === 0) throw new Error("No installed actions found; install actions with Arc or pass --catalog-dir");
-        const result = await composeFlow(options.request, { catalog, llm });
+        const result = await composeFlow(options.request, { catalog, llm, holdToDelivery: true });
         console.log(options.json ? JSON.stringify(result) : result.status === "complete" ? result.yaml : JSON.stringify(result));
         if (result.status !== "complete") process.exitCode = 1;
       } catch (error) {

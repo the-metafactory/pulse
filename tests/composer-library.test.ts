@@ -59,7 +59,10 @@ test("CLI JSON matches the library using a real HTTP model boundary and catalog 
     await writeFile(join(dir, entry.name, "action.ts"), 'throw new Error("compose must not execute actions")');
   }
   expect(await buildCatalog(dir)).toHaveLength(2);
-  const server = Bun.serve({ port: 0, fetch: () => Response.json({ choices: [{ message: { content: response } }] }) });
+  const server = Bun.serve({ port: 0, fetch: async (request) => {
+    const readsDelivery = (await request.text()).includes("must be delivered");
+    return Response.json({ choices: [{ message: { content: readsDelivery ? JSON.stringify({ channels: [], send: false, mailsSomeoneElse: false }) : response } }] });
+  } });
   try {
     const proc = Bun.spawn(["bun", "src/cli.ts", "compose", "--request", "fetch and add links", "--json", "--catalog-dir", dir, "--model-url", `http://127.0.0.1:${server.port}/v1`, "--model", "fixture"], { cwd: join(import.meta.dir, ".."), env: { ...process.env, PULSE_COMPOSE_API_KEY: "fixture" }, stdout: "pipe", stderr: "pipe" });
     const actual = await new Response(proc.stdout).json();

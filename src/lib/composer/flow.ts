@@ -1,6 +1,6 @@
 import { parsePipeline } from "../pipeline";
 import { compose, type ComposerLLM, type ComposeOptions } from "./compose";
-import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES } from "./delivery";
+import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES, readDeliveryAsk } from "./delivery";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
 const noMatch = (message: string) => ({ status: "no-match", kind: "missing-capability", message }) as const;
 export interface ComposeFlowOptions extends Omit<ComposeOptions, "check"> {
@@ -43,14 +43,14 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
     const initialFields = options.initialFields ?? ["scenario", "text"];
     try {
         if (!Number.isInteger(options.maxRetries ?? 2) || (options.maxRetries ?? 2) < 0 || (options.maxRetries ?? 2) > 2) throw new Error("maxRetries must be an integer between 0 and 2");
-        const hold = options.holdToDelivery ?? true;
-        const gap = hold ? deliveryGap(request, options.catalog) : null;
+        const ask = options.holdToDelivery ? await readDeliveryAsk(request, options.llm) : null;
+        const gap = ask ? deliveryGap(ask, options.catalog) : null;
         if (gap) return noMatch(gap);
         const result = await compose(request, options.catalog, options.llm, {
             ...options,
             initialFields,
             strictReply: options.strictReply ?? true,
-            check: hold ? (yaml) => deliveryFindings(request, yaml, options.catalog) : undefined,
+            check: ask ? (yaml) => deliveryFindings(ask, yaml, options.catalog) : undefined,
             systemPrompt: options.systemPrompt ?? `${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {
@@ -67,7 +67,7 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
             }
             return { status: "invalid", kind: "off-contract", findings: result.findings } as const;
         }
-        if (hold && choosesMailRecipient(result.yaml, options.catalog)) {
+        if (ask && choosesMailRecipient(result.yaml, options.catalog)) {
             return noMatch(ONLY_OWN_ADDRESSES);
         }
         const flow = parsePipeline(result.yaml);
