@@ -39,7 +39,9 @@ For map and gate primitives the annotation likewise follows the map: or gate: on
 Never move the annotation onto a nested field; that does not annotate the step.
 Connect required inputs by exact field names from earlier outputs, the initial fields listed below, or a top-level input: map that fixes a value the request settles.
 An agent step sees only its rendered prompt: nothing reaches it unless the prompt names the field as {field}. A step that works from earlier data must name it, as in "Summarize these articles: {items}". An output no later step reads is lost.
-An input named limit cuts off what an action returns, often at a small default, so always set it for what the request needs: a fixed value under the top-level input: map, such as limit: 150 for a day of a busy news feed.
+Do not use an agent step to filter or copy a list, because a local model takes many minutes to write a list out. Let the step that writes the result read the whole list and say what to keep, as in "Summarize yesterday's articles among these: {items}".
+An input named limit cuts off what an action returns, often at a small default, so always set it, as a fixed value under the top-level input: map. A busy news feed publishes over 100 items a day, so anything covering a day of one needs limit: 150.
+Emit the finished flow once and do not draft it in your reply.
 Every agent step is told today's and yesterday's date when it runs. Say a relative date in words such as "yesterday" and never write a calendar date unless the request names one, because this flow may run daily.
 Use agent collect fields for judgments, never to simulate a missing external tool or side effect.
 Emit an optional fenced mermaid diagram and a plain-language summary. Do not add schedules or execute anything.
