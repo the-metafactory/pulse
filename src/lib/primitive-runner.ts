@@ -34,6 +34,8 @@ import type { GovernedResult, GovernedStepSpec } from "../types/governed";
 import { StepFailure, MapItemFailure, partialPayload } from "./step-failure";
 import { mapWithConcurrency } from "./concurrency";
 import { ResearchUnavailable, checkResearchTools, runResearch, validateResearch } from "./research";
+import type { AgentReturnType } from "../types/agent";
+import { AGENT_RETURN_TYPES, readAgentReturn, returnInstruction } from "./agent-returns";
 import { renderPromptTemplate, runState, withRunState, type StepRecord, type StepRunnerOptions } from "./step-options";
 import type { ResearchStepSpec } from "../types/research";
 
@@ -690,6 +692,9 @@ function validateAgent(spec: Record<string, unknown>, path: string): void {
       throw new Error(`${path}: 'timeout_ms' must be a positive number when set`);
     }
   }
+  if (spec.returns !== undefined && !AGENT_RETURN_TYPES.includes(spec.returns as AgentReturnType)) {
+    throw new Error(`${path}: 'returns' must be one of ${AGENT_RETURN_TYPES.join(", ")}`);
+  }
   if ("distribution_mode" in spec && spec.distribution_mode !== undefined) {
     const mode = spec.distribution_mode;
     if (mode !== "offer" && mode !== "direct" && mode !== "delegate") {
@@ -735,7 +740,7 @@ async function runAgent(
     );
   }
 
-  const prompt = renderPromptTemplate(spec.prompt, payload);
+  const prompt = renderPromptTemplate(spec.prompt, payload) + (spec.returns ? returnInstruction(spec.returns) : "");
   const taskSpec = {
     capability: spec.capability,
     prompt,
@@ -831,6 +836,19 @@ async function runAgent(
     return recordAndThrow(result.error ?? "agent task failed");
   }
 
+  const collectField = spec.collect ?? `agent_${spec.name}`;
+  const answer = spec.returns ? readAgentReturn(result.output, spec.returns, collectField) : { value: result.output };
+  if ("reason" in answer) {
+    options.onAgentEvent?.({
+      type: "agent.failed",
+      name: spec.name,
+      capability: spec.capability,
+      task_id: result.task_id,
+      error: answer.reason,
+    });
+    return recordAndThrow(answer.reason);
+  }
+
   options.onAgentEvent?.({
     type: "agent.completed",
     name: spec.name,
@@ -858,8 +876,7 @@ async function runAgent(
   // before reaching here, so on this path the status is always "completed";
   // a step that needs the error value sees it via the thrown StepFailure, not
   // the payload.
-  const collectField = spec.collect ?? `agent_${spec.name}`;
-  return { ...payload, [collectField]: result.output };
+  return { ...payload, [collectField]: answer.value };
 }
 
 // ---------------------------------------------------------------------------

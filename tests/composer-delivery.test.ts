@@ -13,7 +13,7 @@ const DELIVER: CatalogEntry = { name: "A_DELIVER", description: "Post to Discord
 const WITH_SEND = [MAIL_SEND, MAIL_READ, FORMAT_DISCORD, DELIVER];
 const WITHOUT_SEND = [MAIL_READ, FORMAT_DISCORD, DELIVER];
 
-const agent = (collect: string): string => `  - agent: # sovereignty: A, residency: CH\n      name: derive-${collect}\n      capability: compose.judgment\n      prompt: "Derive ${collect} from {scenario}"\n      collect: ${collect}\n`;
+const agent = (collect: string): string => `  - agent: # sovereignty: A, residency: CH\n      name: derive-${collect}\n      capability: compose.judgment\n      prompt: "Derive ${collect} from {scenario}"\n      collect: ${collect}\n      returns: string\n`;
 const flow = (...steps: string[]): string => `name: F_TEST\nactions:\n${steps.join("")}`;
 const action = (name: string): string => `  - ${name} # sovereignty: D, residency: CH\n`;
 const reply = (yaml: string): string => `\`\`\`yaml\n${yaml}\`\`\`\nA summary.`;

@@ -71,7 +71,7 @@ function flatten(step: PipelineStep): PipelineStep[] {
 }
 const actionNames = (step: PipelineStep): string[] => flatten(step).filter((s): s is string => typeof s === "string");
 
-function readFlow(yaml: string): { steps: PipelineStep[]; input: Record<string, unknown> } {
+export function readFlow(yaml: string): { steps: PipelineStep[]; input: Record<string, unknown> } {
   const doc = parse(yaml) as { actions: unknown[]; input?: Record<string, unknown> };
   return { steps: validateSteps(doc.actions), input: doc.input ?? {} };
 }
