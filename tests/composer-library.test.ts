@@ -101,7 +101,7 @@ const composeReplying = async (first: { text: string; finishReason?: string }) =
 };
 
 test("a reply cut off at the token limit is sent back as cut off, not as empty", async () => {
-  const { result, retry } = await composeReplying({ text: "```yaml\nname: F_NEWS\nactions:\n  - A_FE", finishReason: "length" });
+  const { result, retry } = await composeReplying({ text: "Here is my thinking about the", finishReason: "length" });
   expect(result.status).toBe("complete");
   expect(retry).toContain("was cut off");
   expect(retry).not.toContain("empty");
@@ -112,13 +112,15 @@ test("an unclosed yaml fence reads as cut off even when the model reports no fin
   expect(retry).toContain("was cut off");
 });
 
-test("a reply that finished with neither yaml nor a refusal is not called empty or cut off", async () => {
+test("a reply that finished with neither yaml nor a refusal is called what it was, and not cut off", async () => {
   const { retry } = await composeReplying({ text: "   " });
   expect(retry).toContain("was empty");
+  expect(retry).not.toContain("cut off");
   const prose = await composeReplying({ text: "Here is my thinking about links.", finishReason: "stop" });
   expect(prose.result.status).toBe("complete");
   expect(prose.retry).toContain("no fenced yaml");
   expect(prose.retry).not.toContain("empty");
+  expect(prose.retry).not.toContain("cut off");
 });
 
 test("a text-only model reports why it stopped", async () => {
