@@ -226,6 +226,16 @@ function requirementsFor(capability: string): string[] | undefined {
   return CAPABILITY_TAG_RE.test(capability) ? [capability] : undefined;
 }
 
+/** The reason a worker gives for a failed task, as text: Cortex sends `error_summary` beside a structured `reason`. */
+function failureText(payload: Record<string, unknown>): string {
+  const reason = payload.reason;
+  const detail = typeof reason === "object" && reason !== null ? (reason as { detail?: unknown }).detail : reason;
+  for (const candidate of [payload.error, payload.error_summary, detail]) {
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+  }
+  return "agent task failed";
+}
+
 // Safe-by-default base: confidential-until-declared. data_residency is left
 // generic ("ZZ" = unknown per ISO 3166 user-assigned) so no deployment-specific
 // jurisdiction leaks into the shared codebase — each deployment sets its own
@@ -375,7 +385,7 @@ export class MyelinAgentProvider implements AgentProvider {
               task_id: taskId,
               status: state === "completed" ? "completed" : "failed",
               output: p.output ?? p.result ?? p.result_summary ?? null,
-              error: state === "failed" ? String(p.error ?? p.reason ?? "agent task failed") : undefined,
+              error: state === "failed" ? failureText(p) : undefined,
               duration_ms: Date.now() - startedAt,
               agent: typeof p.agent_id === "string" ? p.agent_id : undefined,
               model: typeof p.model === "string" ? p.model : undefined,
