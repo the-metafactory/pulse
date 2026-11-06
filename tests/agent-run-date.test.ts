@@ -84,6 +84,7 @@ describe("what counts as a frozen date", () => {
     "published on November 5th",
     "published on 5 May from the feed",
     "published on 05.11.2026.",
+    "published since 2026-11-05T00:00:00Z",
     "published on 05.11.2026",
     "published on 5.11.2026",
     "published on 11/05/2026",
