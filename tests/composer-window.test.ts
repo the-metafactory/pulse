@@ -77,6 +77,15 @@ describe("a date-relative flow over a feed that has a window", () => {
     expect(rules("mail me the articles from the day before yesterday", flowOf({ input: WINDOW }))[0]).toContain("Closest I have");
   });
 
+  test("a relative day in a prompt counts when the request names none", () => {
+    expect(rules("mail me a daily digest", flowOf({ prompt: "Summarize today's articles among {items}" }))[0]).toContain("Closest I have");
+  });
+
+  test("a word about when to send does not turn a request about yesterday away", () => {
+    expect(rules("mail me yesterday's articles today at 7", flowOf({ input: WINDOW }))).toEqual([]);
+    expect(rules("Schick mir heute die Artikel von gestern", flowOf({ input: WINDOW }))).toEqual([]);
+  });
+
   test("a report after the delivery comes too late", () => {
     const late = flowOf({ input: WINDOW, notice: false }).replace("  - A_MAIL_SEND # sovereignty: D, residency: CH\n", "  - A_MAIL_SEND # sovereignty: D, residency: CH\n  - A_WINDOW_NOTICE # sovereignty: D, residency: CH\n");
     expect(rules(YESTERDAY_REQUEST, late)[0]).toContain("A_WINDOW_NOTICE");
@@ -110,7 +119,7 @@ describe("a date-relative flow over a feed that has a window", () => {
       return { text: `\`\`\`yaml\n${flowOf({ input: WINDOW })}\`\`\`\nA summary.` };
     } });
     const told = prompts.join("\n");
-    expect(told).toContain("window");
+    expect(told).toContain("sets window: yesterday");
     expect(told).toContain("sign-off");
     expect(told).not.toContain("Summarize yesterday's articles among these");
   });
