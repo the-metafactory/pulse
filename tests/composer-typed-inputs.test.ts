@@ -227,6 +227,19 @@ describe("what the composer holds a flow to", () => {
     expect(rules(`${inside}        - A_EXTRACT_ARTICLE\n`)[0]?.message).toContain("returns: array");
   });
 
+  test("two maps inside one retry do not share what they write", () => {
+    const mapOf = (actions: string) => `        - map:\n            over: other\n            as: item\n            collect: done\n            actions:\n${actions}`;
+    const writes = "              - agent: { name: pick, capability: c, prompt: p, collect: items }\n";
+    const reads = "              - A_EXTRACT_ARTICLE\n";
+    const around = `  - retry: # sovereignty: D, residency: CH\n      attempts: 2\n      actions:\n${mapOf(writes)}${mapOf(reads)}`;
+    expect(rules(around)).toEqual([]);
+  });
+
+  test("what a parallel branch writes stays in that branch", () => {
+    const parallel = "  - parallel: # sovereignty: D, residency: CH\n      branches:\n        first:\n          actions:\n            - agent: { name: pick, capability: c, prompt: p, collect: items }\n        second:\n          actions: [A_EXTRACT_ARTICLE]\n";
+    expect(rules(parallel)).toEqual([]);
+  });
+
   test("a judgment nothing reads needs no type", () => {
     expect(rules(agent("muse", "thought"))).toEqual([]);
   });

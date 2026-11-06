@@ -45,13 +45,13 @@ interface FlowEvent {
  * A step reads before its children run and writes once they have, so a step around a reader does not hide it.
  * What a map, filter, reduce or parallel branch writes stays inside it; retry passes it on.
  */
-function flowEvents(step: PipelineStep, index: number, scope: string): FlowEvent[] {
+function flowEvents(step: PipelineStep, index: number, scope: string, path: string): FlowEvent[] {
   const events: FlowEvent[] = [{ kind: "reads", step, index, scope }];
   if (typeof step !== "string") {
     const passesOutputOn = "retry" in step;
     childActions(step).forEach((children, group) => {
-      const inner = passesOutputOn ? scope : `${scope}${index}.${group}/`;
-      for (const child of children) events.push(...flowEvents(child, index, inner));
+      const inner = passesOutputOn ? scope : `${path}.${group}/`;
+      children.forEach((child, position) => events.push(...flowEvents(child, index, inner, `${path}.${group}.${position}`)));
     });
   }
   events.push({ kind: "writes", step, index, scope });
@@ -83,7 +83,7 @@ function consumersOf(field: string, judgmentScope: string, later: FlowEvent[], b
 /** Where a judgment's free text reaches a declared input without the step saying what it yields; the model is sent back to fix these. */
 export function typedInputFindings(yaml: string, catalog: CatalogEntry[]): Finding[] {
   const byName = new Map(catalog.map((entry) => [entry.name, entry]));
-  const events = readFlow(yaml).steps.flatMap((step, index) => flowEvents(step, index, ""));
+  const events = readFlow(yaml).steps.flatMap((step, index) => flowEvents(step, index, "", String(index)));
   return events.flatMap((event, position) => {
     if (event.kind !== "writes" || !isJudgment(event.step)) return [];
     const judgment = event.step;
