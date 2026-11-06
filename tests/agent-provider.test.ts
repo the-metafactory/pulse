@@ -169,10 +169,10 @@ describe("MyelinAgentProvider dispatch", () => {
       const { correlation_id, sovereignty } = JSON.parse(data);
       const publish = (state: string, payload: Record<string, unknown>) =>
         transport.publish(`local.jc.default.dispatch.task.${state}`, JSON.stringify({ correlation_id, sovereignty, payload }));
-      void publish("started", {});
-      setTimeout(() => void publish("completed", { result_summary: "done" }), 40);
+      setTimeout(() => void publish("started", {}), 5);
+      setTimeout(() => void publish("completed", { result_summary: "done" }), 80);
     });
-    const provider = new MyelinAgentProvider({ transport, principal: "jc", claimTimeoutMs: 10 });
+    const provider = new MyelinAgentProvider({ transport, principal: "jc", claimTimeoutMs: 40 });
     const result = await provider.dispatch({ capability: "compose.judgment", prompt: "p" });
     expect(result).toMatchObject({ status: "completed", output: "done" });
   });

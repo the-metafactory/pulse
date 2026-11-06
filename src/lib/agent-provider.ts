@@ -399,7 +399,7 @@ export class MyelinAgentProvider implements AgentProvider {
                 task_id: taskId,
                 status: "failed",
                 output: null,
-                error: `nobody took this task: no worker started capability '${spec.capability}' within ${this.claimTimeoutMs}ms`,
+                error: `nobody took this task: no worker reported starting capability '${spec.capability}' within ${this.claimTimeoutMs}ms`,
                 duration_ms: Date.now() - startedAt,
               });
             }, this.claimTimeoutMs);

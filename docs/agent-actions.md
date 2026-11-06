@@ -94,8 +94,10 @@ Vendored from the myelin v3 spec (`schemas/envelope.schema.json`,
    starts (`dispatch.task.started`) within `claimTimeoutMs` (default 120 s)
    resolves as failed with "nobody took this task", rather than waiting forever.
 
-This is exactly the contract cortex's dispatch listener and lifecycle publisher
-already speak — a cortex fleet can claim pulse tasks with no pulse changes.
+A Cortex exec-brain consumer speaks this contract, including `started` before it
+runs, from the Cortex release that preserves an inbound `correlation_id`
+(RFC-0007 §8). Cortex's review consumer answers on the request envelope's `id`
+instead, so a `code-review` task from this provider ends in "nobody took this task".
 
 ## Sovereignty routing
 
