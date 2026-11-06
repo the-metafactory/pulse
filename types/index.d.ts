@@ -24,7 +24,7 @@ export type { ResearchStepSpec, ResearchStats, ResearchEvent } from "./types/res
 export { ResearchUnavailable } from "./lib/research";
 export { OpenAICompatibleChatModel, ModelUnavailableError, ModelError } from "./lib/chat-model";
 export type { ChatModel, ChatMessage, ChatTool, ChatToolCall, ChatRequest, ChatResponse, OpenAICompatibleConfig, } from "./lib/chat-model";
-export type { ActionCapabilities, CapabilityName, ActionManifest, ActionContext, ActionImplementation, ActionResult, LLMOptions, LLMResponse, ShellResult, ActionEffect, ActionInputField, } from "./types/action";
+export type { ActionCapabilities, CapabilityName, ActionManifest, ActionContext, ActionRunClock, ActionImplementation, ActionResult, LLMOptions, LLMResponse, ShellResult, ActionEffect, ActionInputField, } from "./types/action";
 export type { TribunalStepSpec, SeatSpec, SeatVote, SeatVerdict, TribunalRuling, TribunalVerdict, TribunalDiversity, TribunalEvent, } from "./types/tribunal";
 export { parseSeatVote, abstainVote, aggregate, planDiversity, checkPosthocDiversity, applyDiversityDowngrade, VOTE_FORMAT_INSTRUCTION, } from "./lib/tribunal";
 export type { GovernedStepSpec, GovernedResult, GovernedEvent, GovernedTribunalSpec, GovernedGateSpec, } from "./types/governed";

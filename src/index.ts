@@ -84,6 +84,7 @@ export type {
   CapabilityName,
   ActionManifest,
   ActionContext,
+  ActionRunClock,
   ActionImplementation,
   ActionResult,
   LLMOptions,

@@ -68,8 +68,13 @@ export interface ActionManifest {
         secrets?: string[];
     };
 }
+export interface ActionRunClock {
+    startedAt: Date;
+    timeZone?: string;
+}
 export interface ActionContext {
     capabilities: ActionCapabilities;
+    run?: ActionRunClock;
     env: {
         mode: "local" | "cloud";
     };

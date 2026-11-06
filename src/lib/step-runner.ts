@@ -7,6 +7,7 @@
 
 import { runAction } from "./action-runner";
 import { recordPartialPayload } from "./step-failure";
+import { runClock } from "./step-options";
 import type { PipelineStep } from "../types/pipeline";
 import {
   StepFailure,
@@ -103,6 +104,7 @@ async function runActionStep(
   const result = await runAction(actionName, payload, {
     ...options,
     traceId: crypto.randomUUID(),
+    run: runClock(options),
   });
   const durationMs = Date.now() - stepStart;
 
