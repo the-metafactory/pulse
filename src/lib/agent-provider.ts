@@ -207,6 +207,23 @@ export interface MyelinAgentProviderConfig {
   source?: string;
   /** Sovereignty defaults applied when a task spec omits them. */
   sovereigntyDefaults?: AgentSovereignty;
+  /** How long a local task may wait for a worker to start it. Default: {@link DEFAULT_CLAIM_TIMEOUT_MS}. */
+  claimTimeoutMs?: number;
+}
+
+/** A Cortex brain consumer publishes `dispatch.task.started` before it spawns the brain, and refuses a task it cannot hold with `dispatch.task.failed`. */
+export const DEFAULT_CLAIM_TIMEOUT_MS = 120_000;
+
+const CAPABILITY_TAG_RE = /^[a-z](?:[a-z0-9]|-(?!-)){0,62}[a-z0-9]$/;
+
+/**
+ * An envelope's `requirements[]` admits only single-segment capability tags
+ * (RFC-0003 §3.12); a dotted capability id is rejected there, and a validating
+ * worker drops the whole envelope. The subject and `payload.capability` carry
+ * the full id, so a capability that is not a tag states no requirement.
+ */
+function requirementsFor(capability: string): string[] | undefined {
+  return CAPABILITY_TAG_RE.test(capability) ? [capability] : undefined;
 }
 
 // Safe-by-default base: confidential-until-declared. data_residency is left
@@ -233,6 +250,7 @@ export class MyelinAgentProvider implements AgentProvider {
   private source: string;
   private transport: AgentTransport;
   private sovereigntyDefaults: AgentSovereignty;
+  private claimTimeoutMs: number;
 
   constructor(config: MyelinAgentProviderConfig) {
     this.transport = config.transport;
@@ -240,6 +258,7 @@ export class MyelinAgentProvider implements AgentProvider {
     this.stack = config.stack ?? "default";
     this.source = config.source ?? `${config.principal}.${this.stack}.pulse`;
     this.sovereigntyDefaults = config.sovereigntyDefaults ?? {};
+    this.claimTimeoutMs = config.claimTimeoutMs ?? DEFAULT_CLAIM_TIMEOUT_MS;
   }
 
   taskSubject(spec: AgentTaskSpec): string {
@@ -274,6 +293,7 @@ export class MyelinAgentProvider implements AgentProvider {
   }
 
   buildEnvelope(spec: AgentTaskSpec, taskId: string): MyelinEnvelope {
+    const requirements = requirementsFor(spec.capability);
     const sovereignty = {
       ...SOVEREIGNTY_BASE,
       ...this.sovereigntyDefaults,
@@ -306,7 +326,7 @@ export class MyelinAgentProvider implements AgentProvider {
         prompt: spec.prompt,
         ...(spec.input ? { input: spec.input } : {}),
       },
-      requirements: [spec.capability],
+      ...(requirements ? { requirements } : {}),
       distribution_mode: spec.distribution_mode ?? "offer",
       ...(spec.target_assistant ? { target_assistant: spec.target_assistant } : {}),
       ...(spec.timeout_ms ? { deadline: new Date(Date.now() + spec.timeout_ms).toISOString() } : {}),
@@ -326,6 +346,13 @@ export class MyelinAgentProvider implements AgentProvider {
 
     let unsubscribe: (() => Promise<void>) | null = null;
     let abortListener: (() => void) | null = null;
+    let claimTimer: ReturnType<typeof setTimeout> | null = null;
+    let claimed = false;
+    const stopClaimWait = () => {
+      claimed = true;
+      if (claimTimer) clearTimeout(claimTimer);
+      claimTimer = null;
+    };
 
     try {
       const result = await new Promise<AgentTaskResult>((resolve, reject) => {
@@ -333,7 +360,6 @@ export class MyelinAgentProvider implements AgentProvider {
         this.transport
           .subscribe(lifecyclePattern, (subj, data) => {
             const state = subj.split(".").pop();
-            if (state !== "completed" && state !== "failed") return;
             let lifecycle: MyelinEnvelope;
             try {
               lifecycle = JSON.parse(data) as MyelinEnvelope;
@@ -341,6 +367,8 @@ export class MyelinAgentProvider implements AgentProvider {
               return; // foreign traffic on the lifecycle subject — not ours, skip
             }
             if (lifecycle.correlation_id !== taskId) return;
+            stopClaimWait();
+            if (state !== "completed" && state !== "failed") return;
 
             const p = lifecycle.payload ?? {};
             resolve({
@@ -365,11 +393,22 @@ export class MyelinAgentProvider implements AgentProvider {
           .then(() => {
             // Task is on the wire — report the real id so observers can correlate.
             opts.onDispatched?.({ task_id: taskId });
+            if (spec.federate || claimed) return;
+            claimTimer = setTimeout(() => {
+              resolve({
+                task_id: taskId,
+                status: "failed",
+                output: null,
+                error: `nobody took this task: no worker reported starting capability '${spec.capability}' within ${this.claimTimeoutMs}ms`,
+                duration_ms: Date.now() - startedAt,
+              });
+            }, this.claimTimeoutMs);
           })
           .catch(reject);
       });
       return result;
     } finally {
+      stopClaimWait();
       if (abortListener && opts.signal) opts.signal.removeEventListener("abort", abortListener);
       if (unsubscribe) await (unsubscribe as () => Promise<void>)();
     }

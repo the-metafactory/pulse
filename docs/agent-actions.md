@@ -81,17 +81,23 @@ Vendored from the myelin v3 spec (`schemas/envelope.schema.json`,
 
 1. Build envelope: `type: tasks.{capability}`, `correlation_id = task_id`,
    full sovereignty block, payload `{task_id, capability, prompt, input?}`,
-   `requirements: [capability]`, `distribution_mode`, optional `deadline`.
+   `requirements: [capability]` when the capability is a single-segment tag
+   (RFC-0003 §3.12 refuses a dotted id; the subject and payload carry it),
+   `distribution_mode`, optional `deadline`.
 2. Subscribe `local.{principal}.{stack}.dispatch.task.*` **before** publishing
    (no completion window lost).
 3. Publish to the task subject:
    - offer: `local.{principal}.{stack}.tasks.{capability}`
    - direct/delegate: `local.{principal}.{stack}.tasks.@{encoded-did}.{capability}`
 4. Resolve on the first `dispatch.task.completed|failed` whose
-   `correlation_id` matches; always unsubscribe.
+   `correlation_id` matches; always unsubscribe. A local task that no worker
+   starts (`dispatch.task.started`) within `claimTimeoutMs` (default 120 s)
+   resolves as failed with "nobody took this task", rather than waiting forever.
 
-This is exactly the contract cortex's dispatch listener and lifecycle publisher
-already speak — a cortex fleet can claim pulse tasks with no pulse changes.
+A Cortex exec-brain consumer speaks this contract, including `started` before it
+runs, from the Cortex release that preserves an inbound `correlation_id`
+(RFC-0007 §8). Cortex's review consumer answers on the request envelope's `id`
+instead, so a `code-review` task from this provider ends in "nobody took this task".
 
 ## Sovereignty routing
 
