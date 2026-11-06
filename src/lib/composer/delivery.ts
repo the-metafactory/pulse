@@ -8,37 +8,42 @@ const MYSELF = "(?:me|myself|mir|mich)";
 const ADDRESS = "[^\\s@,;<>]+@[^\\s@,;<>]+\\.[A-Za-z]{2,}";
 const SELF_TARGET = new RegExp(`\\b${MAIL}\\s+${MYSELF}\\b`);
 const NOT_A_RECIPIENT_NOUN = "(?:inbox|e-?mail|mail|address|account|own|work|private|personal)\\b";
+const CHAT_LABELS = ["Discord", "Slack", "Mattermost", "Telegram"];
+const RECIPIENT = `(?:${ADDRESS}|(?:the|our)\\s+\\w+|my\\s+(?!${NOT_A_RECIPIENT_NOUN})\\w+|(?!(?:${CHAT_LABELS.join("|")})\\b)[A-Z][\\w-]*)`;
+const CLAUSE_START = "(?:^|[,;:.]\\s*|\\b(?:and|then|please|und|dann)\\s+)";
 
 const ASKS_EMAIL = [
   SELF_TARGET,
-  new RegExp(`(?:^|[,;:.]\\s*|\\b(?:and|then|please|und|dann)\\s+)${MAIL}\\s+(?!(?:from|in|about|with|for|and|or|threads?|accounts?|inbox)\\b)\\S`),
+  new RegExp(`${CLAUSE_START}${MAIL}\\s+(?!(?:from|in|about|with|for|and|or|threads?|accounts?|inbox)\\b)\\S`),
   /\b(?:by|via|per|over)\s+e-?mail\b/i,
   /\bas\s+an?\s+e-?mail\b/i,
-  /\bsend\s+(?:\S+\s+)?an?\s+e-?mail\b/i,
+  /\bsend\s+(?:(?!of\b|my\b|from\b)\S+\s+){0,3}e-?mail\b/i,
   /\bto\s+my\s+(?:inbox|e-?mail|mail)\b/i,
 ];
 const NAMES_OTHER_RECIPIENT = [
   new RegExp(`\\b${MAIL}\\s+(?:${ADDRESS}|[A-Z][\\w-]*)`),
-  new RegExp(`\\b${MAIL}\\s+(?:the|my|our)\\s+\\w+\\s+(?:a|an|the|this|my|our)\\b`),
-  new RegExp(`\\bto\\s+(?:${ADDRESS}|(?:the|our)\\s+\\w+|my\\s+(?!${NOT_A_RECIPIENT_NOUN})\\w+|[A-Z][\\w-]*)\\s*(?:[.,;!?]|$)`),
+  new RegExp(`\\b${MAIL}\\s+(?:(?:the|my|our)\\s+)?(?!(?:me|myself|it|this|that|them|these|those|a|an|the|with|from|of|about|for|in|on|to|and|or|at|by)\\b)\\w+\\s+(?:a|an|the|this|my|our)\\b`),
+  new RegExp(`\\bto\\s+${RECIPIENT}\\s*(?:[.,;!?]|$)`),
 ];
 const SELF_AND_OTHER = new RegExp(`\\b${MAIL}\\s+${MYSELF}\\s+(?:and|und)\\s+(?:${ADDRESS}|[A-Z]|(?:the|my|our)\\s)`);
 const COPIES_SOMEONE = /\b(?:cc|bcc)\b/i;
+const PASSES_IT_ON = new RegExp(`\\b(?:send|forward|mail|copy)\\s+(?:it|this|that|them|the\\s+\\w+)\\s+(?:also\\s+)?to\\s+${RECIPIENT}`);
 
-const chatChannel = (tag: string, label: string) => ({
-  tags: [tag],
+interface Channel {
+  tags: string[];
+  label: string;
+  asked: RegExp[];
+}
+const chatChannel = (label: string): Channel => ({
+  tags: [label.toLowerCase()],
   label,
-  asked: [new RegExp(`\\b(?:post|send|publish|share|deliver|announce)\\b[^.;]*\\b${tag}\\b`, "i"), new RegExp(`\\b(?:to|via)\\s+${tag}\\b`, "i")],
+  asked: [
+    new RegExp(`${CLAUSE_START}(?:post|send|publish|share|deliver|announce)\\b[^.;]*\\b(?:to|on|via)\\s+(?:the\\s+)?${label}\\b`, "i"),
+    new RegExp(`\\b(?:to|via)\\s+(?:the\\s+)?${label}\\s*(?:[.,;!?]|$)`, "i"),
+  ],
 });
-const CHANNELS = [
-  { tags: ["email", "mail"], label: "email", asked: ASKS_EMAIL },
-  chatChannel("discord", "Discord"),
-  chatChannel("slack", "Slack"),
-  chatChannel("mattermost", "Mattermost"),
-  chatChannel("telegram", "Telegram"),
-];
-type Channel = (typeof CHANNELS)[number];
-const EMAIL = CHANNELS[0]!;
+const EMAIL: Channel = { tags: ["email", "mail"], label: "email", asked: ASKS_EMAIL };
+const CHANNELS: Channel[] = [EMAIL, ...CHAT_LABELS.map(chatChannel)];
 
 const SENDS = ["send", "deliver", "post", "publish"];
 const REACHES_OUT = [...SENDS, "notify"];
@@ -49,9 +54,10 @@ const hasTag = (entry: CatalogEntry | undefined, tags: string[]): boolean => tag
 const sendsOn = (entry: CatalogEntry | undefined, channel: Channel): boolean => hasTag(entry, channel.tags) && hasTag(entry, SENDS);
 const reachesOutOn = (entry: CatalogEntry | undefined, channel: Channel): boolean => hasTag(entry, channel.tags) && hasTag(entry, REACHES_OUT);
 const askedChannels = (request: string): Channel[] => CHANNELS.filter((channel) => channel.asked.some((pattern) => pattern.test(request)));
+const mentions = (request: string, channel: Channel): boolean => channel.tags.some((tag) => request.toLowerCase().includes(tag));
 
 function namesOtherRecipient(request: string): boolean {
-  if (COPIES_SOMEONE.test(request) || SELF_AND_OTHER.test(request)) return true;
+  if (COPIES_SOMEONE.test(request) || SELF_AND_OTHER.test(request) || PASSES_IT_ON.test(request)) return true;
   return !SELF_TARGET.test(request) && NAMES_OTHER_RECIPIENT.some((pattern) => pattern.test(request));
 }
 
@@ -80,12 +86,12 @@ function readFlow(yaml: string): { steps: PipelineStep[]; input: Record<string, 
 /** What a composed flow gets wrong about the delivery its request names; the model is sent back to fix these. */
 export function deliveryFindings(request: string, yaml: string, catalog: CatalogEntry[]): Finding[] {
   const asked = askedChannels(request);
-  if (asked.length === 0) return [];
   const byName = new Map(catalog.map((entry) => [entry.name, entry]));
   const { steps } = readFlow(yaml);
   const names = steps.flatMap(actionNames);
   const findings: Finding[] = [];
   const finding = (step: number, message: string) => findings.push({ rule: "missing-delivery", step, message });
+  const wanted = (channel: Channel): boolean => asked.includes(channel) || (asked.length === 0 && mentions(request, channel));
   for (const channel of asked) {
     if (names.some((name) => sendsOn(byName.get(name), channel))) continue;
     const senders = catalog.filter((entry) => sendsOn(entry, channel)).map((entry) => entry.name);
@@ -94,10 +100,10 @@ export function deliveryFindings(request: string, yaml: string, catalog: Catalog
   const lastStep = steps.length - 1;
   const last = steps[lastStep];
   const endsBySending = last !== undefined && actionNames(last).some((name) => asked.some((channel) => sendsOn(byName.get(name), channel)));
-  if (findings.length === 0 && !endsBySending) finding(lastStep, "the flow must end with the step that sends the delivery the request asks for");
+  if (asked.length > 0 && findings.length === 0 && !endsBySending) finding(lastStep, "the flow must end with the step that sends the delivery the request asks for");
   steps.forEach((step, index) => {
     for (const name of actionNames(step)) {
-      const other = CHANNELS.find((channel) => !asked.includes(channel) && reachesOutOn(byName.get(name), channel));
+      const other = CHANNELS.find((channel) => !wanted(channel) && reachesOutOn(byName.get(name), channel));
       if (other) finding(index, `\`${name}\` reaches ${other.label}, which the request did not ask for; remove it`);
     }
   });

@@ -92,6 +92,8 @@ describe("a request to mail someone else", () => {
     "mail a summary to Dana.",
     "mail me a summary and cc Erin",
     "mail me and Frank a summary",
+    "email bob a summary",
+    "mail me a summary and send it to Bob.",
   ]) {
     test(`refuses "${request}" before asking the model`, async () => {
       const result = await composeFlow(request, { catalog: WITH_SEND, llm: mustNotCallModel });
@@ -107,6 +109,9 @@ describe("a request to mail someone else", () => {
     "email the digest to my work address",
     "send me an email with the digest",
     "summarize the feed and send it by email",
+    "send me a summary email",
+    "email me what people post on Discord",
+    "send me a summary of the Slack threads by email",
   ]) {
     test(`still composes "${request}"`, async () => {
       expect((await composeFlow(request, { catalog: WITH_SEND, llm: replies(MAILS).llm })).status).toBe("complete");
@@ -149,6 +154,13 @@ describe("a request that names Discord", () => {
   });
 });
 
+describe("a request that names two channels", () => {
+  test("is not read as mailing someone called Discord", async () => {
+    const both = reply(flow(agent("summary"), agent("subject"), agent("body"), action("A_MAIL_SEND"), action("A_DELIVER")));
+    expect((await composeFlow("send it by email and post it to Discord", { catalog: WITH_SEND, llm: replies(both).llm })).status).toBe("complete");
+  });
+});
+
 describe("a request that names no delivery", () => {
   for (const request of [
     "summarize my email",
@@ -162,6 +174,20 @@ describe("a request that names no delivery", () => {
       expect((await composeFlow(request, { catalog: WITHOUT_SEND, llm: replies(yaml).llm })).status).toBe("complete");
     });
   }
+});
+
+describe("a phrasing the request reading misses", () => {
+  for (const request of ["drop a summary in my mailbox", "send me a summary"]) {
+    test(`still cannot swap to a channel it never named: "${request}"`, async () => {
+      const result = await composeFlow(request, { catalog: WITH_SEND, llm: replies(SWAPS_TO_DISCORD).llm });
+      expect(result.status).toBe("no-match");
+      if (result.status === "no-match") expect(result.message).toContain("did not ask for");
+    });
+  }
+
+  test("a channel the request names as its source may be used", async () => {
+    expect((await composeFlow("format the threads on discord", { catalog: WITH_SEND, llm: replies(SWAPS_TO_DISCORD).llm })).status).toBe("complete");
+  });
 });
 
 describe("the library surfaces around the check", () => {

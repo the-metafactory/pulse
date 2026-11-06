@@ -2,7 +2,8 @@ import { parsePipeline } from "../pipeline";
 import { compose, type ComposerLLM, type ComposeOptions } from "./compose";
 import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES } from "./delivery";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
-export interface ComposeFlowOptions extends ComposeOptions {
+const noMatch = (message: string) => ({ status: "no-match", kind: "missing-capability", message }) as const;
+export interface ComposeFlowOptions extends Omit<ComposeOptions, "check"> {
     catalog: CatalogEntry[];
     llm: ComposerLLM;
     holdToDelivery?: boolean;
@@ -44,7 +45,7 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
         if (!Number.isInteger(options.maxRetries ?? 2) || (options.maxRetries ?? 2) < 0 || (options.maxRetries ?? 2) > 2) throw new Error("maxRetries must be an integer between 0 and 2");
         const hold = options.holdToDelivery ?? true;
         const gap = hold ? deliveryGap(request, options.catalog) : null;
-        if (gap) return { status: "no-match", kind: "missing-capability", message: gap } as const;
+        if (gap) return noMatch(gap);
         const result = await compose(request, options.catalog, options.llm, {
             ...options,
             initialFields,
@@ -54,20 +55,20 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
         });
         if (!result.ok) {
             if (result.kind === "no-match") {
-                return { status: "no-match", kind: "missing-capability", message: result.message } as const;
+                return noMatch(result.message);
             }
             const undelivered = result.findings.filter((finding) => finding.rule === "missing-delivery");
             if (undelivered.length > 0) {
-                return { status: "no-match", kind: "missing-capability", message: `I could not compose a routine that delivers as asked: ${undelivered.map((finding) => finding.message).join("; ")}.` } as const;
+                return noMatch(`I could not compose a routine that delivers as asked: ${undelivered.map((finding) => finding.message).join("; ")}.`);
             }
             const missing = result.findings.filter((finding) => finding.rule === "unknown-block");
             if (missing.length > 0) {
-                return { status: "no-match", kind: "missing-capability", message: missing.map((finding) => finding.message).join("; ") } as const;
+                return noMatch(missing.map((finding) => finding.message).join("; "));
             }
             return { status: "invalid", kind: "off-contract", findings: result.findings } as const;
         }
         if (hold && choosesMailRecipient(result.yaml, options.catalog)) {
-            return { status: "no-match", kind: "missing-capability", message: ONLY_OWN_ADDRESSES } as const;
+            return noMatch(ONLY_OWN_ADDRESSES);
         }
         const flow = parsePipeline(result.yaml);
         return { status: "complete", flow, yaml: result.yaml, summary: result.summary, mermaid: result.mermaid } as const;
