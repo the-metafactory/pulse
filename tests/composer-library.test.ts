@@ -128,3 +128,19 @@ test("a text-only model reports why it stopped", async () => {
   const llm = chatModelLLM({ label: "m", complete: async () => ({ content: "partial", toolCalls: [], finishReason: "length" }) });
   expect(await llm("hi")).toMatchObject({ text: "partial", finishReason: "length" });
 });
+
+const FENCE = "```";
+const draftThenFinal = (draft: string, final: string): string => `Let me think.\n${FENCE}yaml\n${draft}${FENCE}\nThat misses a field, so:\n${FENCE}yaml\n${final}${FENCE}\nFetch and add links.`;
+
+test("a model that drafts in its reply is held to the last fence, the answer it settled on", async () => {
+  const draft = "name: F_DRAFT\nactions:\n  - A_PIGEON # sovereignty: D, residency: CH\n";
+  const result = await composeFlow("fetch and add links", { catalog, llm: async () => ({ text: draftThenFinal(draft, yaml) }) });
+  expect(result).toMatchObject({ status: "complete", yaml });
+});
+
+test("a closed draft before a cut-off answer is not taken for the answer", async () => {
+  const { retry } = await composeReplying({ text: `${draftThenFinal(yaml, yaml)}\n${FENCE}yaml\nname: F_LATER` });
+  expect(retry).toContain("was cut off");
+  const limited = await composeReplying({ text: draftThenFinal(yaml, yaml), finishReason: "length" });
+  expect(limited.retry).toContain("was cut off");
+});

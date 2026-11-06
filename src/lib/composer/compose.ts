@@ -37,10 +37,11 @@ export async function loadSystemPrompt(catalog: CatalogEntry[]): Promise<string>
     const template = await readFile(join(here, "SYSTEM_PROMPT.md"), "utf-8");
     return `${template}\n\`\`\`json\n${JSON.stringify(catalog, null, 2)}\n\`\`\`\n`;
 }
+/** The last fence of a kind: a model that drafts in its reply ends with the answer it settled on. */
 export function extractFence(text: string, lang: string): string | null {
-    const re = new RegExp("```" + lang + "\\s*\\n([\\s\\S]*?)```", "i");
-    const match = re.exec(text);
-    return match?.[1] !== undefined ? match[1].trimEnd() + "\n" : null;
+    const fences = [...text.matchAll(new RegExp("```" + lang + "\\s*\\n([\\s\\S]*?)```", "gi"))];
+    const last = fences[fences.length - 1]?.[1];
+    return last !== undefined ? last.trimEnd() + "\n" : null;
 }
 function extractSummary(text: string): string {
     const withoutFences = text.replace(/```[a-z]*\s*\n[\s\S]*?```/gi, "");
@@ -54,9 +55,9 @@ export function composeTier(): "fast" | "standard" | "smart" {
     const t = process.env.PULSE_COMPOSE_TIER;
     return t === "fast" || t === "standard" || t === "smart" ? t : "standard";
 }
-const OPENS_YAML = /```yaml\s*\n/i;
+const isCutOff = (text: string, finishReason: string | undefined): boolean => finishReason === "length" || (text.match(/```/g)?.length ?? 0) % 2 === 1;
 function askAgainWithoutYaml(text: string, finishReason: string | undefined): string {
-    if (finishReason === "length" || OPENS_YAML.test(text)) {
+    if (isCutOff(text, finishReason)) {
         return "Your previous reply was cut off at the token limit before its YAML ended. Emit the response again, shorter: the fenced yaml and one line of summary, with no mermaid and no explanation.";
     }
     if (text.trim().length === 0) return "Your previous reply was empty. Emit the full response (yaml + mermaid + summary) for the scenario.";
@@ -74,9 +75,10 @@ export async function compose(scenario: string, catalog: CatalogEntry[], llm: Co
         attempts++;
         const response = await llm(prompt, { system, tier: composeTier() });
         const text = response.text ?? "";
-        const yaml = extractFence(text, "yaml");
+        const cutOff = isCutOff(text, response.finishReason);
+        const yaml = cutOff ? null : extractFence(text, "yaml");
         if (!yaml) {
-            if (text.trim().length > 0 && (!options.strictReply || /^Closest I have is [\s\S]+; the gap is [\s\S]+/i.test(text.trim()))) {
+            if (!cutOff && text.trim().length > 0 && (!options.strictReply || /^Closest I have is [\s\S]+; the gap is [\s\S]+/i.test(text.trim()))) {
                 if (options.strictReply && lastFindings.some((finding) => finding.rule !== "unknown-block")) {
                     return { ok: false, kind: "invalid", findings: lastFindings, lastYaml, attempts };
                 }
