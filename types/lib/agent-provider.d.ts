@@ -53,13 +53,16 @@ export interface MyelinAgentProviderConfig {
     stack?: string;
     source?: string;
     sovereigntyDefaults?: AgentSovereignty;
+    claimTimeoutMs?: number;
 }
+export declare const DEFAULT_CLAIM_TIMEOUT_MS = 120000;
 export declare class MyelinAgentProvider implements AgentProvider {
     private principal;
     private stack;
     private source;
     private transport;
     private sovereigntyDefaults;
+    private claimTimeoutMs;
     constructor(config: MyelinAgentProviderConfig);
     taskSubject(spec: AgentTaskSpec): string;
     lifecyclePattern(spec: AgentTaskSpec): string;

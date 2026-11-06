@@ -211,7 +211,7 @@ export interface MyelinAgentProviderConfig {
   claimTimeoutMs?: number;
 }
 
-/** A worker announces `dispatch.task.started` before it does any work, so silence this long means no worker has the task. */
+/** A Cortex brain consumer publishes `dispatch.task.started` before it spawns the brain, and refuses a task it cannot hold with `dispatch.task.failed`. */
 export const DEFAULT_CLAIM_TIMEOUT_MS = 120_000;
 
 const CAPABILITY_TAG_RE = /^[a-z](?:[a-z0-9]|-(?!-)){0,62}[a-z0-9]$/;

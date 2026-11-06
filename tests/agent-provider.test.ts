@@ -177,6 +177,19 @@ describe("MyelinAgentProvider dispatch", () => {
     expect(result).toMatchObject({ status: "completed", output: "done" });
   });
 
+  test("a federated task has no claim window, because a peer may not forward its start", async () => {
+    const transport = new InMemoryAgentTransport();
+    await transport.subscribe("federated.peer.default.tasks.>", (_subject, data) => {
+      const { correlation_id } = JSON.parse(data);
+      setTimeout(() => {
+        void transport.publish("federated.jc.default.dispatch.task.completed", JSON.stringify({ correlation_id, payload: { result_summary: "done" } }));
+      }, 40);
+    });
+    const provider = new MyelinAgentProvider({ transport, principal: "jc", claimTimeoutMs: 10 });
+    const result = await provider.dispatch({ capability: "compose.judgment", prompt: "p", federate: { principal: "peer" } });
+    expect(result).toMatchObject({ status: "completed", output: "done" });
+  });
+
   test("a start for another task does not hold the claim window open", async () => {
     const transport = new InMemoryAgentTransport();
     await transport.subscribe("local.jc.default.tasks.>", () => {
