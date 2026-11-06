@@ -50,8 +50,8 @@ function flowEvents(step: PipelineStep, index: number, scope: string, path: stri
   if (typeof step !== "string") {
     const passesOutputOn = "retry" in step;
     childActions(step).forEach((children, group) => {
-      const inner = passesOutputOn ? scope : `${path}.${group}/`;
-      children.forEach((child, position) => events.push(...flowEvents(child, index, inner, `${path}.${group}.${position}`)));
+      const inner = passesOutputOn ? scope : `${scope}${path}.${group}/`;
+      children.forEach((child, position) => events.push(...flowEvents(child, index, inner, passesOutputOn ? `${path}.${group}.${position}` : String(position))));
     });
   }
   events.push({ kind: "writes", step, index, scope });

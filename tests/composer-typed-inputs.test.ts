@@ -235,6 +235,11 @@ describe("what the composer holds a flow to", () => {
     expect(rules(around)).toEqual([]);
   });
 
+  test("a judgment inside a map reaches a reader in a map nested beside it", () => {
+    const around = "  - map: # sovereignty: D, residency: CH\n      over: other\n      as: item\n      collect: done\n      actions:\n        - agent: { name: pick, capability: c, prompt: p, collect: items }\n        - map:\n            over: other\n            as: inner\n            collect: innerDone\n            actions: [A_EXTRACT_ARTICLE]\n";
+    expect(rules(around)[0]?.message).toContain("A_EXTRACT_ARTICLE.items");
+  });
+
   test("what a parallel branch writes stays in that branch", () => {
     const parallel = "  - parallel: # sovereignty: D, residency: CH\n      branches:\n        first:\n          actions:\n            - agent: { name: pick, capability: c, prompt: p, collect: items }\n        second:\n          actions: [A_EXTRACT_ARTICLE]\n";
     expect(rules(parallel)).toEqual([]);
