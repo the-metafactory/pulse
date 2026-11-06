@@ -37,7 +37,7 @@ actions:
 For map and gate primitives the annotation likewise follows the map: or gate: on the list-item line.
 Never move the annotation onto a nested field; that does not annotate the step.
 Connect required inputs by exact field names from earlier outputs or the initial fields listed below.
-Every agent step is told today's and yesterday's date when it runs. Say a relative date in words such as "yesterday" and never write a calendar date the request did not name, because this flow may run daily.
+Every agent step is told today's and yesterday's date when it runs. Say a relative date in words such as "yesterday" and never write a calendar date unless the request names one, because this flow may run daily.
 Use agent collect fields for judgments, never to simulate a missing external tool or side effect.
 Emit an optional fenced mermaid diagram and a plain-language summary. Do not add schedules or execute anything.
 Installed catalog:

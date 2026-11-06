@@ -81,6 +81,7 @@ describe("the date a run gives its agents", () => {
 describe("what counts as a frozen date", () => {
   test.each([
     "published on 2026-11-05",
+    "published on 05.11.2026.",
     "published on 05.11.2026",
     "published on 5.11.2026",
     "published on 11/05/2026",
@@ -99,6 +100,8 @@ describe("what counts as a frozen date", () => {
     "keep the 15 newest of 2026 budget lines",
     "use version 1.2.3 and 10.0.0.1",
     "may contain marked items",
+    "the top 5 may be dropped",
+    "the host at 10.1.10.20",
   ])("not: %s", async (prompt) => {
     expect(await composeReplying(YESTERDAY_REQUEST, reply(flowWithPrompt(prompt))).result).toMatchObject({ status: "complete" });
   });
