@@ -9,7 +9,8 @@ const ADDRESS = "[^\\s@,;<>]+@[^\\s@,;<>]+\\.[A-Za-z]{2,}";
 const SELF_TARGET = new RegExp(`\\b${MAIL}\\s+${MYSELF}\\b`);
 const NOT_A_RECIPIENT_NOUN = "(?:inbox|e-?mail|mail|address|account|own|work|private|personal)\\b";
 const CHAT_LABELS = ["Discord", "Slack", "Mattermost", "Telegram"];
-const RECIPIENT = `(?:${ADDRESS}|(?:the|our)\\s+\\w+|my\\s+(?!${NOT_A_RECIPIENT_NOUN})\\w+|(?!(?:${CHAT_LABELS.join("|")})\\b)[A-Z][\\w-]*)`;
+const NOT_A_CHAT = `(?!(?:${CHAT_LABELS.join("|")})\\b)`;
+const RECIPIENT = `(?:${ADDRESS}|(?:the|our)\\s+${NOT_A_CHAT}\\w+|my\\s+(?!${NOT_A_RECIPIENT_NOUN})${NOT_A_CHAT}\\w+|${NOT_A_CHAT}[A-Z][\\w-]*)`;
 const CLAUSE_START = "(?:^|[,;:.]\\s*|\\b(?:and|then|please|und|dann)\\s+)";
 
 const ASKS_EMAIL = [
@@ -22,7 +23,7 @@ const ASKS_EMAIL = [
 ];
 const NAMES_OTHER_RECIPIENT = [
   new RegExp(`\\b${MAIL}\\s+(?:${ADDRESS}|[A-Z][\\w-]*)`),
-  new RegExp(`\\b${MAIL}\\s+(?:(?:the|my|our)\\s+)?(?!(?:me|myself|it|this|that|them|these|those|a|an|the|with|from|of|about|for|in|on|to|and|or|at|by)\\b)\\w+\\s+(?:a|an|the|this|my|our)\\b`),
+  new RegExp(`(?<!\\b(?:an?|the|my|our)\\s)\\b${MAIL}\\s+(?:(?:the|my|our)\\s+)?(?!(?:me|myself|it|this|that|them|these|those|a|an|the|with|from|of|about|for|in|on|to|and|or|at|by)\\b)\\w+\\s+(?:a|an|the|this|my|our)\\b`),
   new RegExp(`\\bto\\s+${RECIPIENT}\\s*(?:[.,;!?]|$)`),
 ];
 const SELF_AND_OTHER = new RegExp(`\\b${MAIL}\\s+${MYSELF}\\s+(?:and|und)\\s+(?:${ADDRESS}|[A-Z]|(?:the|my|our)\\s)`);
@@ -38,7 +39,7 @@ const chatChannel = (label: string): Channel => ({
   tags: [label.toLowerCase()],
   label,
   asked: [
-    new RegExp(`${CLAUSE_START}(?:post|send|publish|share|deliver|announce)\\b[^.;]*\\b(?:to|on|via)\\s+(?:the\\s+)?${label}\\b`, "i"),
+    new RegExp(`${CLAUSE_START}(?:post|send|publish|share|deliver|announce)\\b(?:[^.;]*\\b(?:to|via)|(?:(?!\\bof\\b)[^.;])*\\bon)\\s+(?:the\\s+)?${label}\\b`, "i"),
     new RegExp(`\\b(?:to|via)\\s+(?:the\\s+)?${label}\\s*(?:[.,;!?]|$)`, "i"),
   ],
 });
@@ -91,7 +92,8 @@ export function deliveryFindings(request: string, yaml: string, catalog: Catalog
   const names = steps.flatMap(actionNames);
   const findings: Finding[] = [];
   const finding = (step: number, message: string) => findings.push({ rule: "missing-delivery", step, message });
-  const wanted = (channel: Channel): boolean => asked.includes(channel) || (asked.length === 0 && mentions(request, channel));
+  const named = CHANNELS.some((channel) => mentions(request, channel));
+  const wanted = (channel: Channel): boolean => asked.includes(channel) || (asked.length === 0 && (!named || mentions(request, channel)));
   for (const channel of asked) {
     if (names.some((name) => sendsOn(byName.get(name), channel))) continue;
     const senders = catalog.filter((entry) => sendsOn(entry, channel)).map((entry) => entry.name);
