@@ -92,3 +92,69 @@ test("malformed model steps followed by a spurious capability refusal retain off
   expect(result).toMatchObject({ status: "invalid", kind: "off-contract" });
   expect("yaml" in result).toBe(false);
 });
+
+const composeReplying = async (first: { text: string; finishReason?: string }) => {
+  const prompts: string[] = [];
+  const replies = [first, { text: response }];
+  const result = await composeFlow("fetch and add links", { catalog, llm: async (prompt) => { prompts.push(prompt); return replies.shift() ?? { text: response }; } });
+  return { result, retry: prompts[1] ?? "" };
+};
+
+test("a reply cut off at the token limit is sent back as cut off, not as empty", async () => {
+  const { result, retry } = await composeReplying({ text: "Here is my thinking about the", finishReason: "length" });
+  expect(result.status).toBe("complete");
+  expect(retry).toContain("was cut off");
+  expect(retry).not.toContain("empty");
+});
+
+test("an unclosed yaml fence reads as cut off even when the model reports no finish reason", async () => {
+  const { retry } = await composeReplying({ text: "```yaml\nname: F_NEWS\nactions:\n  - A_FE" });
+  expect(retry).toContain("was cut off");
+});
+
+test("a reply that finished with neither yaml nor a refusal is called what it was, and not cut off", async () => {
+  const { retry } = await composeReplying({ text: "   " });
+  expect(retry).toContain("was empty");
+  expect(retry).not.toContain("cut off");
+  const prose = await composeReplying({ text: "Here is my thinking about links.", finishReason: "stop" });
+  expect(prose.result.status).toBe("complete");
+  expect(prose.retry).toContain("no fenced yaml");
+  expect(prose.retry).not.toContain("empty");
+  expect(prose.retry).not.toContain("cut off");
+});
+
+test("a text-only model reports why it stopped", async () => {
+  const { chatModelLLM } = await import("../src/lib/capabilities");
+  const llm = chatModelLLM({ label: "m", complete: async () => ({ content: "partial", toolCalls: [], finishReason: "length" }) });
+  expect(await llm("hi")).toMatchObject({ text: "partial", finishReason: "length" });
+});
+
+const FENCE = "```";
+const draftThenFinal = (draft: string, final: string): string => `Let me think.\n${FENCE}yaml\n${draft}${FENCE}\nThat misses a field, so:\n${FENCE}yaml\n${final}${FENCE}\nFetch and add links.`;
+
+test("a model that drafts in its reply is held to the last fence, the answer it settled on", async () => {
+  const draft = "name: F_DRAFT\nactions:\n  - A_PIGEON # sovereignty: D, residency: CH\n";
+  const result = await composeFlow("fetch and add links", { catalog, llm: async () => ({ text: draftThenFinal(draft, yaml) }) });
+  expect(result).toMatchObject({ status: "complete", yaml });
+});
+
+test("a closed draft before a cut-off answer is not taken for the answer", async () => {
+  const { retry } = await composeReplying({ text: `${draftThenFinal(yaml, yaml)}\n${FENCE}yaml\nname: F_LATER` });
+  expect(retry).toContain("was cut off");
+});
+
+test("a complete flow survives a cut-off after it: the yaml is whole when only the diagram or the summary is lost", async () => {
+  const atLimit = await composeReplying({ text: draftThenFinal(yaml, yaml), finishReason: "length" });
+  expect(atLimit.result).toMatchObject({ status: "complete", yaml });
+  expect(atLimit.retry).toBe("");
+  const inDiagram = await composeReplying({ text: `${draftThenFinal(yaml, yaml)}\n${FENCE}mermaid\ngraph TD` });
+  expect(inDiagram.result).toMatchObject({ status: "complete", yaml });
+  expect(inDiagram.retry).toBe("");
+});
+
+test("a retry after a reply with no flow restates the scenario, since the model has no history", async () => {
+  for (const first of [{ text: "partial", finishReason: "length" }, { text: "   " }, { text: "thinking" }]) {
+    const { retry } = await composeReplying(first);
+    expect(retry).toContain("fetch and add links");
+  }
+});

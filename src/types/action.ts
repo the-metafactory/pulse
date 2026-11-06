@@ -68,6 +68,8 @@ export interface LLMResponse {
   text: string;
   json?: unknown;
   usage?: { input: number; output: number };
+  /** Why the model stopped, when it says: "length" means the token limit cut the reply off. */
+  finishReason?: string;
 }
 
 export interface ShellResult {

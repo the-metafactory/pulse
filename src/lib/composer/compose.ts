@@ -37,10 +37,11 @@ export async function loadSystemPrompt(catalog: CatalogEntry[]): Promise<string>
     const template = await readFile(join(here, "SYSTEM_PROMPT.md"), "utf-8");
     return `${template}\n\`\`\`json\n${JSON.stringify(catalog, null, 2)}\n\`\`\`\n`;
 }
+/** The last fence of a kind: a model that drafts in its reply ends with the answer it settled on. */
 export function extractFence(text: string, lang: string): string | null {
-    const re = new RegExp("```" + lang + "\\s*\\n([\\s\\S]*?)```", "i");
-    const match = re.exec(text);
-    return match?.[1] !== undefined ? match[1].trimEnd() + "\n" : null;
+    const fences = [...text.matchAll(new RegExp("```" + lang + "\\s*\\n([\\s\\S]*?)```", "gi"))];
+    const last = fences[fences.length - 1]?.[1];
+    return last !== undefined ? last.trimEnd() + "\n" : null;
 }
 function extractSummary(text: string): string {
     const withoutFences = text.replace(/```[a-z]*\s*\n[\s\S]*?```/gi, "");
@@ -54,6 +55,18 @@ export function composeTier(): "fast" | "standard" | "smart" {
     const t = process.env.PULSE_COMPOSE_TIER;
     return t === "fast" || t === "standard" || t === "smart" ? t : "standard";
 }
+/** True when the reply ended inside a yaml fence: whatever closed before it is a draft. A diagram cut off after the yaml does not touch the flow. */
+const endsInsideYamlFence = (text: string): boolean => {
+    const fences = [...text.matchAll(/```(\w*)/g)];
+    return fences.length % 2 === 1 && fences[fences.length - 1]?.[1]?.toLowerCase() === "yaml";
+};
+function askAgainWithoutYaml(text: string, cutOff: boolean): string {
+    if (cutOff) {
+        return "Your previous reply was cut off at the token limit before its YAML ended. Emit the response again, shorter: the fenced yaml and one line of summary, with no mermaid and no explanation.";
+    }
+    if (text.trim().length === 0) return "Your previous reply was empty. Emit the full response (yaml + mermaid + summary) for the scenario.";
+    return "Your previous reply had no fenced yaml and no Closest I have reply. Emit the full response (yaml + mermaid + summary) for the scenario.";
+}
 export async function compose(scenario: string, catalog: CatalogEntry[], llm: ComposerLLM, options: ComposeOptions = {}): Promise<ComposeResult> {
     const maxRetries = options.maxRetries ?? 2;
     const initialFields = options.initialFields ?? ["scenario"];
@@ -66,16 +79,17 @@ export async function compose(scenario: string, catalog: CatalogEntry[], llm: Co
         attempts++;
         const response = await llm(prompt, { system, tier: composeTier() });
         const text = response.text ?? "";
-        const yaml = extractFence(text, "yaml");
+        const yaml = endsInsideYamlFence(text) ? null : extractFence(text, "yaml");
         if (!yaml) {
-            if (text.trim().length > 0 && (!options.strictReply || /^Closest I have is [\s\S]+; the gap is [\s\S]+/i.test(text.trim()))) {
+            const cutOff = response.finishReason === "length" || endsInsideYamlFence(text);
+            if (!cutOff && text.trim().length > 0 && (!options.strictReply || /^Closest I have is [\s\S]+; the gap is [\s\S]+/i.test(text.trim()))) {
                 if (options.strictReply && lastFindings.some((finding) => finding.rule !== "unknown-block")) {
                     return { ok: false, kind: "invalid", findings: lastFindings, lastYaml, attempts };
                 }
                 return { ok: false, kind: "no-match", message: text.trim(), attempts };
             }
             lastFindings = [{ rule: "parse-error", step: -1, message: "composer reply must contain pipeline YAML or an explicit closest-match refusal" }];
-            prompt = `Your previous reply was empty. Emit the full response (yaml + mermaid + summary) for the scenario.`;
+            prompt = `Scenario from the audience:\n\n${scenario}\n\n${askAgainWithoutYaml(text, cutOff)}`;
             continue;
         }
         const validation = validatePipeline(yaml, catalog, { initialFields });
