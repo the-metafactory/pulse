@@ -201,7 +201,6 @@ describe("what the composer holds a flow to", () => {
   });
 
   test("a step that overwrites the field ends the judgment's reach", () => {
-    expect(rules(agent("draft", "items"), action("A_FETCH_FEED").replace("A_FETCH_FEED", "A_NOOP"))).toEqual([]);
     const refill = "  - map: # sovereignty: D, residency: CH\n      over: other\n      as: item\n      collect: items\n      actions: []\n";
     expect(rules(agent("draft", "items"), refill, action("A_EXTRACT_ARTICLE"))).toEqual([]);
   });
@@ -209,6 +208,23 @@ describe("what the composer holds a flow to", () => {
   test("a step around a reader does not hide it, even when it collects the same field", () => {
     const around = "  - map: # sovereignty: D, residency: CH\n      over: other\n      as: item\n      collect: items\n      actions: [A_EXTRACT_ARTICLE]\n";
     expect(rules(agent("draft", "items"), around)[0]?.message).toContain("returns: array");
+  });
+
+  test("a judgment inside retry still reaches the steps after it", () => {
+    const nested = "  - retry: # sovereignty: D, residency: CH\n      attempts: 2\n      actions:\n        - agent: { name: pick, capability: c, prompt: p, collect: items }\n";
+    expect(rules(nested, action("A_EXTRACT_ARTICLE"))[0]?.message).toContain("returns: array");
+  });
+
+  test("what a map's children write stays inside the map, so the judgment still reaches the step after it", () => {
+    const writesItemsInside = "  - map: # sovereignty: D, residency: CH\n      over: other\n      as: item\n      collect: done\n      actions: [A_FEED_ITEMS]\n";
+    const catalog = [...CATALOG, { name: "A_FEED_ITEMS", description: "Writes items", input: {}, output: { items: { type: "array" } } }];
+    expect(typedInputFindings(flow(agent("pick", "items"), writesItemsInside, action("A_EXTRACT_ARTICLE")), catalog)[0]?.message).toContain("A_EXTRACT_ARTICLE.items");
+  });
+
+  test("a judgment inside a map reaches its siblings but not the steps after the map", () => {
+    const inside = "  - map: # sovereignty: D, residency: CH\n      over: other\n      as: item\n      collect: done\n      actions:\n        - agent: { name: pick, capability: c, prompt: p, collect: items }\n";
+    expect(rules(inside, action("A_EXTRACT_ARTICLE"))).toEqual([]);
+    expect(rules(`${inside}        - A_EXTRACT_ARTICLE\n`)[0]?.message).toContain("returns: array");
   });
 
   test("a judgment nothing reads needs no type", () => {
