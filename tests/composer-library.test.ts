@@ -92,3 +92,37 @@ test("malformed model steps followed by a spurious capability refusal retain off
   expect(result).toMatchObject({ status: "invalid", kind: "off-contract" });
   expect("yaml" in result).toBe(false);
 });
+
+const composeReplying = async (first: { text: string; finishReason?: string }) => {
+  const prompts: string[] = [];
+  const replies = [first, { text: response }];
+  const result = await composeFlow("fetch and add links", { catalog, llm: async (prompt) => { prompts.push(prompt); return replies.shift() ?? { text: response }; } });
+  return { result, retry: prompts[1] ?? "" };
+};
+
+test("a reply cut off at the token limit is sent back as cut off, not as empty", async () => {
+  const { result, retry } = await composeReplying({ text: "```yaml\nname: F_NEWS\nactions:\n  - A_FE", finishReason: "length" });
+  expect(result.status).toBe("complete");
+  expect(retry).toContain("was cut off");
+  expect(retry).not.toContain("empty");
+});
+
+test("an unclosed yaml fence reads as cut off even when the model reports no finish reason", async () => {
+  const { retry } = await composeReplying({ text: "```yaml\nname: F_NEWS\nactions:\n  - A_FE" });
+  expect(retry).toContain("was cut off");
+});
+
+test("a reply that finished with neither yaml nor a refusal is not called empty or cut off", async () => {
+  const { retry } = await composeReplying({ text: "   " });
+  expect(retry).toContain("was empty");
+  const prose = await composeReplying({ text: "Here is my thinking about links.", finishReason: "stop" });
+  expect(prose.result.status).toBe("complete");
+  expect(prose.retry).toContain("no fenced yaml");
+  expect(prose.retry).not.toContain("empty");
+});
+
+test("a text-only model reports why it stopped", async () => {
+  const { chatModelLLM } = await import("../src/lib/capabilities");
+  const llm = chatModelLLM({ label: "m", complete: async () => ({ content: "partial", toolCalls: [], finishReason: "length" }) });
+  expect(await llm("hi")).toMatchObject({ text: "partial", finishReason: "length" });
+});

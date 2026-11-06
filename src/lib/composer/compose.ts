@@ -54,6 +54,14 @@ export function composeTier(): "fast" | "standard" | "smart" {
     const t = process.env.PULSE_COMPOSE_TIER;
     return t === "fast" || t === "standard" || t === "smart" ? t : "standard";
 }
+const OPENS_YAML = /```yaml\s*\n/i;
+function askAgainWithoutYaml(text: string, finishReason: string | undefined): string {
+    if (finishReason === "length" || OPENS_YAML.test(text)) {
+        return "Your previous reply was cut off at the token limit before its YAML ended. Emit the response again, shorter: the fenced yaml and one line of summary, with no mermaid and no explanation.";
+    }
+    if (text.trim().length === 0) return "Your previous reply was empty. Emit the full response (yaml + mermaid + summary) for the scenario.";
+    return "Your previous reply had no fenced yaml and no Closest I have reply. Emit the full response (yaml + mermaid + summary) for the scenario.";
+}
 export async function compose(scenario: string, catalog: CatalogEntry[], llm: ComposerLLM, options: ComposeOptions = {}): Promise<ComposeResult> {
     const maxRetries = options.maxRetries ?? 2;
     const initialFields = options.initialFields ?? ["scenario"];
@@ -75,7 +83,7 @@ export async function compose(scenario: string, catalog: CatalogEntry[], llm: Co
                 return { ok: false, kind: "no-match", message: text.trim(), attempts };
             }
             lastFindings = [{ rule: "parse-error", step: -1, message: "composer reply must contain pipeline YAML or an explicit closest-match refusal" }];
-            prompt = `Your previous reply was empty. Emit the full response (yaml + mermaid + summary) for the scenario.`;
+            prompt = askAgainWithoutYaml(text, response.finishReason);
             continue;
         }
         const validation = validatePipeline(yaml, catalog, { initialFields });

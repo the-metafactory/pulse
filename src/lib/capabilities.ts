@@ -106,6 +106,7 @@ export function chatModelLLM(model: ChatModel, signal?: AbortSignal): LLMFunctio
       text: res.content,
       json: options?.json ? parseJsonText(res.content) : undefined,
       usage: res.usage,
+      finishReason: res.finishReason,
     };
   }, model.label);
 }

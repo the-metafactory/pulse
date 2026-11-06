@@ -26,6 +26,7 @@ export interface LLMResponse {
         input: number;
         output: number;
     };
+    finishReason?: string;
 }
 export interface ShellResult {
     stdout: string;
