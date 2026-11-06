@@ -14,7 +14,7 @@ export { runSteps, runStep, StepFailure, MapItemFailure, validateSteps, validate
 export type { StepRecord, StepRunnerOptions } from "./lib/step-runner";
 export type { PipelineStep, MapStepSpec, FilterStepSpec, ReduceStepSpec, ParallelStepSpec, RetryStepSpec, GateStepSpec, GateProvider, GateInput, GateResult, GateVerdict, GateEvent, ActionStepEvent, } from "./types/pipeline";
 export { StdinGateProvider } from "./lib/gate-provider";
-export type { AgentStepSpec, AgentSovereignty, AgentTaskSpec, AgentTaskResult, AgentProvider, AgentEvent, } from "./types/agent";
+export type { AgentStepSpec, AgentReturnType, AgentSovereignty, AgentTaskSpec, AgentTaskResult, AgentProvider, AgentEvent, } from "./types/agent";
 export { MyelinAgentProvider, MockAgentProvider, InMemoryAgentTransport, NatsAgentTransport, encodeDidSegment, subjectMatches, } from "./lib/agent-provider";
 export type { AgentTransport, MyelinAgentProviderConfig, MyelinEnvelope, NatsAgentTransportOptions } from "./lib/agent-provider";
 export { renderPromptTemplate } from "./lib/primitive-runner";

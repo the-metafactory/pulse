@@ -76,7 +76,7 @@ test("CLI JSON matches the library using a real HTTP model boundary and catalog 
 
 
 test("agent steps supply named fields without invented actions", async () => {
-  const text = "```yaml\nname: F_AGENT\nactions:\n  - agent: # sovereignty: A, residency: CH\n      name: judge\n      capability: compose.judgment\n      prompt: Assess {scenario}\n      collect: links\n  - A_ADD # sovereignty: D, residency: CH\n```";
+  const text = "```yaml\nname: F_AGENT\nactions:\n  - agent: # sovereignty: A, residency: CH\n      name: judge\n      capability: compose.judgment\n      prompt: Assess {scenario}\n      collect: links\n      returns: array\n  - A_ADD # sovereignty: D, residency: CH\n```";
   expect(await composeFlow("judge links", { catalog, llm: async () => ({ text }) })).toMatchObject({ status: "complete" });
 });
 

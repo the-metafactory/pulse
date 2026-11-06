@@ -122,6 +122,8 @@ export type AgentEvent =
  * Declarative agent step. Completes miner's D/A/H step taxonomy in pipeline
  * YAML: Deterministic = action, Agentic = `agent:`, Human = `gate:`.
  */
+export type AgentReturnType = "string" | "url" | "number" | "integer" | "boolean" | "array" | "object";
+
 export interface AgentStepSpec {
   /** Stable identifier for this step (used in events + traces). */
   name: string;
@@ -144,4 +146,10 @@ export interface AgentStepSpec {
   timeout_ms?: number;
   /** Field to write the AgentTaskResult under (default: `agent_${name}`). */
   collect?: string;
+  /**
+   * The one value this step yields. The step asks the model for only that value
+   * and fails, naming the collect field, when the answer is anything else.
+   * Absent: the answer is collected as it came.
+   */
+  returns?: AgentReturnType;
 }

@@ -46,6 +46,7 @@ export { StdinGateProvider } from "./lib/gate-provider";
 // Agent actions (iteration 6, P-600/P-601) — fleet tasks via myelin envelopes
 export type {
   AgentStepSpec,
+  AgentReturnType,
   AgentSovereignty,
   AgentTaskSpec,
   AgentTaskResult,

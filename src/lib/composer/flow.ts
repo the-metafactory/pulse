@@ -1,6 +1,7 @@
 import { parsePipeline } from "../pipeline";
 import { compose, type ComposerLLM, type ComposeOptions } from "./compose";
 import { choosesMailRecipient, deliveryFindings, deliveryGap, ONLY_OWN_ADDRESSES, readDeliveryAsk } from "./delivery";
+import { typedInputFindings } from "./typed-inputs";
 import type { CatalogEntry, Finding } from "./validate-pipeline";
 const noMatch = (message: string) => ({ status: "no-match", kind: "missing-capability", message }) as const;
 export interface ComposeFlowOptions extends Omit<ComposeOptions, "check"> {
@@ -16,7 +17,9 @@ Plain actions MUST be bare strings. Write "- ACTION_NAME # sovereignty: D, resid
 There are NO per-action parameter mappings. Every action reads named fields from one shared passthrough payload.
 Do not write field references like ACTION_NAME.output; fields are simply the output keys themselves.
 To provide required configuration such as a search query, place an agent step BEFORE the action with collect set to that field name.
-Agent judgment steps use {agent: {name, capability, prompt, collect}}.
+An agent step yields ONE value, so give every input its own step: never ask one step for two values such as a URL and a limit.
+When an agent step's collect field is an input of a later action, set returns to that input's declared type: string, number, integer, boolean, array or object, and url for a string input named like feedUrl. The run asks the step for only that value and fails at that step if the answer is anything else, so never write a prompt that wants an explanation around it.
+Agent judgment steps use {agent: {name, capability, prompt, collect, returns}}.
 Collection adapters use {map: {over, as, collect, actions: [...]}}. Never use block:, with:, or input: wrappers.
 Every top-level step needs a trailing YAML comment ON THE LIST ITEM LINE: # sovereignty: D|A|H, residency: CH|EU|frontier.
 Agent steps are a built-in primitive, not actions needing installation. They can infer configuration fields from the request or assess upstream data.
@@ -28,6 +31,7 @@ actions:
       capability: compose.judgment
       prompt: "Infer the criterion from: {scenario}"
       collect: criterion
+      returns: string
       sovereignty: { model_class: local-only, frontier_ok: false, data_residency: CH }
 For map and gate primitives the annotation likewise follows the map: or gate: on the list-item line.
 Never move the annotation onto a nested field; that does not annotate the step.
@@ -51,7 +55,7 @@ export async function composeFlow(request: string, options: ComposeFlowOptions) 
             ...options,
             initialFields,
             strictReply: options.strictReply ?? true,
-            check: ask ? (yaml) => deliveryFindings(ask, yaml, options.catalog) : undefined,
+            check: (yaml) => [...typedInputFindings(yaml, options.catalog), ...(ask ? deliveryFindings(ask, yaml, options.catalog) : [])],
             systemPrompt: options.systemPrompt ?? `${ask ? deliveryRules : ""}${instructions}${JSON.stringify(options.catalog)}\nInitial fields: ${JSON.stringify(initialFields)}`,
         });
         if (!result.ok) {

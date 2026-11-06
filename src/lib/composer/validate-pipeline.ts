@@ -21,7 +21,7 @@ export interface StepAnnotation {
     sovereignty?: SovereigntyClass;
     residency?: string;
 }
-export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery";
+export type FindingRule = "parse-error" | "unknown-block" | "missing-input" | "missing-annotation" | "missing-delivery" | "untyped-input";
 export interface Finding {
     rule: FindingRule;
     step: number;

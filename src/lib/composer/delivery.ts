@@ -66,12 +66,12 @@ export function deliveryGap(ask: DeliveryAsk, catalog: CatalogEntry[]): string |
   return chats.length > 0 ? `${ONLY_OWN_ADDRESSES} It can deliver by ${chats.join(" or ")} instead, if you ask for that.` : ONLY_OWN_ADDRESSES;
 }
 
-function flatten(step: PipelineStep): PipelineStep[] {
+export function flatten(step: PipelineStep): PipelineStep[] {
   return typeof step === "string" ? [step] : [step, ...childActions(step).flat().flatMap(flatten)];
 }
 const actionNames = (step: PipelineStep): string[] => flatten(step).filter((s): s is string => typeof s === "string");
 
-function readFlow(yaml: string): { steps: PipelineStep[]; input: Record<string, unknown> } {
+export function readFlow(yaml: string): { steps: PipelineStep[]; input: Record<string, unknown> } {
   const doc = parse(yaml) as { actions: unknown[]; input?: Record<string, unknown> };
   return { steps: validateSteps(doc.actions), input: doc.input ?? {} };
 }

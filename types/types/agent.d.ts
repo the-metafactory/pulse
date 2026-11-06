@@ -66,6 +66,7 @@ export type AgentEvent = {
     task_id: string;
     timeout_ms: number;
 };
+export type AgentReturnType = "string" | "url" | "number" | "integer" | "boolean" | "array" | "object";
 export interface AgentStepSpec {
     name: string;
     capability: string;
@@ -76,4 +77,5 @@ export interface AgentStepSpec {
     federate?: AgentFederation;
     timeout_ms?: number;
     collect?: string;
+    returns?: AgentReturnType;
 }
