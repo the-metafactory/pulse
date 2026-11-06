@@ -17,7 +17,7 @@ function agentPrompts(steps: PipelineStep[]): string[] {
 }
 
 /**
- * This is a lint over the words a request or prompt uses, not a date parser. Every finding can be cleared by changing the flow, so a misread word costs a retry and never a refusal.
+ * This is a lint over the words a request or prompt uses, not a date parser. Every finding can be cleared by changing the flow, so no word forces a refusal; a request naming yesterday and another day is read as yesterday and loses the other day.
  * It holds a flow to the one window that exists; a relative day no window offers is left to the composer's instructions.
  * Whether an action can narrow by day, and what reads its report, comes from the catalog, so a feed with no window input is left alone.
  * A model cannot be relied on to select by date, so a date-relative flow over a windowed action goes back until code does the selecting.
