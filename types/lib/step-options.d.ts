@@ -26,11 +26,15 @@ export interface StepRunnerOptions extends ActionRunnerOptions {
     models?: Record<string, ChatModel>;
     transcriptDir?: string;
     onResearchEvent?: (event: ResearchEvent) => void;
+    now?: () => Date;
+    timeZone?: string;
 }
 export interface RunState {
     preflight: Map<object, unknown>;
     unavailableModels: Map<string, string>;
+    startedAt: Date;
 }
 export declare function withRunState(options: StepRunnerOptions): StepRunnerOptions;
 export declare function runState(options: StepRunnerOptions): RunState | undefined;
+export declare function renderRunPrompt(template: string, payload: Record<string, unknown>, options: StepRunnerOptions): string;
 export declare function renderPromptTemplate(template: string, payload: Record<string, unknown>): string;
