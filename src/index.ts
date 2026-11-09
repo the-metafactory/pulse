@@ -152,3 +152,4 @@ export { validatePipeline, type CatalogEntry } from "./lib/composer/validate-pip
 export { runScenario, runSavedFlow, composeScenario, makeStubLLM, makeOllamaAgentProvider } from "./lib/composer/scenario";
 
 export { proposeRoutineEdit } from "./lib/routine-proposal";
+export type { ComposerLLM } from "./lib/composer/compose";
