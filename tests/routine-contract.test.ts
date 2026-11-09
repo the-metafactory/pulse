@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { routineContract } from "../src/lib/routine-contract";
-import { proposeRoutineEdit } from "../src/lib/routine-proposal";
+import { proposeRoutineEdit } from "../src/index";
 
 const yaml = "# reflex-generated-flow: test v1\nname: F_TEST\ninput: {token: secret-value}\nactions:\n  - retry:\n      attempts: 2\n      actions: [A_NOOP]\n  - agent:\n      name: review\n      capability: test.review\n      prompt: secret-prompt\n      collect: result\n";
 describe("routine contract", () => {
