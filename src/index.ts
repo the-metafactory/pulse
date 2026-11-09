@@ -150,3 +150,6 @@ export { composeFlow, type ComposeFlowOptions, type ComposeFlowResult } from "./
 export { buildCatalog, loadInstalledCatalog } from "./lib/composer/catalog";
 export { validatePipeline, type CatalogEntry } from "./lib/composer/validate-pipeline";
 export { runScenario, runSavedFlow, composeScenario, makeStubLLM, makeOllamaAgentProvider } from "./lib/composer/scenario";
+
+export { proposeRoutineEdit } from "./lib/routine-proposal";
+export type { ComposerLLM } from "./lib/composer/compose";

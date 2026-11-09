@@ -2,7 +2,7 @@ import { z } from "zod";
 import { RoutineFlowViewSchema, RoutinePatchSchema, routineFieldError } from "./routine-contract";
 import { extractFence, composeTier, type ComposerLLM } from "./composer/compose";
 
-export async function proposeRoutineEdit(request: string, raw: unknown, llm: ComposerLLM) {
+export async function proposeRoutineEdit(request: string, raw: unknown, llm: ComposerLLM): Promise<{ status: "edit"; patches: z.infer<typeof RoutinePatchSchema>[] }> {
   const view = RoutineFlowViewSchema.parse(raw);
   const allowed = view.steps.flatMap((step) => step.editable.map((field) => ({ path: [...step.path, step.action, field.name], field, current: step.parameters.find((p) => p.name === field.name && p.kind === "literal")?.value ?? null })));
   if (!allowed.length) throw new Error("This routine has no declared editable parameters");
